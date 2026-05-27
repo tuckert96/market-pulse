@@ -1,0 +1,25 @@
+{
+  "holdings": [
+    {
+      "account": { "name": "Taxable Brokerage", "type": "Taxable" },
+      "symbol": "AMD",
+      "security": { "description": "Advanced Micro Devices" },
+      "quantity": "6",
+      "currentPrice": "180.00",
+      "marketValue": "1080.00",
+      "costBasis": "900.00",
+      "unrealizedGainLoss": "180.00",
+      "sector": "Semiconductors"
+    },
+    {
+      "account": { "name": "Roth IRA", "type": "Retirement" },
+      "ticker": "VGT",
+      "description": "Vanguard Information Technology ETF",
+      "shares": "4",
+      "price": "525.00",
+      "currentValue": "2100.00",
+      "totalCostBasis": "1800.00",
+      "sector": "Mega-cap tech"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "tucker-portfolio-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/local-server.js",
+    "dev:api": "node scripts/local-server.js",
+    "lint": "node scripts/check-syntax.js",
+    "check": "node scripts/check-syntax.js && npm run validate:data && npm run test && npm run smoke",
+    "test": "node --test",
+    "smoke": "node scripts/smoke.js",
+    "validate:data": "node scripts/validate-data.js",
+    "build": "node scripts/check-syntax.js"
+  }
+}

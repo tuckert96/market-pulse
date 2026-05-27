@@ -1,0 +1,48 @@
+{
+  "holdings": [
+    {
+      "account": {
+        "name": "Taxable",
+        "type": "Taxable"
+      },
+      "security": {
+        "symbol": "crdo",
+        "description": "Credo Technology Group"
+      },
+      "quantity": "12",
+      "currentPrice": "$80.00",
+      "marketValue": "$960.00"
+    },
+    {
+      "accountName": "Roth IRA",
+      "accountType": "Retirement",
+      "ticker": "VGT",
+      "securityName": "Vanguard Information Technology ETF",
+      "shares": "4",
+      "currentValue": "$2,100.00",
+      "costBasis": "$1,800.00"
+    },
+    {
+      "account": {
+        "name": "Taxable"
+      },
+      "security": {
+        "symbol": "1234",
+        "description": "Bad ticker row"
+      },
+      "quantity": "1",
+      "marketValue": "$10.00"
+    },
+    {
+      "account": {
+        "name": "Taxable"
+      },
+      "security": {
+        "symbol": "SOXL",
+        "description": "Direxion Daily Semiconductor Bull 3X Shares"
+      },
+      "quantity": "-1",
+      "marketValue": "-$45.00"
+    }
+  ]
+}
