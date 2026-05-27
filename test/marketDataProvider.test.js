@@ -146,6 +146,41 @@ test("market data status handles mock, stale, error, and not configured states",
   assert.match(error.status.detail, /provider unavailable/);
 });
 
+test("market data status exposes per-ticker quote coverage diagnostics", () => {
+  const snapshot = buildMarketDataSnapshot({
+    provider: {
+      id: "finnhub",
+      label: "Finnhub",
+      mode: "live",
+      configured: true,
+      liveProviderCalls: true
+    },
+    requestedTickers: ["MU", "BAD"],
+    asOf: "2026-05-23T16:00:00.000Z",
+    now: "2026-05-23T16:00:00.000Z",
+    quotes: [{
+      ticker: "MU",
+      price: 132.1,
+      dailyChange: 1.2,
+      dailyChangePercent: 0.009,
+      providerLabel: "Finnhub",
+      cacheStatus: "live",
+      dataFreshness: "live",
+      resourceFreshness: { quote: "live", profile: "deferred", metric: "deferred", history: "skipped" }
+    }]
+  });
+
+  assert.equal(snapshot.status.quoteDiagnostics.length, 2);
+  const mu = snapshot.status.quoteDiagnostics.find((row) => row.ticker === "MU");
+  const bad = snapshot.status.quoteDiagnostics.find((row) => row.ticker === "BAD");
+  assert.equal(mu.quote, "live");
+  assert.equal(mu.profile, "deferred");
+  assert.equal(mu.history, "skipped");
+  assert.ok(mu.missingFields.includes("history"));
+  assert.equal(bad.dataFreshness, "missing");
+  assert.deepEqual(bad.missingFields, ["quote"]);
+});
+
 test("live provider configuration reports safe missing-key and live-ready configured states", () => {
   const missingConfig = buildMarketDataProviderConfig({});
   const missingStatuses = buildMarketDataProviderStatuses({});

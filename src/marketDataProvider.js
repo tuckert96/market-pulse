@@ -997,6 +997,8 @@ export function applyMarketDataToHoldings(holdings = [], snapshot = {}, options 
       marketDataProviderId: quote.providerId,
       marketDataMode: quote.sourceMode,
       marketDataStatus: snapshot.status?.status || MARKET_DATA_PROVIDER_STATUSES.MOCK,
+      marketDataFreshness: quote.dataFreshness,
+      marketDataCacheStatus: quote.cacheStatus,
       marketDataAsOf: quote.asOf,
       marketDataPrice: quote.price,
       marketDataDailyChange: quote.dailyChange,
@@ -1010,6 +1012,7 @@ export function applyMarketDataToHoldings(holdings = [], snapshot = {}, options 
       marketDataHistoricalPrices: quote.historicalPrices,
       marketDataIsMock: Boolean(quote.isMock),
       marketDataAppliedToDailyChange: useProviderMove,
+      marketDataLastError: quote.lastError?.message || quote.lastError || "",
       dailyChangeSource: useProviderMove ? (quote.isMock ? "mock-market-data" : quote.providerId) : (holding.dailyChangeSource || holding.source || "imported-holding")
     });
   });
@@ -1778,8 +1781,56 @@ function status(statusValue, label, detail, snapshot) {
     truncatedTickers: snapshot.truncatedTickers || [],
     warnings: snapshot.warnings || [],
     fallbackReason: snapshot.fallbackReason || "",
-    cache: snapshot.cache || null
+    cache: snapshot.cache || null,
+    quoteDiagnostics: marketDataQuoteDiagnostics(snapshot)
   };
+}
+
+function marketDataQuoteDiagnostics(snapshot = {}) {
+  const quotesByTicker = snapshot.quotesByTicker || Object.fromEntries((snapshot.quotes || []).map((quote) => [normalizeTicker(quote.ticker), quote]));
+  const requested = normalizeTickerList(snapshot.requestedTickers || []);
+  const quoteTickers = normalizeTickerList((snapshot.quotes || []).map((quote) => quote.ticker));
+  const tickers = [...new Set([...(requested.length ? requested : quoteTickers), ...quoteTickers])];
+  return tickers.map((ticker) => {
+    const quote = quotesByTicker[ticker];
+    if (!quote) {
+      return {
+        ticker,
+        status: MARKET_DATA_PROVIDER_STATUSES.PARTIAL,
+        dataFreshness: "missing",
+        cacheStatus: "missing",
+        quote: "missing",
+        profile: "missing",
+        metric: "missing",
+        history: "missing",
+        missingFields: ["quote"],
+        fetchedAt: null,
+        lastError: "No normalized quote returned."
+      };
+    }
+    const freshness = quote.dataFreshness || quote.cacheStatus || snapshot.dataFreshness || "unknown";
+    const resources = quote.resourceFreshness || {};
+    const historicalCount = Array.isArray(quote.historicalPrices) ? quote.historicalPrices.length : 0;
+    const missingFields = [];
+    if (!(numberFrom(quote.price) > 0)) missingFields.push("price");
+    if (!quote.sector || quote.sector === "Unknown") missingFields.push("sector");
+    if (!quote.industry || quote.industry === "Unknown") missingFields.push("industry");
+    if (!(numberFrom(quote.marketCap) > 0)) missingFields.push("market cap");
+    if (!historicalCount) missingFields.push("history");
+    return {
+      ticker,
+      status: snapshot.status?.status || snapshot.status || freshness,
+      dataFreshness: freshness,
+      cacheStatus: quote.cacheStatus || freshness,
+      quote: resources.quote || quote.cacheStatus || freshness,
+      profile: resources.profile || "unknown",
+      metric: resources.metric || "unknown",
+      history: resources.history || (historicalCount ? freshness : "missing"),
+      missingFields,
+      fetchedAt: quote.fetchedAt || snapshot.fetchedAt || null,
+      lastError: quote.lastError?.message || quote.lastError || ""
+    };
+  });
 }
 
 function providerCredentialStatus(env, spec) {

@@ -3801,6 +3801,19 @@ function buildMarketDataRefreshErrorSnapshot(tickers = [], message = "Market dat
       requestedTickers,
       missingTickers: requestedTickers,
       warnings: [message],
+      quoteDiagnostics: requestedTickers.map((ticker) => ({
+        ticker,
+        status: "error",
+        dataFreshness: "error",
+        cacheStatus: "error",
+        quote: "missing",
+        profile: "missing",
+        metric: "missing",
+        history: "missing",
+        missingFields: ["quote"],
+        fetchedAt: null,
+        lastError: message
+      })),
       cache: {
         enabled: false,
         quoteCount: 0,
@@ -3846,7 +3859,14 @@ function markMarketDataSnapshotStale(snapshot, message) {
       detail: `Using the last successful market data snapshot because refresh failed: ${message}`,
       dataFreshness: "stale",
       cacheStatus: "stale",
-      lastError
+      lastError,
+      quoteDiagnostics: (snapshot.status?.quoteDiagnostics || []).map((row) => ({
+        ...row,
+        status: "stale data",
+        dataFreshness: "stale",
+        cacheStatus: "stale",
+        lastError: message
+      }))
     }
   };
 }

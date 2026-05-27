@@ -11,6 +11,7 @@ import {
   marketDataBadgeClass,
   marketDataDiagnosticsHtml,
   marketDataFreshnessLine,
+  marketDataQuoteSourceLabel,
   marketDataSourceAvailability,
   prepareHoldingsForView,
   portfolioImportSourceStatus,
@@ -239,6 +240,11 @@ test("market data freshness line shows provider, timestamps, and last error", ()
 test("market data diagnostics show request budget and deferred enrichment", () => {
   const html = marketDataDiagnosticsHtml({
     requestedTickers: ["MU", "NVDA", "AMD"],
+    quoteDiagnostics: [
+      { ticker: "MU", status: "connected", dataFreshness: "live", cacheStatus: "live", quote: "live", profile: "live", metric: "live", history: "live", missingFields: [], fetchedAt: "2026-05-23T16:00:00.000Z" },
+      { ticker: "NVDA", status: "partial data", dataFreshness: "live", cacheStatus: "live", quote: "live", profile: "deferred", metric: "deferred", history: "skipped", missingFields: ["history"], fetchedAt: "2026-05-23T16:00:00.000Z" },
+      { ticker: "AMD", status: "partial data", dataFreshness: "missing", cacheStatus: "missing", quote: "missing", profile: "missing", metric: "missing", history: "missing", missingFields: ["quote"], fetchedAt: null }
+    ],
     cache: {
       status: "live",
       quoteCount: 3,
@@ -255,6 +261,19 @@ test("market data diagnostics show request budget and deferred enrichment", () =
   assert.match(html, /enrich first 1 tickers/);
   assert.match(html, /Deferred enrichment/);
   assert.match(html, /NVDA, AMD/);
+  assert.match(html, /Per-ticker provider coverage/);
+  assert.match(html, /MU/);
+  assert.match(html, /Deferred/);
+  assert.match(html, /Missing/);
+  assert.match(html, /history/);
+});
+
+test("market data quote labels distinguish live cached stale and missing quote states", () => {
+  assert.equal(marketDataQuoteSourceLabel({ status: "connected", dataFreshness: "live" }), "Live quote");
+  assert.equal(marketDataQuoteSourceLabel({ status: "cached", dataFreshness: "cached" }), "Cached quote");
+  assert.equal(marketDataQuoteSourceLabel({ status: "stale data", dataFreshness: "stale" }), "Stale quote");
+  assert.equal(marketDataQuoteSourceLabel({ status: "partial data" }), "Partial data quote");
+  assert.equal(marketDataQuoteSourceLabel({ status: "not configured" }), "Not configured quote");
 });
 
 test("affected exposure summary matches imported/provider tickers case-insensitively", () => {

@@ -2079,12 +2079,12 @@ function renderHoldingsTable(holdings, uiState = "SAMPLE_MODE") {
         <th scope="row"><b>${renderTickerLink(holding.ticker)}</b><span>${escapeHtml(holding.name)}</span></th>
         <td>${escapeHtml(holding.account)}</td>
         <td>${formatNumber(holding.shares)}</td>
-        <td>${formatCurrency(holding.marketDataPrice || holding.price)}${holding.marketDataIsMock ? '<span class="data-tag">Sample quote</span>' : ""}</td>
+        <td>${formatCurrency(holding.marketDataPrice || holding.price)}${renderHoldingMarketDataTag(holding, "quote")}</td>
         <td>${formatCurrency(holding.marketValue)}</td>
         <td>${formatPct(holding.portfolioWeight)}</td>
         <td>${formatCurrency(holding.costBasis)}</td>
         <td class="${holding.unrealizedGainPercent >= 0 ? "positive" : "negative"}">${formatPct(holding.unrealizedGainPercent)}</td>
-        <td class="${holding.dailyChange >= 0 ? "positive" : "negative"}">${formatSignedCurrency(holding.dailyChange)}${holding.marketDataIsMock ? `<span class="data-tag">${holding.marketDataAppliedToDailyChange ? "Sample move" : "Sample quote"}</span>` : ""}</td>
+        <td class="${holding.dailyChange >= 0 ? "positive" : "negative"}">${formatSignedCurrency(holding.dailyChange)}${renderHoldingMarketDataTag(holding, holding.marketDataAppliedToDailyChange ? "move" : "quote")}</td>
         <td>${formatPct(holding.targetWeight)}</td>
         <td class="${holding.drift >= 0 ? "negative" : "positive"}">${formatSignedPct(holding.drift)}</td>
         <td>${escapeHtml(holding.sector)}</td>
@@ -2785,10 +2785,12 @@ function whatIfActionLabel(action = "") {
 function renderRiskDeepDive(risk = {}, breakdowns = {}, overview = {}, holdings = [], uiState = "SAMPLE_MODE", marketDataStatus = {}) {
   const decision = risk.decisionDashboard || {};
   renderRiskTopPositions(decision.topPositionWeights || risk.topHoldings || [], uiState, marketDataStatus);
-  const marketNote = marketDataStatus.status === "mock/sample mode" ? " Daily change uses Sample market data. Live quotes: Not configured." : "";
+  const marketNote = marketDataStatus.status
+    ? ` Market movement source: ${marketDataDisplayLabel(marketDataStatus)}. ${marketDataDisplayDetail(marketDataStatus)}`
+    : "";
   renderRiskBreakdownPanel("riskSectorExposurePanel", decision.sectorConcentration || breakdowns.sector || [], uiState, `Cash/money market exposure is separated from operating-sector risk.${marketNote}`);
   renderRiskBreakdownPanel("riskAccountExposurePanel", decision.accountConcentration || breakdowns.account || [], uiState, marketNote.trim());
-  renderLeveragedExposurePanel(decision.leveragedEtfExposure, holdings, overview, uiState);
+  renderLeveragedExposurePanel(decision.leveragedEtfExposure, holdings, overview, uiState, marketDataStatus);
   renderRiskThemeExposurePanel(decision.themeExposure || [], uiState);
   renderRiskAssetMixPanel(decision.assetMix || {}, decision.cashExposure, uiState);
   renderRiskCorrelationPanel(decision.correlationPlaceholder, uiState);
@@ -2808,13 +2810,14 @@ function renderRiskTopPositions(topHoldings = [], uiState = "SAMPLE_MODE", marke
       const value = row.value ?? row.marketValue;
       const weight = row.weight ?? row.portfolioWeight;
       const details = row.explanation || `${ticker} is ${formatPct(weight)} of portfolio value.`;
+      const sourceLabel = marketDataStatus.status ? ` · ${marketDataDisplayLabel(marketDataStatus)}` : "";
       return `
         <article class="risk-row ${escapeHtml(row.status || "normal")}">
           <div class="risk-row-main ranked">
             <span class="risk-rank">${index + 1}</span>
             <div>
               <b>${ticker ? renderTickerLink(ticker) : escapeHtml(row.name)}</b>
-              <span>${escapeHtml(label)}${marketDataStatus.status === "mock/sample mode" ? " · sample market data" : ""}</span>
+              <span>${escapeHtml(label)}${escapeHtml(sourceLabel)}</span>
             </div>
           </div>
           <div class="risk-row-value">
@@ -2856,7 +2859,7 @@ function renderRiskBreakdownPanel(id, rows = [], uiState = "SAMPLE_MODE", note =
     : '<div class="empty"><strong>No exposure rows available.</strong><span>Import holdings to populate this panel.</span></div>';
 }
 
-function renderLeveragedExposurePanel(leverageSummary = {}, holdings = [], overview = {}, uiState = "SAMPLE_MODE") {
+function renderLeveragedExposurePanel(leverageSummary = {}, holdings = [], overview = {}, uiState = "SAMPLE_MODE", marketDataStatus = {}) {
   const target = byId("riskLeveragedExposurePanel");
   if (!target) return;
   if (!isImportedState(uiState)) {
@@ -2893,6 +2896,7 @@ function renderLeveragedExposurePanel(leverageSummary = {}, holdings = [], overv
         ${renderRiskStatusBadge(leverageSummary.status || "normal")}
       </div>
     </article>
+    ${marketDataStatus.status ? `<p class="section-note">Market data source: ${escapeHtml(marketDataDisplayLabel(marketDataStatus))}. ${escapeHtml(marketDataDisplayDetail(marketDataStatus))}</p>` : ""}
   `;
 }
 
@@ -3283,7 +3287,7 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
           </div>
           <strong>${model.priceAvailable ? formatCurrency(model.displayPrice) : "Quote unavailable"}</strong>
           <span class="${moveAmount >= 0 ? "positive" : "negative"}">
-            ${hasMove ? `${quote ? formatSignedCurrency(quote.dailyChange) : formatSignedCurrency(model.dailyChange)} ${formatSignedPct(move)}` : "--"}
+            ${hasMove ? `${quote ? formatSignedCurrency(quote.dailyChange) : formatSignedCurrency(model.dailyChange)} ${formatSignedPct(move)}` : "Not available"}
           </span>
           <p class="section-note">${escapeHtml(marketDataDisplayDetail(model.marketDataStatus))}</p>
           ${marketFreshnessLine ? `<p class="section-note">${escapeHtml(marketFreshnessLine)}</p>` : ""}
@@ -3291,16 +3295,16 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
         </article>
         <div class="ticker-stat-grid">
           <div><span>Position value</span><b>${model.owned || model.samplePosition ? formatCurrency(model.marketValue) : "Not currently owned"}</b></div>
-          <div><span>${model.samplePosition ? "Sample weight" : "Portfolio weight"}</span><b>${model.owned || model.samplePosition ? formatPct(model.portfolioWeight) : "--"}</b></div>
-          <div><span>Shares</span><b>${model.owned || model.samplePosition ? formatNumber(model.shares) : "--"}</b></div>
-          <div><span>Daily move impact</span><b class="${Number(model.dailyChange || 0) >= 0 ? "positive" : "negative"}">${(model.owned || model.samplePosition) && model.dailyChangeAvailable ? formatSignedCurrency(model.dailyChange) : "--"}</b></div>
-          <div><span>Open</span><b>${quote?.dayOpen ? formatCurrency(quote.dayOpen) : "--"}</b></div>
-          <div><span>Day high</span><b>${quote?.dayHigh ? formatCurrency(quote.dayHigh) : "--"}</b></div>
-          <div><span>Day low</span><b>${quote?.dayLow ? formatCurrency(quote.dayLow) : "--"}</b></div>
-          <div><span>Market cap</span><b>${quote?.marketCap ? formatCompact(quote.marketCap) : "--"}</b></div>
-          <div><span>Volume</span><b>${quote?.volume ? formatNumber(quote.volume) : "--"}</b></div>
-          <div><span>52-week high</span><b>${quote?.fiftyTwoWeekHigh ? formatCurrency(quote.fiftyTwoWeekHigh) : "--"}</b></div>
-          <div><span>52-week low</span><b>${quote?.fiftyTwoWeekLow ? formatCurrency(quote.fiftyTwoWeekLow) : "--"}</b></div>
+          <div><span>${model.samplePosition ? "Sample weight" : "Portfolio weight"}</span><b>${model.owned || model.samplePosition ? formatPct(model.portfolioWeight) : "Not available"}</b></div>
+          <div><span>Shares</span><b>${model.owned || model.samplePosition ? formatNumber(model.shares) : "Not available"}</b></div>
+          <div><span>Daily move impact</span><b class="${Number(model.dailyChange || 0) >= 0 ? "positive" : "negative"}">${(model.owned || model.samplePosition) && model.dailyChangeAvailable ? formatSignedCurrency(model.dailyChange) : "Not available"}</b></div>
+          <div><span>Open</span><b>${formatMarketDataValue(quote?.dayOpen, formatCurrency)}</b></div>
+          <div><span>Day high</span><b>${formatMarketDataValue(quote?.dayHigh, formatCurrency)}</b></div>
+          <div><span>Day low</span><b>${formatMarketDataValue(quote?.dayLow, formatCurrency)}</b></div>
+          <div><span>Market cap</span><b>${formatMarketDataValue(quote?.marketCap, formatCompact)}</b></div>
+          <div><span>Volume</span><b>${formatMarketDataValue(quote?.volume, formatNumber)}</b></div>
+          <div><span>52-week high</span><b>${formatMarketDataValue(quote?.fiftyTwoWeekHigh, formatCurrency)}</b></div>
+          <div><span>52-week low</span><b>${formatMarketDataValue(quote?.fiftyTwoWeekLow, formatCurrency)}</b></div>
         </div>
       </div>
       <div class="ticker-hero">
@@ -6129,6 +6133,35 @@ function marketDataDisplayLabel(status = {}) {
   return `${dataModeLabel(marketDataMode(status))} market data`;
 }
 
+export function marketDataQuoteSourceLabel(status = {}, quote = {}) {
+  const mode = marketDataMode(status, quote);
+  return `${dataModeLabel(mode)} quote`;
+}
+
+function renderMarketDataSourceTag(status = {}, quote = {}, suffix = "quote") {
+  const mode = marketDataMode(status, quote);
+  return `<span class="data-tag ${dataModeBadgeClass(mode)}">${escapeHtml(dataModeLabel(mode))} ${escapeHtml(suffix)}</span>`;
+}
+
+function renderHoldingMarketDataTag(holding = {}, suffix = "quote") {
+  if (!holding.marketDataStatus && !holding.marketDataFreshness && !holding.marketDataCacheStatus && !holding.marketDataIsMock) return "";
+  return renderMarketDataSourceTag({
+    status: holding.marketDataStatus,
+    dataFreshness: holding.marketDataFreshness,
+    cacheStatus: holding.marketDataCacheStatus
+  }, {
+    isMock: holding.marketDataIsMock,
+    dataFreshness: holding.marketDataFreshness,
+    cacheStatus: holding.marketDataCacheStatus
+  }, suffix);
+}
+
+function formatMarketDataValue(value, formatter) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "Not available";
+  return formatter(numeric);
+}
+
 function marketDataDisplayDetail(status = {}) {
   if (status.status === "mock/sample mode") {
     return "Quote and price-move context is Sample data. Market data key: Not configured.";
@@ -6173,6 +6206,60 @@ export function marketDataFreshnessLine(status = {}, quote = {}) {
   return parts.join(" · ");
 }
 
+function resourceCoverageLabel(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "Not available";
+  if (text === "disabled") return "Not requested";
+  if (text === "deferred") return "Deferred";
+  if (text === "skipped") return "Skipped";
+  if (text === "missing") return "Missing";
+  return dataModeLabel(marketDataMode({ status: text, dataFreshness: text, cacheStatus: text }));
+}
+
+function marketDataCoverageTableHtml(rows = []) {
+  const visible = rows.slice(0, 16);
+  if (!visible.length) {
+    return '<p class="section-note">No per-ticker quote diagnostics yet. Refresh market data after loading a portfolio to populate coverage.</p>';
+  }
+  return `
+    <div class="provider-coverage-wrap">
+      <table class="provider-coverage-table">
+        <thead>
+          <tr>
+            <th scope="col">Ticker</th>
+            <th scope="col">Status</th>
+            <th scope="col">Quote</th>
+            <th scope="col">Profile</th>
+            <th scope="col">Fundamentals</th>
+            <th scope="col">History</th>
+            <th scope="col">Missing fields</th>
+            <th scope="col">Last fetch</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${visible.map((row) => {
+            const mode = marketDataMode({ status: row.status, dataFreshness: row.dataFreshness, cacheStatus: row.cacheStatus });
+            const missingFields = Array.isArray(row.missingFields) && row.missingFields.length ? row.missingFields.join(", ") : "None";
+            return `
+              <tr>
+                <th scope="row">${escapeHtml(row.ticker || "Unknown")}</th>
+                <td><span class="status-badge ${dataModeBadgeClass(mode)}">${escapeHtml(dataModeLabel(mode))}</span></td>
+                <td>${escapeHtml(resourceCoverageLabel(row.quote))}</td>
+                <td>${escapeHtml(resourceCoverageLabel(row.profile))}</td>
+                <td>${escapeHtml(resourceCoverageLabel(row.metric))}</td>
+                <td>${escapeHtml(resourceCoverageLabel(row.history))}</td>
+                <td>${escapeHtml(missingFields)}</td>
+                <td>${row.fetchedAt ? escapeHtml(formatDateTime(row.fetchedAt)) : "Not available"}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+      ${rows.length > visible.length ? `<p class="section-note">Showing ${visible.length} of ${rows.length} requested tickers.</p>` : ""}
+    </div>
+  `;
+}
+
 export function marketDataDiagnosticsHtml(status = {}, config = {}) {
   const requestedTickers = Array.isArray(status.requestedTickers) ? status.requestedTickers : [];
   const visibleRequested = requestedTickers.slice(0, 12).join(", ");
@@ -6208,6 +6295,8 @@ export function marketDataDiagnosticsHtml(status = {}, config = {}) {
       <div class="import-debug-grid">
         ${diagnostics.map(([label, value]) => `<div><b>${escapeHtml(label)}</b><span>${escapeHtml(value)}</span></div>`).join("")}
       </div>
+      <p><b>Per-ticker provider coverage</b></p>
+      ${marketDataCoverageTableHtml(status.quoteDiagnostics || [])}
       ${warnings.length ? `<p><b>Provider warnings</b></p><ul>${warnings.slice(0, 6).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : ""}
     </details>
   `;
