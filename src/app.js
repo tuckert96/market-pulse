@@ -1391,12 +1391,19 @@ function renderImportDebugPanel(result, options = {}) {
       }
     : isPortfolioImport(result) ? friendlyImportHealth(report, { applied: options.applied }) : report.health;
   const skippedRows = skippedNonHoldingRows(report);
-  const rejectedRows = (report.rejectedRows || []).filter((row) => row.classification !== "non-holding row").slice(0, 6)
+  const reviewRows = (report.rejectedRows || []).filter((row) => row.classification !== "non-holding row");
+  const rejectedRows = reviewRows.slice(0, 6)
     .map((row) => `<li>Row ${escapeHtml(row.rowNumber)}: ${escapeHtml(row.classification || "needs review")} - ${escapeHtml(row.reasons.join(", "))}</li>`)
     .join("");
   const skippedRowDetails = skippedRows.slice(0, 6)
     .map((row) => `<li>Row ${escapeHtml(row.rowNumber)}: skipped non-holding row - ${escapeHtml(row.reasons.join(", "))}</li>`)
     .join("");
+  const reviewRowsMore = reviewRows.length > 6
+    ? `<li>${escapeHtml(reviewRows.length - 6)} more row${reviewRows.length - 6 === 1 ? "" : "s"} need review in the imported file.</li>`
+    : "";
+  const skippedRowsMore = skippedRows.length > 6
+    ? `<li>${escapeHtml(skippedRows.length - 6)} more skipped non-holding row${skippedRows.length - 6 === 1 ? "" : "s"} in the imported file.</li>`
+    : "";
   const missing = (report.missingRequiredFields || [])
     .map((item) => `<li>${escapeHtml(item.field)} missing on ${escapeHtml(item.count)} row${item.count === 1 ? "" : "s"}</li>`)
     .join("");
@@ -1436,8 +1443,8 @@ function renderImportDebugPanel(result, options = {}) {
       ${warnings ? `<p><b>Mapping warnings</b></p><ul>${warnings}</ul>` : ""}
       ${duplicates ? `<p><b>Duplicate ticker/account rows merged</b></p><ul>${duplicates}</ul>` : ""}
       ${missing ? `<p><b>Missing required fields</b></p><ul>${missing}</ul>` : ""}
-      ${skippedRowDetails ? `<p><b>Skipped non-holding rows</b> <span>Fidelity footer, disclaimer, and account-container rows are harmless when holdings imported successfully.</span></p><ul>${skippedRowDetails}</ul>` : ""}
-      ${rejectedRows ? `<p><b>Rows needing review</b></p><ul>${rejectedRows}</ul>` : ""}
+      ${skippedRowDetails ? `<p><b>Skipped non-holding rows</b> <span>Fidelity footer, disclaimer, and account-container rows are harmless when holdings imported successfully.</span></p><ul>${skippedRowDetails}${skippedRowsMore}</ul>` : ""}
+      ${rejectedRows ? `<p><b>Rows needing review</b></p><ul>${rejectedRows}${reviewRowsMore}</ul>` : ""}
       ${unsupported ? `<p><b>Unsupported/unmapped columns</b></p><ul>${unsupported}</ul>` : ""}
     </details>
     ${pendingCsvImport ? renderManualMappingControls(report) : ""}
@@ -1606,6 +1613,7 @@ async function applyPendingPortfolioImport() {
     message: `Fidelity import applied: ${result.importReport?.holdingsImported || result.records.length} holding${(result.importReport?.holdingsImported || result.records.length) === 1 ? "" : "s"} loaded locally.`
   };
   saveFidelityStatus();
+  renderFidelityStatus();
   pendingCsvImport = null;
   showImportStatus(result, { persist: true, render: false, applied: true });
   await refreshMarketDataSnapshot({ renderAfter: false });
@@ -3236,6 +3244,10 @@ function renderFidelityStatus() {
     showFidelityStatus(status.message || "Fidelity status restored from backup. Revalidate before treating it as connected.", "pending");
     return;
   }
+  if (/sample/i.test(String(status.mode || ""))) {
+    showFidelityStatus(status.message || "Sample portfolio loaded. Import a Fidelity CSV to use Tucker's real holdings.", "pending");
+    return;
+  }
   if (status.lastSync) {
     const synced = new Date(status.lastSync).toLocaleString();
     const label = /csv|import/i.test(String(status.mode || ""))
@@ -3554,6 +3566,7 @@ function loadSampleData() {
   latestTickerSignals = [];
   saveHoldings();
   saveFidelityStatus();
+  renderFidelityStatus();
   saveSeekingAlphaStatus();
   saveMarketEvents();
   saveAlphaEvents();

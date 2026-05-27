@@ -5321,12 +5321,13 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
   const accountScopeLine = accountScope?.combined?.accountCount
     ? ` · ${accountScope.combined.accountCount} account${accountScope.combined.accountCount === 1 ? "" : "s"} loaded${accountScope.selectedAccount && accountScope.selectedAccount !== "all" ? ` · viewing ${accountScope.selectedAccountLabel || "selected account"}` : ""}`
     : "";
+  const portfolioDiagnostics = portfolioImportDiagnosticsLine(report);
   const rows = [
     {
       label: "Manual/imported holdings",
       status: importAvailability.status,
       detail: portfolioStatus?.realPortfolio
-        ? `${portfolioStatus.holdingCount || report?.holdingsImported || 0} holding${(portfolioStatus.holdingCount || report?.holdingsImported || 0) === 1 ? "" : "s"} active${accountScopeLine}${portfolioStatus.loadedAt ? ` · loaded ${shortDateTime(portfolioStatus.loadedAt)}` : ""}${report?.fileName ? ` · ${report.fileName}` : ""}`
+        ? `${portfolioStatus.holdingCount || report?.holdingsImported || 0} holding${(portfolioStatus.holdingCount || report?.holdingsImported || 0) === 1 ? "" : "s"} active${accountScopeLine}${portfolioDiagnostics}${portfolioStatus.loadedAt ? ` · loaded ${shortDateTime(portfolioStatus.loadedAt)}` : ""}${report?.fileName ? ` · ${report.fileName}` : ""}`
         : portfolioStatus?.samplePortfolio
         ? `${portfolioStatus.holdingCount || 0} sample holding${(portfolioStatus.holdingCount || 0) === 1 ? "" : "s"} active for workflow testing${accountScopeLine}. Import a CSV before relying on portfolio totals.`
         : "Import Fidelity CSV to load Tucker's real account-level holdings.",
@@ -5466,6 +5467,20 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       ${row.diagnostics || ""}
     </div>
   `).join("");
+}
+
+export function portfolioImportDiagnosticsLine(report = {}) {
+  if (!report || typeof report !== "object" || (!report.realPortfolioImport && !report.rowsParsed)) return "";
+  const skipped = (report.rejectedRows || []).filter((row) => row.classification === "non-holding row").length;
+  const reviewRows = countHoldingRowsNeedingReview(report);
+  const duplicateRows = Array.isArray(report.duplicateRows) ? report.duplicateRows.length : 0;
+  const parts = [];
+  if (report.rowsParsed) parts.push(`${formatNumber(report.rowsParsed)} rows parsed`);
+  if (report.holdingsImported) parts.push(`${formatNumber(report.holdingsImported)} accepted`);
+  if (skipped) parts.push(`${formatNumber(skipped)} skipped non-holding`);
+  if (reviewRows) parts.push(`${formatNumber(reviewRows)} need review`);
+  if (duplicateRows) parts.push(`${formatNumber(duplicateRows)} duplicate merged`);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
 }
 
 function renderPoliticianTrades(records = [], report = null) {
