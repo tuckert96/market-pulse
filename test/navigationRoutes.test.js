@@ -14,6 +14,7 @@ const majorRoutes = [
   "imports",
   "holdings",
   "risk",
+  "risk-guardrails",
   "what-if",
   "targets",
   "thesis",
@@ -83,7 +84,7 @@ test("every major route has one focused screen and a sidebar link", () => {
 
 test("dashboard summary cards route to expected deep screens", () => {
   const dataRoutes = [...indexHtml.matchAll(/data-route="([^"]+)"/g)].map((match) => match[1]);
-  const expected = ["#daily", "#calendar", "#holdings", "#risk", "#thesis", "#alerts", "#market-intelligence", "#data-sources"];
+  const expected = ["#daily", "#calendar", "#holdings", "#risk", "#risk-guardrails", "#thesis", "#alerts", "#market-intelligence", "#data-sources"];
   for (const route of expected) {
     assert.ok(dataRoutes.includes(route), `Overview digest card should route to ${route}`);
   }

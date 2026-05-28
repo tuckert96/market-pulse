@@ -1,6 +1,7 @@
 import { signalActionCategory } from "./alphaEngine.js";
 import { DATA_MODES, dataModeBadgeClass, dataModeLabel, marketDataMode, portfolioDataMode, sourceDataMode } from "./dataModes.js";
 import { eventSourceLabel, eventTypeLabel, summarizeCalendarEvents } from "./eventCalendar.js";
+import { filterRiskGuardrailRows, RISK_ACTION_LABELS, sortRiskGuardrailRows } from "./equityRiskGuardrails.js";
 import { buildTickerMovementExplainer } from "./movementExplainer.js";
 import { normalizeTicker } from "./portfolioSchema.js";
 import { countHoldingRowsNeedingReview, isRealPortfolioUiState } from "./portfolioState.js";
@@ -26,6 +27,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderImportSnapshot(options.latestImportReport, options.portfolioDataQuality);
   renderOverviewTopMovers(analysis.holdings, options.uiState, options.marketDataStatus);
   renderOverviewConcentrationWarnings(analysis.risk, analysis.overview, options.uiState);
+  renderOverviewRiskGuardrails(options.equityRiskGuardrails, options.uiState);
   renderOverviewConvictionHoldings(options.thesisRows || [], options.uiState);
   renderOverviewRecentAlerts(analysis.alerts, options.uiState);
   renderOverviewMarketSnapshot(options.marketEvents || [], analysis.holdings, options.uiState, options.tickerSignals || [], options.marketDataStatus);
@@ -59,6 +61,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   );
   renderWhatIfSimulator(options.whatIfResult, options.whatIfScenario, options.uiState);
   renderRiskDeepDive(analysis.risk, analysis.breakdowns, analysis.overview, analysis.holdings, options.uiState, options.marketDataStatus);
+  renderRiskGuardrailsScreen(options.equityRiskGuardrails, options);
   renderRiskPanel(analysis.risk, analysis.overview, options.uiState);
   renderDataQuality(analysis.dataQuality, options.portfolioDataQuality, options.uiState);
   renderTickerDetailPage(analysis, options);
@@ -636,6 +639,34 @@ function renderOverviewConcentrationWarnings(risk = {}, overview = {}, uiState =
       <small>${escapeHtml(detail)}</small>
     </div>
   `).join("");
+}
+
+function renderOverviewRiskGuardrails(guardrails = {}, uiState = "SAMPLE_MODE") {
+  const target = byId("overviewRiskGuardrails");
+  if (!target) return;
+  if (!isImportedState(uiState)) {
+    target.innerHTML = '<div class="empty"><strong>No equity guardrails yet.</strong><span>Import holdings to classify each position as Hold, Review, Trim, or Exit review.</span></div>';
+    return;
+  }
+  const summary = guardrails.summary || {};
+  const highest = summary.highestRiskHolding;
+  const largest = summary.largestConcentration;
+  const drawdown = summary.biggestDrawdown;
+  target.innerHTML = `
+    <div>
+      <span>Portfolio risk status</span>
+      <b>${escapeHtml(summary.statusLabel || "No holdings")}</b>
+      <small>${escapeHtml(summary.suggestedActionSummary || "Risk guardrails need holdings and market data.")}</small>
+    </div>
+    <div>
+      <span>Guardrail queue</span>
+      <b>${escapeHtml(summary.counts?.review || 0)} Review · ${escapeHtml(summary.counts?.trim || 0)} Trim · ${escapeHtml(summary.counts?.exit || 0)} Exit</b>
+      <small>${escapeHtml(summary.below200DMA || 0)} below 200DMA · ${escapeHtml(summary.missingDataCount || 0)} with missing data</small>
+    </div>
+    ${highest ? `<div><span>Highest risk</span><b>${renderTickerLink(highest.symbol)} · ${escapeHtml(highest.riskActionLabel)}</b><small>Score ${escapeHtml(highest.riskScore)} · ${escapeHtml(highest.triggeredRules?.[0]?.label || "No trigger")}</small></div>` : ""}
+    ${largest ? `<div><span>Largest concentration</span><b>${renderTickerLink(largest.symbol)} · ${formatPct(largest.portfolioWeightPct / 100)}</b><small>${escapeHtml(largest.riskCategoryLabel || "Risk category unavailable")}</small></div>` : ""}
+    ${drawdown ? `<div><span>Biggest drawdown from high</span><b>${renderTickerLink(drawdown.symbol)} · ${formatSignedPct(drawdown.drawdownFromRecentHighPct / 100)}</b><small>Recent-high guardrail context</small></div>` : ""}
+  `;
 }
 
 function renderOverviewConvictionHoldings(rows = [], uiState = "SAMPLE_MODE") {
@@ -3010,6 +3041,137 @@ function renderRiskDecisionRow(row = {}, ctaLabel = "Inspect") {
       </div>
     </article>
   `;
+}
+
+function renderRiskGuardrailsScreen(guardrails = {}, options = {}) {
+  renderRiskGuardrailsSummary(guardrails, options.uiState);
+  renderRiskGuardrailsTable(guardrails, options);
+}
+
+function renderRiskGuardrailsSummary(guardrails = {}, uiState = "SAMPLE_MODE") {
+  const target = byId("riskGuardrailsSummaryPanel");
+  if (!target) return;
+  if (!isImportedState(uiState)) {
+    target.innerHTML = '<div class="empty"><strong>Import holdings to activate Equity Risk Guardrails.</strong><span>The guardrails classify each equity or ETF as Hold, Review, Trim, or Exit / Major Cut using deterministic thresholds.</span></div>';
+    return;
+  }
+  const summary = guardrails.summary || {};
+  const counts = summary.counts || {};
+  const highest = summary.highestRiskHolding;
+  const largest = summary.largestConcentration;
+  const drawdown = summary.biggestDrawdown;
+  target.innerHTML = `
+    <div class="risk-grid guardrail-summary-grid">
+      <div class="risk-stat"><span>Portfolio risk status</span><b>${escapeHtml(summary.statusLabel || "No holdings")}</b><small>${escapeHtml(summary.suggestedActionSummary || "No guardrail summary available.")}</small></div>
+      <div class="risk-stat"><span>Hold</span><b>${escapeHtml(counts.hold || 0)}</b><small>No action needed from active triggers.</small></div>
+      <div class="risk-stat"><span>Review</span><b>${escapeHtml(counts.review || 0)}</b><small>Re-check thesis or sizing.</small></div>
+      <div class="risk-stat"><span>Trim</span><b>${escapeHtml(counts.trim || 0)}</b><small>Risk is elevated; review reduction.</small></div>
+      <div class="risk-stat"><span>Exit / Major Cut</span><b>${escapeHtml(counts.exit || 0)}</b><small>Thesis or risk profile needs major review.</small></div>
+      <div class="risk-stat"><span>Below 200DMA</span><b>${escapeHtml(summary.below200DMA || 0)}</b><small>Long-term trend guardrail.</small></div>
+    </div>
+    <div class="risk-list guardrail-key-list">
+      ${highest ? renderGuardrailSummaryRow("Highest risk", highest, `Score ${highest.riskScore} · ${highest.riskActionLabel}`, highest.triggeredRules?.[0]?.explanation) : ""}
+      ${largest ? renderGuardrailSummaryRow("Largest concentration", largest, formatPct(largest.portfolioWeightPct / 100), `${largest.symbol} is the biggest equity/fund weight under the guardrail model.`) : ""}
+      ${drawdown ? renderGuardrailSummaryRow("Biggest drawdown", drawdown, formatSignedPct(drawdown.drawdownFromRecentHighPct / 100), `${drawdown.symbol} has the deepest drawdown from its available recent high.`) : ""}
+    </div>
+    <p class="section-note">Decision support only. These guardrails do not execute trades, predict returns, or replace thesis review.</p>
+  `;
+}
+
+function renderGuardrailSummaryRow(label, row = {}, value = "", detail = "") {
+  return `
+    <article class="risk-row ${escapeHtml(guardrailActionClass(row.riskAction))}">
+      <div class="risk-row-main">
+        <b>${escapeHtml(label)} · ${renderTickerLink(row.symbol)}</b>
+        <span>${escapeHtml(row.name || row.riskCategoryLabel || "")}</span>
+        <p>${escapeHtml(detail || "Review the detailed table for triggered rules.")}</p>
+      </div>
+      <div class="risk-row-value">
+        <b>${escapeHtml(value)}</b>
+        <span>${escapeHtml(row.riskActionLabel || "Hold")}</span>
+        <a class="button-link compact-link" href="${escapeHtml(row.href || "#holdings")}">Open ticker</a>
+      </div>
+    </article>
+  `;
+}
+
+function renderRiskGuardrailsTable(guardrails = {}, options = {}) {
+  const target = byId("riskGuardrailsTableBody");
+  if (!target) return;
+  const table = byId("riskGuardrailsTable");
+  const status = byId("riskGuardrailTableStatus");
+  const uiState = options.uiState || "SAMPLE_MODE";
+  if (!isImportedState(uiState)) {
+    target.innerHTML = '<tr><td colspan="11">Import holdings to calculate position-level risk guardrails.</td></tr>';
+    if (status) status.textContent = "No imported portfolio loaded.";
+    return;
+  }
+  const rows = sortRiskGuardrailRows(
+    filterRiskGuardrailRows(guardrails.rows || [], options.riskGuardrailFilter || "all"),
+    options.riskGuardrailSortKey || "riskScore",
+    options.riskGuardrailSortDirection || -1
+  );
+  if (status) {
+    status.textContent = `Showing ${rows.length} of ${(guardrails.rows || []).length} equity risk guardrail rows.`;
+  }
+  if (table) table.dataset.rowCount = String(rows.length);
+  target.innerHTML = rows.length
+    ? rows.map(renderRiskGuardrailTableRow).join("")
+    : '<tr><td colspan="11">No guardrail rows match the current filter.</td></tr>';
+}
+
+function renderRiskGuardrailTableRow(row = {}) {
+  const triggerSummary = row.triggeredRules?.length
+    ? row.triggeredRules.slice(0, 2).map((item) => item.label).join("; ")
+    : row.missingData?.length
+      ? `Data unavailable: ${row.missingData.slice(0, 3).join(", ")}`
+      : "No active triggers";
+  const details = row.triggeredRules?.length
+    ? row.triggeredRules.map((item) => `<li><b>${escapeHtml(item.label)}</b>: +${escapeHtml(item.points)} · ${escapeHtml(item.explanation)}</li>`).join("")
+    : `<li>${escapeHtml(row.missingData?.length ? `Data unavailable: ${row.missingData.join(", ")}` : "No triggered rules. Keep monitoring as data updates.")}</li>`;
+  return `
+    <tr class="guardrail-action-${escapeHtml(row.riskAction || "hold")}">
+      <th scope="row">
+        <div class="ticker">
+          <b>${renderTickerLink(row.symbol)}</b>
+          <span>${escapeHtml(row.name || row.symbol)}</span>
+        </div>
+      </th>
+      <td>${escapeHtml(row.riskCategoryLabel || "Speculative growth")}</td>
+      <td>${formatPct(row.portfolioWeightPct / 100)}</td>
+      <td>${formatGuardrailPct(row.gainLossFromCostPct)}</td>
+      <td>${formatGuardrailPct(row.drawdownFromRecentHighPct)}</td>
+      <td>${formatNullableCurrency(row.currentPrice)}</td>
+      <td>${formatNullableCurrency(row.fiftyDayMovingAverage)}</td>
+      <td>${formatNullableCurrency(row.twoHundredDayMovingAverage)}</td>
+      <td><b>${escapeHtml(row.riskScore || 0)}</b></td>
+      <td><span class="risk-action-pill ${escapeHtml(row.riskAction || "hold")}">${escapeHtml(row.riskActionLabel || RISK_ACTION_LABELS.hold)}</span></td>
+      <td>
+        <details class="guardrail-details">
+          <summary>${escapeHtml(triggerSummary)}</summary>
+          <ul>${details}</ul>
+          <p>Target max ${formatPct(row.guardrailConfig?.maxTargetWeightPct / 100)} · hard trim ${formatPct(row.guardrailConfig?.hardTrimWeightPct / 100)}</p>
+        </details>
+      </td>
+    </tr>
+  `;
+}
+
+function guardrailActionClass(action = "hold") {
+  return ({
+    hold: "normal",
+    review: "elevated",
+    trim: "high",
+    exit: "extreme"
+  })[action] || "normal";
+}
+
+function formatGuardrailPct(value) {
+  return Number.isFinite(value) ? formatSignedPct(value / 100) : '<span class="muted">Data unavailable</span>';
+}
+
+function formatNullableCurrency(value) {
+  return Number.isFinite(value) && value > 0 ? formatCurrency(value) : '<span class="muted">Data unavailable</span>';
 }
 
 function renderRiskStatusBadge(status = "normal") {

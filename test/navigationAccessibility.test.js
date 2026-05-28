@@ -14,6 +14,7 @@ const weekTwoRoutes = [
   "imports",
   "holdings",
   "risk",
+  "risk-guardrails",
   "what-if",
   "targets",
   "thesis",
@@ -51,6 +52,7 @@ test("Week 2 routes have focused screens and sidebar navigation", () => {
   assert.match(indexHtml, /<section class="screen" id="overview" data-screen="overview" aria-label="Portfolio overview">/);
   assert.match(indexHtml, /<section class="screen" id="holdings" data-screen="holdings" aria-label="Holdings" hidden>/);
   assert.match(indexHtml, /<section class="screen" id="risk" data-screen="risk" aria-label="Risk and concentration" hidden>/);
+  assert.match(indexHtml, /<section class="screen" id="risk-guardrails" data-screen="risk-guardrails" aria-label="Equity Risk Guardrails" hidden>/);
   assert.match(indexHtml, /<section class="screen" id="what-if" data-screen="what-if" aria-label="Portfolio What-If Simulator" hidden>/);
   assert.match(indexHtml, /<section class="screen" id="ticker" data-screen="ticker" aria-label="Ticker intelligence" hidden>/);
   assert.match(indexHtml, /<section class="screen" id="signal-review" data-screen="signal-review" aria-label="Signal Review" hidden>/);
@@ -65,6 +67,7 @@ test("overview summary cards route to Week 2 deep-dive screens", () => {
     "#daily",
     "#calendar",
     "#risk",
+    "#risk-guardrails",
     "#what-if",
     "#thesis",
     "#journal",
@@ -83,6 +86,8 @@ test("overview summary cards route to Week 2 deep-dive screens", () => {
   assert.match(appJs, /window\.location\.hash = route/);
   assert.match(indexHtml, /<article class="digest-card" data-route="#risk" role="link" tabindex="0"/);
   assert.match(indexHtml, /<a class="button-link" href="#risk">Review risk<\/a>/);
+  assert.match(indexHtml, /<article class="digest-card" data-route="#risk-guardrails" role="link" tabindex="0"/);
+  assert.match(indexHtml, /<a class="button-link" href="#risk-guardrails">Open guardrails<\/a>/);
   assert.match(indexHtml, /<article class="digest-card" data-route="#market-intelligence" role="link" tabindex="0"/);
   assert.match(indexHtml, /<a class="button-link" href="#market-intelligence">Open Market Intelligence<\/a>/);
   assert.match(indexHtml, /<article class="digest-card" data-route="#market-drivers" role="link" tabindex="0"/);
@@ -247,6 +252,10 @@ test("brief and risk layouts do not collapse labels into one-character columns",
   assert.match(indexHtml, /@media \(max-width: 720px\)[\s\S]*\.workspace-nav\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(indexHtml, /\.risk-row > p\s*\{[\s\S]*grid-column:\s*1 \/ -1/);
   assert.match(indexHtml, /\.risk-status\s*\{[\s\S]*white-space:\s*nowrap/);
+  assert.match(indexHtml, /\.guardrail-table\s*\{[\s\S]*min-width:\s*1320px/);
+  assert.match(indexHtml, /\.guardrail-table th,[\s\S]*\.guardrail-table td\s*\{[\s\S]*white-space:\s*nowrap/);
+  assert.match(indexHtml, /\.guardrail-table td:last-child\s*\{[\s\S]*white-space:\s*normal/);
+  assert.match(indexHtml, /\.risk-action-pill\s*\{[\s\S]*display:\s*inline-flex/);
   assert.match(indexHtml, /\.market-driver-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(180px, 260px\)/);
   assert.match(indexHtml, /@media \(max-width: 1080px\)[\s\S]*\.market-driver-hero-grid,[\s\S]*\.market-driver-row\s*\{[\s\S]*grid-template-columns: 1fr/);
   assert.match(indexHtml, /\.market-driver-card h3,[\s\S]*\.market-driver-row h3\s*\{[\s\S]*word-break:\s*normal/);

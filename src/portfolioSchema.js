@@ -19,6 +19,7 @@ export const CANONICAL_HOLDING_FIELDS = Object.freeze([
   "strategySleeve",
   "thesisStatus",
   "riskLevel",
+  "riskCategory",
   "quant",
   "valuationGrade",
   "growthGrade",
@@ -63,6 +64,9 @@ const LEVERAGED_ETFS = new Map([
 ]);
 const SEMICONDUCTORS = new Set(["NVDA", "AMD", "MU", "SOXL", "TSM", "AVGO", "SMH", "CRDO"]);
 const MEGA_CAP_TECH = new Set(["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "META", "TSLA", "AVGO"]);
+const CORE_MEGA_CAP_RISK = new Set(["MSFT", "AAPL", "NVDA", "GOOGL", "GOOG", "AMZN", "META", "BRK.B", "BRK.A"]);
+const CYCLICAL_HIGH_BETA_RISK = new Set(["MU", "AMD", "AVGO", "TSLA", "SMCI", "CRDO"]);
+const BROAD_INDEX_RISK = new Set(["VOO", "VTI", "SPY", "IVV", "QQQ", "SCHB", "SPLG", "VGT", "IWM", "DIA"]);
 const CASH_LIKE_TICKERS = new Set(["CASH", "FCASH", "FDIC", "SPAXX", "FDRXX", "FZFXX", "FDLXX", "SPRXX", "FTEXX", "FZDXX", "FMPXX"]);
 
 export function normalizeHolding(input = {}, options = {}) {
@@ -119,6 +123,7 @@ export function normalizeHolding(input = {}, options = {}) {
     strategySleeve,
     thesisStatus: input.thesisStatus || DEFAULTS.thesisStatus,
     riskLevel: sanitizedInput.riskLevel || inferRiskLevel(ticker, assetClass, sector, sanitizedInput),
+    riskCategory: input.riskCategory || inferHoldingRiskCategory(ticker, { ...sanitizedInput, assetClass, sector }),
     quant: numberFrom(input.quant, input.quantRating, undefined),
     valuationGrade: input.valuationGrade || input.valueGrade || gradeFromNumeric(input.value),
     growthGrade: input.growthGrade || gradeFromNumeric(input.growth),
@@ -301,6 +306,16 @@ function inferRiskLevel(ticker, assetClass, sector, input) {
   if (assetClass === "Cash" || assetClass === "Treasuries") return "Low";
   if (ticker === "VGT" || ticker === "QQQ") return "Medium-high";
   return DEFAULTS.riskLevel;
+}
+
+function inferHoldingRiskCategory(ticker, input = {}) {
+  if (input.riskCategory) return input.riskCategory;
+  if (LEVERAGED_ETFS.has(ticker) || input.isLeveragedEtf) return "leveraged_etf";
+  if (BROAD_INDEX_RISK.has(ticker)) return "broad_index";
+  if (CORE_MEGA_CAP_RISK.has(ticker)) return "core_mega_cap";
+  if (CYCLICAL_HIGH_BETA_RISK.has(ticker)) return "cyclical_high_beta";
+  if (isCashLikeHolding(ticker, input)) return "broad_index";
+  return "speculative_growth";
 }
 
 function inferBeta(ticker, assetClass, sector) {

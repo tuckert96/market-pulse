@@ -677,7 +677,14 @@ export function buildDecisionBrief(signals = [], analysis = {}) {
       source: signal.headline
     })))
     .slice(0, 3);
-  const thesisImpactEvents = sortedSignals
+  const thesisImpactSignals = [
+    ...sortedSignals,
+    ...staleSignals.sort((a, b) =>
+      actionRank(b.actionabilityLevel) - actionRank(a.actionabilityLevel) ||
+      b.priorityScore - a.priorityScore
+    )
+  ];
+  const thesisImpactEvents = thesisImpactSignals
     .filter((signal) => signal.thesisImpact && signal.thesisImpact !== "no thesis impact / noise")
     .slice(0, 4)
     .map((signal) => ({
@@ -685,7 +692,8 @@ export function buildDecisionBrief(signals = [], analysis = {}) {
       ticker: signal.primaryTicker,
       headline: signal.headline,
       thesisImpact: signal.thesisImpact,
-      actionLabel: signal.actionLabel
+      actionLabel: signal.actionLabel,
+      isStale: Boolean(signal.isStaleSignal)
     }));
   const noActionRecommendations = signals
     .filter((signal) => signal.noActionRecommendation || signal.isLowSignal)
