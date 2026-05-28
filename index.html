@@ -844,6 +844,74 @@
         font-weight: 760;
       }
 
+      .data-tag.badge-source-live,
+      .status-badge.badge-source-live {
+        background: var(--good-bg);
+        color: #17631f;
+        border-color: #b7dfbf;
+      }
+
+      .data-tag.badge-source-cached,
+      .status-badge.badge-source-cached,
+      .data-tag.badge-source-imported,
+      .status-badge.badge-source-imported {
+        background: rgba(0, 122, 255, 0.09);
+        color: #075985;
+        border-color: rgba(0, 122, 255, 0.2);
+      }
+
+      .data-tag.badge-source-stale,
+      .status-badge.badge-source-stale,
+      .data-tag.badge-source-partial,
+      .status-badge.badge-source-partial,
+      .data-tag.badge-source-rate-limited,
+      .status-badge.badge-source-rate-limited {
+        background: var(--warn-bg);
+        color: #8a4b00;
+        border-color: #f0d49c;
+      }
+
+      .data-tag.badge-source-error,
+      .status-badge.badge-source-error {
+        background: var(--bad-bg);
+        color: #9f261d;
+        border-color: #f3b8b3;
+      }
+
+      .data-tag.badge-source-not-configured,
+      .status-badge.badge-source-not-configured,
+      .data-tag.badge-source-empty,
+      .status-badge.badge-source-empty {
+        background: rgba(118, 118, 128, 0.1);
+        color: var(--text-secondary);
+        border-color: var(--line);
+      }
+
+      .provider-coverage-wrap {
+        margin-top: 8px;
+        overflow-x: auto;
+      }
+
+      .provider-coverage-table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      .provider-coverage-table th,
+      .provider-coverage-table td {
+        border-bottom: 1px solid var(--line);
+        padding: 8px;
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      .provider-coverage-table th:first-child,
+      .provider-coverage-table td:first-child {
+        font-weight: 800;
+      }
+
       .button-link {
         display: inline-flex;
         align-items: center;
