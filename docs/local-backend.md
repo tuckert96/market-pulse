@@ -61,6 +61,9 @@ Supported placeholders:
 - `POLITICIAN_TRADES_SOURCE_URL` (optional override)
 - `POLITICIAN_TRADES_TTL_HOURS`
 - `POLITICIAN_TRADES_LIMIT`
+- `OPENAI_API_KEY` (optional; server-side only)
+- `OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED` (`false` by default)
+- `OPENAI_PORTFOLIO_MODEL` (defaults to the app's current explanation model)
 
 The `/api/config` endpoint returns only whether each key is present. It never returns the value. Market-data quote credentials are server-side only; browser code receives normalized status and quote data, not API keys.
 
@@ -80,6 +83,7 @@ GET /api/market-data/quotes?tickers=MU,NVDA&history=1
 GET /api/reddit/mentions?subreddits=stocks,investing
 GET /api/x/updates?query=%24MU%20OR%20%24NVDA
 GET /api/politician-trades?provider=senate-stock-watcher
+POST /api/portfolio/explanation
 ```
 
 Current behavior is intentionally conservative:
@@ -99,6 +103,7 @@ Current behavior is intentionally conservative:
 - X update requests use `/api/x/updates`. By default the endpoint returns `not-configured` or `configured-not-connected` and makes no network call. `provider=mock` returns sample source-labeled rows. Live recent-search calls require both `X_BEARER_TOKEN` and `X_LIVE_ENABLED=true`, use the bearer token only in the local backend, redact handles from row text, avoid usernames/cookies/session state, cache successful rows, and return stale cached rows with clear warnings when refresh fails.
 - Politician trade disclosure requests use `/api/politician-trades`. By default the endpoint returns a safe not-configured payload and makes no network call. When `POLITICIAN_TRADES_PROVIDER=senate-stock-watcher` and `POLITICIAN_TRADES_LIVE_ENABLED=true`, the local backend fetches the public static Senate Stock Watcher JSON dataset, normalizes disclosure rows, caches the result, and returns source-labeled rows to the browser. A blank `POLITICIAN_TRADES_SOURCE_URL` uses the built-in GitHub-hosted daily summaries URL. This is the recommended automatic path for now: Senate-only, disclosure-derived, backend-only, and no official-site scraping.
 - X/Twitter market-event support remains a readiness contract only under `/api/market/events?provider=xApi`. The live row provider is separate at `/api/x/updates`, backend-only, disabled by default, and never scrapes X/Twitter.
+- Portfolio explanation requests use `/api/portfolio/explanation`. Without `OPENAI_API_KEY` or without `OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED=true`, the route returns a deterministic local explanation and makes no OpenAI call. When enabled, it sends a capped, redacted, source-labeled dashboard summary to OpenAI's Responses API through the local backend only, strips account identifiers and secret-like fields, and falls back to local deterministic text if the provider errors.
 
 Market event provider adapters are scaffolded for:
 
@@ -121,6 +126,7 @@ Use `GET /api/market/events?provider=newsApi` or `provider=xApi` to see a provid
 - No Reddit HTML scraping, cookies, passwords, or stored live usernames.
 - No API key values returned to frontend JavaScript.
 - External market data calls happen only from the local backend when a market data API key is configured.
+- Optional OpenAI explanation calls happen only from the local backend, are disabled by default, and must use redacted structured dashboard context rather than raw brokerage exports.
 - No trade execution.
 
 ## Next Step

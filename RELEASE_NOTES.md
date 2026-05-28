@@ -12,6 +12,9 @@ Date: 2026-05-24
 
 ## What Is Ready
 
+- GitHub ticket sweep: Fidelity CSV verification, CI checks, provider diagnostics/source labels, and OpenAI/thesis summary work are split into reviewable PRs tied to the open issues.
+- Optional OpenAI portfolio explanations are now backend-only, disabled by default, redacted, source-labeled, and fall back to deterministic local explanations when no key is configured or the provider errors.
+- Ticker pages now include a clearer local deterministic thesis/risk summary with review flags, source label, key risks, invalidation criteria, add/trim/review conditions, and guardrail gaps.
 - Portfolio Health Score: Overview and Daily Command Brief now include a compact 0-100 local workflow score that combines import trust, concentration, thesis coverage, target drift, alert load, and market-data freshness. It links directly to the next screen to inspect and stays disabled/honest when only sample or no portfolio data is loaded.
 - Market-data reliability pass: Finnhub remains the preferred free personal-use realtime provider path, with docs now spelling out the boundary between free bounded provider data and paid/exchange-grade market-data entitlements.
 - Optional market-data fallback path: if the selected configured live provider returns no usable quotes because of an error/rate limit, the local backend can try configured fallback providers such as Financial Modeling Prep and reports the attempt chain in Data Sources diagnostics without exposing keys.

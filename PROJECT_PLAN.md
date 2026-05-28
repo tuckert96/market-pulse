@@ -1,6 +1,6 @@
 # Project Plan
 
-Last updated: 2026-05-25
+Last updated: 2026-05-28
 Lead: Codie
 Human owner: Tucker
 Team name: Dream Team
@@ -39,14 +39,10 @@ The product should cut through internet noise by connecting holdings, target all
 
 ## Priority Order
 
-1. P1 Market Drivers explainer for why the broader market and AI/tech are moving today.
-2. Fidelity CSV import verification against Tucker's real exports.
-3. Finnhub provider diagnostics and coverage visibility.
-4. OpenAI-powered portfolio explanation endpoint with backend-only credentials and deterministic fallback.
-5. AI thesis/risk summary panel.
-6. Dashboard data freshness and source labels.
-7. CI checks for import, provider fallback, and Alpha Engine ranking.
-8. Broader automated UI/browser smoke coverage once browser automation is available.
+1. Review and merge PRs for Fidelity CSV import verification, CI checks, provider diagnostics/source labels, and AI explanation/thesis summary work.
+2. Keep P1 Market Drivers explainer current as new live/source data paths mature.
+3. Broader automated UI/browser smoke coverage once browser automation is available.
+4. Continue improving active-portfolio consistency and real-data diagnostics as Tucker tests real CSVs and provider keys.
 
 ## Active Phase
 
@@ -77,6 +73,7 @@ Active priority:
 - Preserve Sample mode and reset behavior without stale sample holdings leaking into imported portfolio screens.
 - Keep the Portfolio Health Score compact and source-aware: it should summarize import trust, concentration, thesis coverage, target discipline, alert load, and market-data freshness, then route Tucker to the next review screen without becoming a new isolated data island or trade recommendation.
 - P1 Market Drivers issue #7 is now the top implementation track: explain broader market and AI/tech moves separately using market-data proxies, source-labeled X/Reddit/news/event context, federal disclosure context, and active portfolio exposure. It must show missing data instead of invented causality and link Tucker to Daily Brief, Risk, Market Intelligence, Data Sources, or ticker pages for the next inspection.
+- GitHub ticket sweep checkpoint: issue #1 is covered by PR #8, issue #6 by PR #9, issues #2/#5 by PR #10, and issues #3/#4 now have a backend-only OpenAI explanation route plus deterministic thesis/risk summary work ready for PR. Issue #7 has existing implementation and passing focused tests; no extra code was required.
 
 Prior Week 5 stability context retained below for continuity:
 

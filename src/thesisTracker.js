@@ -21,12 +21,14 @@ export function buildThesisRows(holdings = [], profiles = {}, options = {}) {
       const drift = holding.portfolioWeight - targetWeight;
       const aboveTarget = targetWeight > 0 && drift > 0.015;
       const weakConfidence = ["Low", "Medium-low", "Unrated"].includes(profile.confidenceLevel);
+      const largeWeakThesis = Boolean(holding.portfolioWeight >= Number(options.largeHoldingThreshold || 0.05) && weakConfidence);
       const leveragedGuardrailMissing = Boolean(holding.isLeveragedEtf && !hasGuardrailNotes(profile));
       const aboveTargetWithWeakOrStale = Boolean(aboveTarget && (weakConfidence || stale || missing || contradicted));
       const reviewReasons = buildReviewReasons({
         missing,
         stale,
         contradicted,
+        largeWeakThesis,
         aboveTargetWithWeakOrStale,
         leveragedGuardrailMissing,
         alphaImpact
@@ -80,6 +82,7 @@ export function buildThesisRows(holdings = [], profiles = {}, options = {}) {
         missing,
         stale,
         weakConfidence,
+        largeWeakThesis,
         aboveTargetWithWeakOrStale,
         leveragedGuardrailMissing,
         isLeveragedEtf: holding.isLeveragedEtf
@@ -103,6 +106,9 @@ export function buildThesisAlerts(rows = []) {
     }
     if (row.aboveTargetWithWeakOrStale) {
       alerts.push(thesisAlert(row, "thesis-above-target", "high", `${row.ticker} is above target with thesis risk`, `Current weight is ${formatPct(row.portfolioWeight)} vs ${formatPct(row.targetWeight)} target. Refresh the thesis before changing size.`, "Review"));
+    }
+    if (row.largeWeakThesis && !row.aboveTargetWithWeakOrStale) {
+      alerts.push(thesisAlert(row, "thesis-large-weak", "medium", `${row.ticker} has size without strong thesis confidence`, `${row.ticker} is ${formatPct(row.portfolioWeight)} of the portfolio with ${row.confidenceLevel || "unrated"} confidence. Refresh the thesis before relying on position size.`, "Review"));
     }
     if (row.leveragedGuardrailMissing) {
       alerts.push(thesisAlert(row, "thesis-leverage-guardrail", "medium", `${row.ticker} needs leverage guardrail notes`, "Add what would make Tucker trim, exit, or review this leveraged ETF.", "Review"));
@@ -131,7 +137,69 @@ export function thesisSummary(rows = []) {
     alphaSupport: rows.filter((row) => row.alphaImpact.supporting.length).length,
     aboveTargetWithWeakOrStale: rows.filter((row) => row.aboveTargetWithWeakOrStale).length,
     leveragedGuardrailMissing: rows.filter((row) => row.leveragedGuardrailMissing).length,
+    largeWeakThesis: rows.filter((row) => row.largeWeakThesis).length,
     needsAttention: rows.filter((row) => !["Current", "Supported"].includes(row.thesisStatus)).length
+  };
+}
+
+export function buildThesisRiskSummary(row = {}, options = {}) {
+  const holding = options.holding || {};
+  const sourceMode = options.sourceMode || "local deterministic";
+  const flags = [];
+  if (!row || !row.ticker) {
+    return {
+      sourceMode,
+      sourceLabel: sourceMode === "AI-assisted" ? "AI-assisted" : "Local deterministic",
+      status: "Missing",
+      summary: "No thesis profile is documented yet.",
+      flags: ["No thesis profile is documented."],
+      keyRisks: ["Not documented"],
+      invalidationCriteria: ["Not documented"],
+      nextReview: "Open Thesis to add review triggers.",
+      reviewAction: "Document thesis",
+      caveat: "This panel summarizes only local thesis fields and supplied dashboard signals."
+    };
+  }
+  if (row.missing) flags.push("No thesis documented.");
+  if (row.stale) flags.push("Thesis review is stale or missing.");
+  if (row.aboveTargetWithWeakOrStale) flags.push("Position is above target while thesis confidence or freshness needs review.");
+  if (row.leveragedGuardrailMissing) flags.push("Leveraged position is missing guardrail notes.");
+  if (row.alphaImpact?.breaking?.length) flags.push("Alpha Engine has a thesis-breaking signal.");
+  if (row.alphaImpact?.weakening?.length) flags.push("Alpha Engine has a thesis review signal.");
+  if (!flags.length && row.alphaImpact?.supporting?.length) flags.push("Alpha Engine signal supports the thesis; monitor confirming evidence.");
+  if (!flags.length) flags.push("Thesis profile is current from the available local fields.");
+
+  const keyRisks = normalizeDisplayList(row.keyRisks, row.downsideRisk || "Not documented");
+  const invalidationCriteria = normalizeDisplayList(row.invalidationCriteria || row.thesisBreakingConditions, row.invalidation || "Not documented");
+  const addConditions = normalizeDisplayList(row.addConditions, row.whatWouldMakeMeAdd || "Not documented");
+  const trimConditions = normalizeDisplayList(row.trimConditions, row.whatWouldMakeMeTrim || "Not documented");
+  const exitReviewConditions = normalizeDisplayList(row.exitReviewConditions, row.whatWouldMakeMeExitReview || "Not documented");
+  const summaryParts = [
+    row.whyOwned ? `Own thesis: ${row.whyOwned}` : "Own thesis is not documented.",
+    `Status: ${row.thesisStatus || "Unrated"}.`,
+    `Confidence: ${row.confidenceLevel || "Unrated"}.`,
+    Number.isFinite(Number(row.portfolioWeight)) ? `Weight: ${formatPct(row.portfolioWeight)}${Number.isFinite(Number(row.targetWeight)) ? ` vs ${formatPct(row.targetWeight)} target` : ""}.` : ""
+  ].filter(Boolean);
+
+  return {
+    ticker: row.ticker || holding.ticker || "",
+    sourceMode,
+    sourceLabel: sourceMode === "AI-assisted" ? "AI-assisted" : "Local deterministic",
+    status: row.thesisStatus || "Unrated",
+    confidence: row.confidenceLevel || "Unrated",
+    summary: summaryParts.join(" "),
+    flags,
+    whyOwned: row.whyOwned || "",
+    keyRisks,
+    invalidationCriteria,
+    addConditions,
+    trimConditions,
+    exitReviewConditions,
+    nextReview: row.nextReviewTrigger || row.reviewAction || "Open Thesis to add review triggers.",
+    reviewAction: row.reviewAction || reviewActionForStatus(row.thesisStatus),
+    caveat: sourceMode === "AI-assisted"
+      ? "AI-assisted text must be checked against Tucker's source notes."
+      : "Local deterministic summary; no AI text was generated."
   };
 }
 
@@ -156,6 +224,18 @@ export function normalizeThesisProfile(profile = {}, holding = {}) {
     lastReviewedDate: profile.lastReviewedDate || "",
     notes: String(profile.notes || "").trim()
   };
+}
+
+function normalizeDisplayList(items, fallback = "Not documented") {
+  if (Array.isArray(items)) {
+    const values = items.map((item) => String(item || "").trim()).filter(Boolean);
+    return values.length ? values : [fallback];
+  }
+  const values = String(items || "")
+    .split(/\n|;/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return values.length ? values : [fallback];
 }
 
 function aggregateHoldingsByTicker(holdings = []) {
@@ -221,6 +301,7 @@ function buildReviewReasons(context) {
   if (context.missing) reasons.push("No thesis documented.");
   if (context.stale) reasons.push("Thesis review is stale or missing.");
   if (context.contradicted) reasons.push(context.contradicted);
+  if (context.largeWeakThesis) reasons.push("Large position has low or unrated thesis confidence.");
   if (context.aboveTargetWithWeakOrStale) reasons.push("Above target while thesis confidence or freshness needs work.");
   if (context.leveragedGuardrailMissing) reasons.push("Leveraged holding lacks trim/exit guardrail notes.");
   if (context.alphaImpact.breaking.length) reasons.push("Alpha Engine has a thesis-breaking signal.");

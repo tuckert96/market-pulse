@@ -33,6 +33,13 @@ import {
   politicianTradeProviderStatuses
 } from "../src/politicianTrades.js";
 import {
+  buildOpenAIExplanationConfig,
+  buildOpenAIResponsesRequest,
+  buildPortfolioExplanationFallback,
+  extractOpenAIResponseText,
+  redactSecretLikeText as redactExplanationSecretLikeText
+} from "../src/portfolioExplanation.js";
+import {
   buildXProviderConfig,
   createXUpdatesProvider,
   xProviderStatuses
@@ -111,6 +118,9 @@ export function buildConfigStatus(env = process.env, options = {}) {
     redditProviderStatuses: redditProviderStatuses(env),
     xProviderConfig: buildXProviderConfig(env),
     xProviderStatuses: xProviderStatuses(env),
+    aiProviders: {
+      openai: buildOpenAIExplanationConfig(env)
+    },
     politicianTradeProviderConfig: buildPoliticianTradeProviderConfig(env, {
       defaultSourceUrl: defaultPoliticianTradeSourceUrl
     }),
@@ -134,6 +144,10 @@ export async function apiResponse(method, pathname, searchParams = new URLSearch
 
   if (method === "GET" && pathname === "/api/config") {
     return ok(buildConfigStatus(env, { fidelityPlaidSession: readFidelityPlaidSession(options) }));
+  }
+
+  if (pathname === "/api/portfolio/explanation" && method === "POST") {
+    return portfolioExplanationResponse(body, env, options);
   }
 
   if (pathname === "/api/connectors/fidelity/link" && method === "POST") {
@@ -557,6 +571,89 @@ export async function apiResponse(method, pathname, searchParams = new URLSearch
   }
 
   return json(404, { error: "not_found", message: `No local API route for ${method} ${pathname}.` });
+}
+
+async function portfolioExplanationResponse(body = {}, env = process.env, options = {}) {
+  const config = buildOpenAIExplanationConfig(env);
+  const fallback = buildPortfolioExplanationFallback(body, { status: config.status });
+
+  if (!config.liveProviderCalls) {
+    return ok({
+      ...fallback,
+      provider: "openai",
+      openai: config,
+      status: config.status,
+      fallbackUsed: true,
+      warnings: [config.configured
+        ? "OpenAI explanation calls are disabled. Returned deterministic local explanation."
+        : "OpenAI API key is not configured. Returned deterministic local explanation."]
+    });
+  }
+
+  const fetchImpl = options.fetchImpl || fetch;
+  const model = config.model;
+  const requestPayload = buildOpenAIResponsesRequest(body, { model });
+
+  try {
+    const response = await fetchImpl("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify(requestPayload)
+    });
+    const text = await response.text();
+    let payload = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { raw: text };
+    }
+    if (!response.ok) {
+      const message = payload.error?.message || payload.message || text || `OpenAI request failed (${response.status})`;
+      throw Object.assign(new Error(message), { status: response.status, payload });
+    }
+    const outputText = extractOpenAIResponseText(payload);
+    if (!outputText) throw new Error("OpenAI response did not include usable explanation text.");
+
+    return ok({
+      ok: true,
+      mode: "AI-assisted",
+      sourceMode: "AI-assisted",
+      status: "connected",
+      provider: "openai",
+      model,
+      openai: {
+        ...config,
+        status: "connected"
+      },
+      dataSources: fallback.dataSources,
+      explanation: {
+        ...fallback.explanation,
+        title: "AI-assisted portfolio explanation",
+        narrative: outputText,
+        caveats: [
+          ...(fallback.explanation.caveats || []),
+          "AI-assisted text is grounded in the supplied dashboard data and should be reviewed for accuracy."
+        ]
+      },
+      fallbackUsed: false
+    });
+  } catch (error) {
+    return ok({
+      ...fallback,
+      provider: "openai",
+      openai: {
+        ...config,
+        status: "error"
+      },
+      status: "error",
+      fallbackUsed: true,
+      lastError: redactExplanationSecretLikeText(error?.message || String(error), [env.OPENAI_API_KEY]),
+      warnings: ["OpenAI explanation failed safely. Returned deterministic local explanation."]
+    });
+  }
 }
 
 function redditMentionCacheKey(config = {}) {
