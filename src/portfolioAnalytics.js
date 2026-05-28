@@ -106,7 +106,7 @@ export function buildAttentionAlerts(holdings, totalValue, breakdowns, options =
     if (isStale(holding.sourceAsOf, thresholds.staleHours)) {
       alerts.push(alert("stale-data", "medium", `${label} data may be stale`, `Source date is ${holding.sourceAsOf || "missing"}.`, holding));
     }
-    if (!holding.costBasis && holding.assetClass !== "Cash") {
+    if (isMissingCostBasis(holding)) {
       alerts.push(alert("missing-cost", "low", `${label} is missing cost basis`, "Gain/loss and tax-aware decisions may be incomplete.", holding));
     }
     if (!holding.quant && holding.assetClass === "Equity") {
@@ -543,7 +543,7 @@ function buildDataQuality(holdings) {
     keys.add(key);
     if (!holding.ticker) issues.push(issue("missing-ticker", `${holding.name} is missing ticker.`));
     if (!holding.marketValue) issues.push(issue("missing-market-value", `${holding.ticker} is missing market value.`));
-    if (!holding.costBasis && holding.assetClass !== "Cash") issues.push(issue("missing-cost-basis", `${holding.ticker} is missing cost basis.`));
+    if (isMissingCostBasis(holding)) issues.push(issue("missing-cost-basis", `${holding.ticker} is missing cost basis.`));
     if (!holding.assetClass || holding.assetClass === "Unknown") issues.push(issue("unknown-asset-class", `${holding.ticker} has unknown asset class.`));
     if (!holding.sector || holding.sector === "Unknown") issues.push(issue("unknown-sector", `${holding.ticker} has unknown sector.`));
     if (holding.shares < 0 || holding.price < 0 || holding.marketValue < 0) issues.push(issue("impossible-value", `${holding.ticker} has an impossible negative value.`));
@@ -638,6 +638,10 @@ function isStale(dateText, hours) {
   const date = new Date(dateText);
   if (Number.isNaN(date.getTime())) return true;
   return Date.now() - date.getTime() > hours * 60 * 60 * 1000;
+}
+
+function isMissingCostBasis(holding = {}) {
+  return holding.assetClass !== "Cash" && (holding.missingCostBasis || !Number(holding.costBasis));
 }
 
 function severityRank(severity) {

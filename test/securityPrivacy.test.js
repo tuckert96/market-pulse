@@ -63,7 +63,9 @@ test("dashboard backup sanitizer removes secret-shaped fields and masks account 
       providerError: "request failed client_secret=raw-client-secret cookie=session-cookie Authorization: Bearer raw-bearer-token",
       providerWarning: "clientSecret=raw-camel-secret refreshToken=raw-camel-refresh access-token=raw-dash-access session_id=raw-session-id",
       itemId: "plaid-item-should-not-export",
-      accountNumber: "123456789"
+      accountNumber: "123456789",
+      accountNameNumber: "Taxable 987654321",
+      accountLabel: "Brokerage 456789123"
     },
     notes: longNotes,
     decisionJournal: [{
@@ -100,6 +102,8 @@ test("dashboard backup sanitizer removes secret-shaped fields and masks account 
   assert.equal(JSON.stringify(exported.thesisProfiles).includes(rawOpaqueToken), false);
   assert.equal(exported.notes.length, 2000);
   assert.equal(exported.nested.accountNumber, "masked-6789");
+  assert.equal(exported.nested.accountNameNumber, "masked-4321");
+  assert.equal(exported.nested.accountLabel, "masked-9123");
   assert.equal(exported.holdings[0].accountId, "masked-4321");
   assert.equal(exported.holdings[0].account_id, "masked-6789");
   assert.equal("finnhubApiKey" in imported, false);

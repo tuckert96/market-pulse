@@ -70,9 +70,13 @@ export function normalizeHolding(input = {}, options = {}) {
   const shares = numberFrom(input.shares, input.quantity, 0);
   const price = numberFrom(input.price, input.lastPrice, input.currentPrice, 0);
   const marketValue = numberFrom(input.marketValue, input.positionValue, shares * price);
-  const costBasis = numberFrom(input.costBasis, input.totalCostBasis, input.averageCost ? shares * numberFrom(input.averageCost) : 0);
-  const unrealizedGain = numberFrom(input.unrealizedGain, marketValue - costBasis);
-  const unrealizedGainPercent = costBasis > 0 ? unrealizedGain / costBasis : numberFrom(input.unrealizedGainPercent, 0);
+  const costBasis = optionalNumberFrom(input.costBasis, input.totalCostBasis, input.averageCost ? shares * numberFrom(input.averageCost) : undefined);
+  const explicitUnrealizedGain = optionalNumberFrom(input.unrealizedGain);
+  const unrealizedGain = explicitUnrealizedGain ?? (costBasis > 0 ? marketValue - costBasis : undefined);
+  const explicitUnrealizedGainPercent = input.unrealizedGainPercent !== undefined ? decimalPercent(input.unrealizedGainPercent) : undefined;
+  const unrealizedGainPercent = costBasis > 0 && unrealizedGain !== undefined
+    ? unrealizedGain / costBasis
+    : explicitUnrealizedGainPercent;
   const dailyChangePercentInput = decimalPercent(input.dailyChangePercent ?? 0);
   const dailyChange = numberFrom(input.dailyChange, input.dayChange, marketValue * dailyChangePercentInput);
   const dailyChangePercent = marketValue > 0 ? dailyChange / marketValue : dailyChangePercentInput;
@@ -204,6 +208,13 @@ export function numberFrom(...values) {
   if (found === undefined) return 0;
   const parsed = Number(String(found).replace(/\((.*)\)/, "-$1").replace(/[$,%+,]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function optionalNumberFrom(...values) {
+  const found = values.find((value) => value !== undefined && value !== null && value !== "");
+  if (found === undefined) return undefined;
+  const parsed = Number(String(found).replace(/\((.*)\)/, "-$1").replace(/[$,%+,]/g, ""));
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export function normalizeTicker(value) {

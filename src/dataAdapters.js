@@ -49,7 +49,7 @@
       "holdingname"
     ],
     sector: ["sector", "sectorname", "industrysector"],
-    shares: ["shares", "quantity", "qty", "sharequantity", "quantityshares", "currentquantity", "units", "unitsheld", "sharesheld"],
+    shares: ["shares", "quantity", "qty", "qtyquantity", "sharequantity", "quantityshares", "currentquantity", "units", "unitsheld", "sharesheld"],
     price: [
       "price",
       "lastprice",
@@ -81,13 +81,20 @@
       "costbasisvalue",
       "costbasistotalvalue",
       "costbasispershare",
+      "costbasispershareusd",
+      "costbasispershareus",
       "costpershare",
+      "costpershareusd",
+      "costpershareus",
       "totalcost",
       "cost",
       "averagecost",
       "averagecostbasis",
+      "averagecostbasisusd",
       "averagecostbasisus",
       "avgcost",
+      "avgcostusd",
+      "avgcostus",
       "basis",
       "totalbasis",
       "totalbasisus",
@@ -111,6 +118,8 @@
       "marketvalueus",
       "currentvalueasof",
       "currentvaluedollars",
+      "mktval",
+      "mktvalmarketvalue",
       "valueusd",
       "valueus"
     ],
@@ -139,7 +148,11 @@
       "totalgainloss",
       "totalgainlossdollar",
       "totalgain/loss",
-      "totalgain/lossdollar"
+      "totalgain/lossdollar",
+      "gain",
+      "gaindollar",
+      "gaingain/loss",
+      "gaingain/lossdollar"
     ],
     unrealizedGainPercent: [
       "percentgainloss",
@@ -149,7 +162,9 @@
       "unrealizedgainlosspercent",
       "unrealizedgain/losspercent",
       "totalgainlosspercent",
-      "totalgain/losspercent"
+      "totalgain/losspercent",
+      "gainpercent",
+      "gainpercentgain/losspercent"
     ],
     dailyChange: [
       "todaygainloss",
@@ -158,13 +173,22 @@
       "todaygain/lossdollar",
       "todaysgainlossdollar",
       "todaysgain/loss",
-      "todaysgain/lossdollar"
+      "todaysgain/lossdollar",
+      "daychng",
+      "daychngdollar",
+      "daychngdaychange",
+      "daychngdollardaychangedollar",
+      "daychange",
+      "daychangedollar"
     ],
     dailyChangePercent: [
       "todaygainlosspercent",
       "todaygain/losspercent",
       "todaysgainlosspercent",
-      "todaysgain/losspercent"
+      "todaysgain/losspercent",
+      "daychngpercent",
+      "daychngpercentdaychangepercent",
+      "daychangepercent"
     ],
     quant: ["quant", "quantscore", "saquant", "quantrating", "quantscore"],
     growth: ["growth", "growthscore", "growthgrade", "sagrowth"],
@@ -507,7 +531,8 @@
       : parseCsv(csvOrRows || "", options);
     const detail = normalizeRowsWithReport(parsed.rows, provider, {
       ...options,
-      headers: parsed.headers
+      headers: parsed.headers,
+      accountFallback: provider === "fidelity" ? fidelityAccountFallbackFromFileName(options.fileName) : ""
     });
     const merged = provider === "fidelity"
       ? mergeDuplicatePositionRows(detail.records)
@@ -549,7 +574,10 @@
 
     contextualRows.forEach((row, index) => {
       const rowNumber = row.__rowNumber || index + 2;
-      const record = normalizeRecord(row, provider, { columnMapping });
+      const record = normalizeRecord(row, provider, {
+        columnMapping,
+        accountFallback: options.accountFallback
+      });
       const issues = rowImportIssues(row, record, provider, columnMapping);
 
       issues.missing.forEach((field) => {
@@ -581,7 +609,8 @@
               ? `Cleaned ${repairedOverflowRows} row${repairedOverflowRows === 1 ? "" : "s"} with trailing empty CSV cells; no holding data changed.`
               : `Adjusted ${repairedOverflowRows} row${repairedOverflowRows === 1 ? "" : "s"} with harmless CSV cell-count issues: ${repairNotes.join("; ")}.`]
           : []),
-        ...fidelityInterpretationWarnings(contextualRows, records)
+        ...fidelityInterpretationWarnings(contextualRows, records),
+        ...fidelityAccountFallbackWarnings(options.accountFallback, records, columnMapping)
       ]
     };
   }
@@ -599,7 +628,9 @@
       ? generatedLocalTickerForFidelityRow(lookup, columnMapping, rawTickerValue)
       : "";
     const ticker = inferredTicker || (!isLikelyCusip(rawTickerValue) ? readTicker(lookup, aliasesFor("ticker", columnMapping)) : "") || generatedTicker;
-    const company = readText(lookup, aliasesFor("company", columnMapping)) || ticker;
+    const company = usefulText(readText(lookup, aliasesFor("company", columnMapping))) ||
+      (provider === "fidelity" && isFidelityCashDescriptor(rawTickerValue) ? rawTickerValue : "") ||
+      ticker;
     const normalized = {
       ticker,
       company,
@@ -614,15 +645,20 @@
       const rawPrice = readNumber(lookup, aliasesFor("price", columnMapping), 0);
       normalized.marketValue = readNumber(lookup, aliasesFor("marketValue", columnMapping), normalized.shares * rawPrice);
       normalized.price = rawPrice || inferPriceFromMarketValue(normalized.shares, normalized.marketValue);
-      const rawCostBasis = readNumber(lookup, aliasesFor("costBasis", columnMapping), 0);
-      normalized.costBasis = isAverageCostBasisColumn(columnMapping.costBasis)
-        ? rawCostBasis * normalized.shares
-        : rawCostBasis;
+      const hasCostBasis = hasParsedNumber(lookup, aliasesFor("costBasis", columnMapping));
+      const rawCostBasis = readNumber(lookup, aliasesFor("costBasis", columnMapping), undefined);
+      if (hasCostBasis) {
+        normalized.costBasis = isAverageCostBasisColumn(columnMapping.costBasis)
+          ? rawCostBasis * normalized.shares
+          : rawCostBasis;
+      } else {
+        normalized.missingCostBasis = true;
+      }
       normalized.unrealizedGain = readNumber(lookup, aliasesFor("unrealizedGain", columnMapping), undefined);
       normalized.unrealizedGainPercent = readPercentValue(lookup, aliasesFor("unrealizedGainPercent", columnMapping), undefined);
       normalized.dailyChange = readNumber(lookup, aliasesFor("dailyChange", columnMapping), undefined);
       normalized.dailyChangePercent = readPercentValue(lookup, aliasesFor("dailyChangePercent", columnMapping), undefined);
-      normalized.account = maskAccountLabel(readText(lookup, aliasesFor("account", columnMapping)) || row.__inferredAccount) || undefined;
+      normalized.account = maskAccountLabel(readText(lookup, aliasesFor("account", columnMapping)) || row.__inferredAccount || options.accountFallback) || undefined;
       normalized.accountType = readText(lookup, aliasesFor("accountType", columnMapping)) || undefined;
       const type = readText(lookup, aliasesFor("type", columnMapping));
       if (generatedTicker) {
@@ -653,6 +689,7 @@
         normalized.strategySleeve = "Cash";
         normalized.riskLevel = "Low";
         normalized.cash = true;
+        delete normalized.missingCostBasis;
       }
       normalized.positionValue = normalized.marketValue;
     }
@@ -755,7 +792,12 @@
   function mergePositionRow(left = {}, right = {}) {
     const shares = numericValue(left.shares) + numericValue(right.shares);
     const marketValue = numericValue(left.marketValue) + numericValue(right.marketValue);
-    const costBasis = numericValue(left.costBasis) + numericValue(right.costBasis);
+    const leftHasCostBasis = numberOrUndefined(left.costBasis) !== undefined;
+    const rightHasCostBasis = numberOrUndefined(right.costBasis) !== undefined;
+    const missingCostBasis = Boolean(left.missingCostBasis || right.missingCostBasis || !leftHasCostBasis || !rightHasCostBasis);
+    const costBasis = leftHasCostBasis || rightHasCostBasis
+      ? numericValue(left.costBasis) + numericValue(right.costBasis)
+      : undefined;
     const unrealizedGain = numberOrUndefined(left.unrealizedGain) !== undefined || numberOrUndefined(right.unrealizedGain) !== undefined
       ? numericValue(left.unrealizedGain) + numericValue(right.unrealizedGain)
       : undefined;
@@ -777,6 +819,8 @@
       price,
       marketValue,
       costBasis,
+      missingCostBasis,
+      missingCostBasisRowNumbers: missingCostBasisRowNumbers(left, right),
       unrealizedGain,
       unrealizedGainPercent: costBasis > 0 && unrealizedGain !== undefined ? unrealizedGain / costBasis : (left.unrealizedGainPercent ?? right.unrealizedGainPercent),
       dailyChange,
@@ -785,6 +829,15 @@
       sources: Array.from(new Set([...(left.sources || []), ...(right.sources || [])])),
       sourceRows
     });
+  }
+
+  function missingCostBasisRowNumbers(left = {}, right = {}) {
+    return Array.from(new Set([
+      ...(left.missingCostBasisRowNumbers || []),
+      ...(right.missingCostBasisRowNumbers || []),
+      ...(left.missingCostBasis ? (left.sourceRows || []).map((source) => source.rowNumber).filter(Boolean) : []),
+      ...(right.missingCostBasis ? (right.sourceRows || []).map((source) => source.rowNumber).filter(Boolean) : [])
+    ])).sort((a, b) => a - b);
   }
 
   function mergeRecord(left, right) {
@@ -877,7 +930,7 @@
     const totalMarketValue = details.records.reduce((total, record) => total + numericValue(record.marketValue), 0);
     return {
       provider: details.provider,
-      fileName: details.fileName || "",
+      fileName: safeFileName(details.fileName || ""),
       detectedFileDate: detectedFileDate(details.fileName, details.rows),
       detectedColumns: details.headers || [],
       unsupportedColumns: unsupportedColumns(details.headers || [], details.columnMapping),
@@ -958,7 +1011,8 @@
     const rawTickerIsIdentifier = provider === "fidelity" && isLikelyCusip(rawTicker);
     const invalidTicker = Boolean(rawTicker && !rawTickerIsIdentifier && !record.ticker);
     const allowedLocalFidelityIdentifier = provider === "fidelity" && record.localIdentifier && isLikelyFidelityNonStandardSymbol(rawTicker);
-    const suspiciousTicker = Boolean(rawTicker && !rawTickerIsIdentifier && !isSupportedRawTicker(rawTicker) && !allowedLocalFidelityIdentifier);
+    const allowedCashDescriptor = provider === "fidelity" && record.cash && isFidelityCashDescriptor(rawTicker);
+    const suspiciousTicker = Boolean(rawTicker && !rawTickerIsIdentifier && !isSupportedRawTicker(rawTicker) && !allowedLocalFidelityIdentifier && !allowedCashDescriptor);
     const classification = isNonHoldingRow(row, columnMapping, rawTicker) ? "non-holding row" : "needs review";
     if (Number(row.__cellCount || 0) > Number(row.__expectedCellCount || 0) && !row.__repairedOverflow) {
       reject.push("column count mismatch; check unquoted comma values");
@@ -1110,6 +1164,8 @@
   }
 
   function generatedLocalTickerForFidelityRow(lookup, columnMapping = {}, rawTickerValue = "") {
+    if (isFidelityCashDescriptor(rawTickerValue)) return "CASH";
+
     const company = readText(lookup, aliasesFor("company", columnMapping));
     const nonStandardSymbol = isLikelyFidelityNonStandardSymbol(rawTickerValue) ? rawTickerValue : "";
     const source = nonStandardSymbol || company;
@@ -1139,6 +1195,15 @@
       /\b(account total|grand total|subtotal|total account value|total value|positions total|brokeragelink|footer|disclaimer|not fdic insured|prices? delayed|provided by|pending activity|activity pending)\b/i.test(text);
   }
 
+  function isFidelityCashDescriptor(value = "") {
+    return /\bcash\s*(?:&|and)?\s*cash investments\b|\bcash investments\b/i.test(String(value || ""));
+  }
+
+  function usefulText(value = "") {
+    const text = String(value || "").trim();
+    return isBlankNumericPlaceholder(text) ? "" : text;
+  }
+
   function isRepeatedHeaderRow(row = {}) {
     const visible = Object.entries(visibleRowValues(row)).filter(([key]) => !key.startsWith("__"));
     if (visible.length < 2) return false;
@@ -1157,6 +1222,27 @@
       if (values.length <= 3 && /^account$/i.test(values[0] || "") && values[1]) return values[1];
     }
     return "";
+  }
+
+  function fidelityAccountFallbackFromFileName(fileName = "") {
+    const base = String(fileName || "")
+      .split(/[\\/]/)
+      .pop()
+      .replace(/\.[A-Za-z0-9]+$/, "")
+      .trim();
+    if (!base || /^portfolio[-_\s]*positions/i.test(base)) return "";
+
+    const match = base.match(/^(.+?)[-_\s]+positions(?:[-_\s]+\d{4}[-_\s]\d{2}[-_\s]\d{2}.*)?$/i);
+    if (!match?.[1]) return "";
+
+    const label = titleCaseHeader(match[1]).replace(/\s+/g, " ").trim();
+    if (!label || /^portfolio$/i.test(label)) return "";
+    return maskAccountLabel(label);
+  }
+
+  function fidelityAccountFallbackWarnings(accountFallback = "", records = [], columnMapping = {}) {
+    if (!accountFallback || columnMapping.account || !records.some((record) => record.account === accountFallback)) return [];
+    return [`Applied account label "${accountFallback}" from the Fidelity file name because no account column was present.`];
   }
 
   function buildFailedImportResult({ provider, fileName, message }) {
@@ -1330,10 +1416,23 @@
     if (/secret|token|password|apikey|api\/?key|clientsecret|refreshtoken|cookie|authorization/.test(normalizedKey)) {
       return "[redacted]";
     }
-    if (/accountnumber|acctnumber|accountno|accountid|acctid/.test(normalizedKey)) {
+    if (isSensitiveAccountKey(normalizedKey, value)) {
       return maskAccountLabel(value);
     }
     return value;
+  }
+
+  function isSensitiveAccountKey(normalizedKey = "", value = "") {
+    if (/account(?:name)?\/?number|accountnumber|accountno|accountid|accountending|acctnumber|acctno|acctid/.test(normalizedKey)) {
+      return true;
+    }
+    const digits = String(value || "").replace(/\D/g, "");
+    return /account|acct/.test(normalizedKey) && digits.length >= 5;
+  }
+
+  function safeFileName(value = "") {
+    const fileName = String(value || "").split(/[\\/]/).pop();
+    return fileName.replace(/\d{5,}/g, (digits) => `••${digits.slice(-4)}`);
   }
 
   function safeParseErrorMessage(error) {
@@ -1669,7 +1768,7 @@
   }
 
   function isAverageCostBasisColumn(columnName = "") {
-    return /^averagecost(basis)?$|^avgcost$|^costbasispershare$|^costpershare$/.test(normalizeHeader(columnName));
+    return /^averagecost(basis)?(us|usd)?$|^avgcost(us|usd)?$|^costbasispershare(us|usd)?$|^costpershare(us|usd)?$/.test(normalizeHeader(columnName));
   }
 
   function readScore(lookup, aliases) {

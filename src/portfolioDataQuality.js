@@ -4,7 +4,7 @@ export function buildPortfolioDataQualitySummary(analysis = {}, importReport = n
   const dataQuality = analysis.dataQuality || { issues: [], issueCount: 0 };
   const totalValue = Number(overview.totalValue) || 0;
   const cashBalance = Number(overview.cashBalance) || 0;
-  const missingCostBasisCount = holdings.filter((holding) => holding.assetClass !== "Cash" && !Number(holding.costBasis)).length;
+  const missingCostBasisCount = holdings.filter((holding) => isMissingCostBasis(holding)).length;
   const rejectedRows = importReport?.rejectedRows || [];
   const rejectedNonHoldingRows = rejectedRows.filter((row) => row.classification === "non-holding row").length;
   const seriousIssues = (dataQuality.issues || []).filter((issue) =>
@@ -39,6 +39,10 @@ export function buildPortfolioDataQualitySummary(analysis = {}, importReport = n
       ...seriousIssues.slice(0, 5).map((issue) => issue.message)
     ]
   };
+}
+
+function isMissingCostBasis(holding = {}) {
+  return holding.assetClass !== "Cash" && (holding.missingCostBasis || !Number(holding.costBasis));
 }
 
 function qualityStatus(input) {

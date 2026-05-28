@@ -138,6 +138,46 @@ Footer,,,,,,,,,`;
   assert.equal(countHoldingRowsNeedingReview(result.importReport), 0);
 });
 
+test("Fidelity single-account position exports map abbreviated quantity, value, day-change, gain, and cash rows", () => {
+  const result = adapters.buildImportResult({
+    fidelityFileName: "Contributory-Positions-2025-10-02-081120.csv",
+    fidelityCsv: [
+      "Symbol,Description,Qty (Quantity),Mkt Val (Market Value),Day Chng $ (Day Change $),Day Chng % (Day Change %),Cost Basis,Gain $ (Gain/Loss $),Gain % (Gain/Loss %),Ratings,Reinvest?,Reinvest Capital Gains?,% of Acct (% of Account),Div Yld (Dividend Yield),Security Type",
+      'MU,Micron Technology Inc,10,"$1,045.00",$12.50,1.21%,$750.00,$295.00,39.33%,--,No,No,20.00%,--,Stock',
+      'Cash & Cash Investments,--,--,"$7,811.05",$0.00,0%,--,--,--,--,--,--,4.64%,--,Cash and Money Market',
+      'Account Total,--,--,"$8,856.05",$12.50,0.14%,$750.00,$295.00,39.33%,--,--,--,--,--,--'
+    ].join("\n")
+  });
+  const mu = result.records.find((record) => record.ticker === "MU");
+  const cash = result.records.find((record) => record.ticker === "CASH");
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.importReport.health.status, "Imported with skipped non-holding rows");
+  assert.equal(result.importReport.holdingsImported, 2);
+  assert.equal(result.importReport.rejectedRows.length, 1);
+  assert.equal(result.importReport.rejectedRows[0].classification, "non-holding row");
+  assert.equal(countHoldingRowsNeedingReview(result.importReport), 0);
+  assert.equal(result.importReport.columnMapping.shares, "Qty (Quantity)");
+  assert.equal(result.importReport.columnMapping.marketValue, "Mkt Val (Market Value)");
+  assert.equal(result.importReport.columnMapping.dailyChange, "Day Chng $ (Day Change $)");
+  assert.equal(result.importReport.columnMapping.dailyChangePercent, "Day Chng % (Day Change %)");
+  assert.equal(result.importReport.columnMapping.unrealizedGain, "Gain $ (Gain/Loss $)");
+  assert.equal(result.importReport.columnMapping.unrealizedGainPercent, "Gain % (Gain/Loss %)");
+  assert.deepEqual(result.importReport.accountsDetected, ["Contributory"]);
+  assert.equal(mu.account, "Contributory");
+  assert.equal(mu.marketValue, 1045);
+  assert.equal(mu.dailyChange, 12.5);
+  assert.equal(mu.dailyChangePercent, 0.0121);
+  assert.equal(mu.unrealizedGain, 295);
+  assert.equal(Math.round(mu.unrealizedGainPercent * 10000) / 10000, 0.3933);
+  assert.equal(cash.account, "Contributory");
+  assert.equal(cash.cash, true);
+  assert.equal(cash.assetClass, "Cash");
+  assert.equal(cash.marketValue, 7811.05);
+  assert.equal(cash.marketDataEligible, false);
+  assert.match(result.importReport.mappingWarnings.join(" "), /file name/);
+});
+
 test("Fidelity Symbol/CUSIP and date-stamped value headers map cleanly", () => {
   const result = adapters.buildImportResult({
     fidelityFileName: "dated-fidelity-export.csv",
@@ -429,6 +469,56 @@ test("account-number-only imports are masked in holdings and import reports", ()
   assert.equal(rejected.values["API Token"], "[redacted]");
   assert.equal(JSON.stringify(result).includes("987654321"), false);
   assert.equal(JSON.stringify(result).includes("local-placeholder-token"), false);
+});
+
+test("portfolio import diagnostics mask account-name-number columns and account-shaped file names", () => {
+  const result = adapters.buildImportResult({
+    fidelityFileName: "Brokerage-123456789-Positions.csv",
+    fidelityCsv: `Account Name/Number,Symbol,Description,Quantity,Current Value,Cost Basis
+Taxable 123456789,BAD!,Bad ticker,1,100,80
+Taxable 123456789,MU,Micron Technology,10,1000,750`
+  });
+  const visibleReport = JSON.stringify(result.importReport);
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.importReport.fileName, "Brokerage-••6789-Positions.csv");
+  assert.equal(result.importReport.rejectedRows.length, 1);
+  assert.equal(result.importReport.rejectedRows[0].values["Account Name/Number"], "Taxable •••••6789");
+  assert.equal(result.records[0].account, "Taxable •••••6789");
+  assert.equal(visibleReport.includes("123456789"), false);
+});
+
+test("Fidelity rows with missing optional cost basis do not fabricate gain/loss", () => {
+  const result = adapters.buildImportResult({
+    fidelityFileName: "missing-cost-basis.csv",
+    fidelityCsv: `Account Name,Symbol,Description,Quantity,Last Price,Current Value,Cost Basis
+Taxable,MU,Micron Technology,10,$100.00,"$1,000.00",--`
+  });
+  const holding = result.records[0];
+  const normalized = normalizeHoldings(result.records)[0];
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.importReport.health.status, "Success");
+  assert.equal(holding.costBasis, undefined);
+  assert.equal(holding.missingCostBasis, true);
+  assert.equal(holding.unrealizedGain, undefined);
+  assert.equal(normalized.costBasis, undefined);
+  assert.equal(normalized.missingCostBasis, true);
+  assert.equal(normalized.unrealizedGain, undefined);
+});
+
+test("Fidelity average-cost-basis USD headers are treated as per-share cost basis", () => {
+  const result = adapters.buildImportResult({
+    fidelityFileName: "average-cost-basis-usd.csv",
+    fidelityCsv: `Account Name,Symbol,Description,Quantity,Last Price,Current Value,Average Cost Basis USD,Total Gain/Loss Dollar
+Taxable,MU,Micron Technology,10,$100.00,"$1,000.00",$75.00,$250.00`
+  });
+  const mu = result.records[0];
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.importReport.columnMapping.costBasis, "Average Cost Basis USD");
+  assert.equal(mu.costBasis, 750);
+  assert.equal(mu.unrealizedGain, 250);
 });
 
 test("generic brokerage CSV maps common position columns", () => {

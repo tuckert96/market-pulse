@@ -1,5 +1,5 @@
 const SECRET_KEY_PATTERN = /(api[_-]?key|client[_-]?secret|secret|token|refresh[_-]?token|password|cookie|authorization|session|\bitem[_-]?id\b)/i;
-const ACCOUNT_KEY_PATTERN = /(account[_-]?(number|id)|acct[_-]?(number|id)|accountNumber|accountId)$/i;
+const ACCOUNT_KEY_PATTERN = /(account.*(number|id|ending)|acct.*(number|id|ending)|accountNumber|accountId)$/i;
 const SECRET_VALUE_PATTERN = /(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|apikey|password|cookie|authorization|session(?:[_-]?id)?)["':=\s]+[^"',\s]+/gi;
 const CAMEL_SECRET_VALUE_PATTERN = /(accessToken|refreshToken|clientSecret|apiKey)["':=\s]+[^"',\s]+/g;
 const RAW_SECRET_VALUE_PATTERNS = Object.freeze([
@@ -28,8 +28,14 @@ function sanitizeValue(value) {
   return Object.fromEntries(
     Object.entries(value)
       .filter(([key]) => !SECRET_KEY_PATTERN.test(key))
-      .map(([key, item]) => [key, ACCOUNT_KEY_PATTERN.test(key) ? maskAccountValue(item) : sanitizeValue(item)])
+      .map(([key, item]) => [key, shouldMaskAccountValue(key, item) ? maskAccountValue(item) : sanitizeValue(item)])
   );
+}
+
+function shouldMaskAccountValue(key = "", value = "") {
+  if (ACCOUNT_KEY_PATTERN.test(key)) return true;
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return /account|acct/i.test(String(key)) && digits.length >= 5;
 }
 
 function sanitizeStringValue(value) {

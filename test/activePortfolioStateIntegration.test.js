@@ -186,6 +186,57 @@ Fidelity footer row,,,,,,`;
   assert.ok(quality.holdingCount >= 3);
 });
 
+test("legacy single-account Fidelity export becomes the active imported portfolio across derived screens", () => {
+  const csv = [
+    "Symbol,Description,Qty (Quantity),Mkt Val (Market Value),Day Chng $ (Day Change $),Day Chng % (Day Change %),Cost Basis,Gain $ (Gain/Loss $),Gain % (Gain/Loss %),Ratings,Reinvest?,Reinvest Capital Gains?,% of Acct (% of Account),Div Yld (Dividend Yield),Security Type",
+    'MU,Micron Technology Inc,10,"$1,045.00",$12.50,1.21%,$750.00,$295.00,39.33%,--,No,No,20.00%,--,Stock',
+    'NVDA,NVIDIA Corp,2,"$1,900.00",$10.00,0.53%,$1,200.00,$700.00,58.33%,--,No,No,36.00%,--,Stock',
+    'Cash & Cash Investments,--,--,"$7,811.05",$0.00,0%,--,--,--,--,--,--,44.00%,--,Cash and Money Market',
+    'Account Total,--,--,"$10,756.05",$22.50,0.21%,$1,950.00,$995.00,51.03%,--,--,--,--,--,--'
+  ].join("\n");
+  const importResult = adapters.buildImportResult({
+    fidelityCsv: csv,
+    fidelityFileName: "Contributory-Positions-2025-10-02-081120.csv"
+  });
+  const importReport = { ...importResult.importReport, realPortfolioImport: true, importedAt: asOf };
+  const portfolioStatus = buildPortfolioStatus({
+    holdings: importResult.records,
+    latestImportReport: importReport,
+    fidelityStatus: { mode: "csv-imported", fileName: "Contributory-Positions-2025-10-02-081120.csv" },
+    asOf
+  });
+  const workflow = buildWorkflow(importResult.records, portfolioStatus.uiState);
+  const nvdaPage = buildTickerDetailModel(workflow.analysis, {
+    selectedTicker: "NVDA",
+    marketDataSnapshot: workflow.marketDataSnapshot,
+    marketDataStatus: workflow.marketDataStatus,
+    thesisRows: workflow.thesisRows,
+    tickerSignals: workflow.tickerSignals,
+    allWatchlistIdeaRows: workflow.watchlistIdeaRows,
+    allCalendarEvents: workflow.calendarEvents,
+    uiState: portfolioStatus.uiState,
+    asOf
+  });
+  const sourceStatus = portfolioImportSourceStatus(importReport, portfolioStatus);
+
+  assert.equal(importResult.validation.ok, true);
+  assert.equal(importResult.importReport.health.status, "Imported with skipped non-holding rows");
+  assert.equal(portfolioStatus.realPortfolio, true);
+  assert.equal(portfolioStatus.uiState, "IMPORTED_WITH_SKIPPED_ROWS");
+  assert.deepEqual(importResult.importReport.accountsDetected, ["Contributory"]);
+  assert.equal(workflow.analysis.holdings.every((holding) => holding.account === "Contributory"), true);
+  assert.equal(workflow.analysis.overview.totalValue > 10000, true);
+  assert.equal(workflow.dailyBrief.statusLabel, "Imported");
+  assert.ok(workflow.dailyBrief.items.some((item) => item.href === "#/ticker/NVDA" || item.href === "#holdings"));
+  assert.ok(workflow.localAlerts.length > 0);
+  assert.ok(workflow.alphaRecommendations.some((recommendation) => recommendation.ticker === "NVDA" || recommendation.ticker === "MU"));
+  assert.equal(nvdaPage.owned, true);
+  assert.equal(nvdaPage.accounts[0].account, "Contributory");
+  assert.equal(sourceStatus.status, "Imported with 1 skipped non-holding row");
+  assert.equal(sourceStatus.label, "Imported");
+  assert.match(sourceStatus.status, /skipped non-holding row/i);
+});
+
 test("imported JSON portfolio powers the same workflow without stale CSV assumptions", () => {
   const holdingsJson = JSON.stringify([
     { account: "Brokerage", ticker: "AMD", company: "Advanced Micro Devices", shares: 20, price: 150, marketValue: 3000, costBasis: 2200 },

@@ -13,6 +13,7 @@ import {
   marketDataFreshnessLine,
   marketDataSourceAvailability,
   prepareHoldingsForView,
+  portfolioImportDiagnosticsLine,
   portfolioImportSourceStatus,
   providerStatusDisplay,
   renderAffectedExposureSummary,
@@ -150,6 +151,22 @@ test("portfolio import status distinguishes clean, skipped, partial, and failed 
   assert.equal(portfolioImportSourceStatus(null, { uiState: "NO_DATA" }).status, "No portfolio loaded");
   assert.equal(portfolioImportSourceStatus(null, { uiState: "STALE_PERSISTED_REPAIRED" }).status, "Persisted local portfolio loaded");
   assert.equal(portfolioImportSourceStatus(null, { uiState: "STALE_PERSISTED_REPAIRED" }).label, "Imported");
+});
+
+test("portfolio import diagnostics summarize accepted, skipped, review, and duplicate rows", () => {
+  const line = portfolioImportDiagnosticsLine({
+    realPortfolioImport: true,
+    rowsParsed: 12,
+    holdingsImported: 8,
+    rejectedRows: [
+      { classification: "non-holding row" },
+      { classification: "needs review" },
+      { classification: "needs review" }
+    ],
+    duplicateRows: [{ ticker: "MU" }]
+  });
+
+  assert.equal(line, " · 12 rows parsed · 8 accepted · 1 skipped non-holding · 2 need review · 1 duplicate merged");
 });
 
 test("market data badge class respects live, cached, stale, error, and mock status", () => {
