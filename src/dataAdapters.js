@@ -251,6 +251,79 @@
     "strong sell": 1
   };
 
+  const EXPECTED_IMPORT_COLUMNS = {
+    fidelity: [
+      {
+        field: "ticker",
+        label: "Ticker / symbol",
+        examples: ["Symbol", "Ticker", "Symbol/CUSIP"],
+        required: true
+      },
+      {
+        field: "company",
+        label: "Security name",
+        examples: ["Description", "Security Description", "Security Name"],
+        required: false
+      },
+      {
+        field: "account",
+        label: "Account",
+        examples: ["Account Name", "Account", "Registration"],
+        required: false
+      },
+      {
+        field: "shares",
+        label: "Quantity",
+        examples: ["Quantity", "Qty", "Shares"],
+        required: true
+      },
+      {
+        field: "price",
+        label: "Last price",
+        examples: ["Last Price", "Current Price", "Price"],
+        required: false
+      },
+      {
+        field: "marketValue",
+        label: "Market value",
+        examples: ["Current Value", "Market Value", "Mkt Val"],
+        required: true
+      },
+      {
+        field: "costBasis",
+        label: "Cost basis",
+        examples: ["Cost Basis", "Total Cost Basis", "Cost Basis Total"],
+        required: false
+      },
+      {
+        field: "unrealizedGain",
+        label: "Gain / loss",
+        examples: ["Gain/Loss", "Total Gain/Loss Dollar", "Unrealized Gain/Loss"],
+        required: false
+      },
+      {
+        field: "unrealizedGainPercent",
+        label: "Percent gain / loss",
+        examples: ["% Gain/Loss", "Total Gain/Loss Percent"],
+        required: false
+      }
+    ],
+    seekingAlpha: [
+      {
+        field: "ticker",
+        label: "Ticker",
+        examples: ["Ticker", "Symbol"],
+        required: true
+      },
+      {
+        field: "quant",
+        label: "Quant rating / score",
+        examples: ["Quant Rating", "Quant Score"],
+        required: false
+      }
+    ]
+  };
+
   function parseCsv(text, options = {}) {
     if (typeof text !== "string") {
       throw new TypeError("CSV input must be a string.");
@@ -571,6 +644,7 @@
     const repairedOverflowRows = contextualRows.filter((row) => row.__repairedOverflow).length;
     const repairNotes = Array.from(new Set(contextualRows.flatMap((row) => row.__repairNotes || [])));
     const lowConfidence = lowConfidenceFidelityMappingWarnings(headers, provider, columnMapping);
+    const transactionExport = provider === "fidelity" && looksLikeTransactionExport(headers);
 
     contextualRows.forEach((row, index) => {
       const rowNumber = row.__rowNumber || index + 2;
@@ -579,10 +653,15 @@
         accountFallback: options.accountFallback
       });
       const issues = rowImportIssues(row, record, provider, columnMapping);
+      if (transactionExport && issues.classification !== "non-holding row") {
+        issues.reject.unshift("unsupported transaction/activity export; import the Fidelity Positions/Holdings export instead");
+      }
 
-      issues.missing.forEach((field) => {
-        missingRequiredFields.set(field, (missingRequiredFields.get(field) || 0) + 1);
-      });
+      if (issues.classification !== "non-holding row") {
+        issues.missing.forEach((field) => {
+          missingRequiredFields.set(field, (missingRequiredFields.get(field) || 0) + 1);
+        });
+      }
 
       if (issues.reject.length) {
         rejectedRows.push({
@@ -939,10 +1018,14 @@
       rejectedRows: details.rejectedRows,
       duplicateRows: details.duplicateRows || [],
       missingRequiredFields: details.missingRequiredFields,
+      expectedColumns: expectedColumnsForProvider(details.provider),
+      missingColumnHints: missingColumnHints(details.provider, details.columnMapping),
+      recoveryActions: recoveryActionsForImport(details),
       columnMapping: details.columnMapping,
       mappingWarnings: [
         ...mappingWarnings(details.columnMapping),
         ...duplicateAccountMappingWarnings(details.duplicateRows || [], details.columnMapping),
+        ...fileShapeWarnings(details.headers || [], details.provider, details.columnMapping),
         ...(details.repairWarnings || [])
       ],
       totalMarketValue,
@@ -964,6 +1047,9 @@
         rejectedRows: [],
         duplicateRows: [],
         missingRequiredFields: [],
+        expectedColumns: [],
+        missingColumnHints: [],
+        recoveryActions: [],
         columnMapping: {},
         mappingWarnings: [],
         totalMarketValue: 0,
@@ -984,6 +1070,11 @@
       rejectedRows: active.flatMap((report) => report.rejectedRows.map((row) => ({ ...row, provider: report.provider }))),
       duplicateRows: active.flatMap((report) => (report.duplicateRows || []).map((row) => ({ ...row, provider: report.provider }))),
       missingRequiredFields: combineMissingFields(active.flatMap((report) => report.missingRequiredFields)),
+      expectedColumns: active.length === 1
+        ? active[0].expectedColumns || []
+        : Object.fromEntries(active.map((report) => [report.provider, report.expectedColumns || []])),
+      missingColumnHints: active.flatMap((report) => report.missingColumnHints || []),
+      recoveryActions: Array.from(new Set(active.flatMap((report) => report.recoveryActions || []))),
       columnMapping: active.length === 1 ? active[0].columnMapping : Object.fromEntries(active.map((report) => [report.provider, report.columnMapping])),
       mappingWarnings: active.flatMap((report) => report.mappingWarnings || []),
       totalMarketValue: active.reduce((total, report) => total + report.totalMarketValue, 0),
@@ -1015,7 +1106,7 @@
     const suspiciousTicker = Boolean(rawTicker && !rawTickerIsIdentifier && !isSupportedRawTicker(rawTicker) && !allowedLocalFidelityIdentifier && !allowedCashDescriptor);
     const classification = isNonHoldingRow(row, columnMapping, rawTicker) ? "non-holding row" : "needs review";
     if (Number(row.__cellCount || 0) > Number(row.__expectedCellCount || 0) && !row.__repairedOverflow) {
-      reject.push("column count mismatch; check unquoted comma values");
+      reject.push(`column count mismatch; expected ${row.__expectedCellCount || "the header"} cells but found ${row.__cellCount}; check unquoted comma values`);
     }
     if (!record.ticker) {
       missing.push("ticker");
@@ -1245,6 +1336,85 @@
     return [`Applied account label "${accountFallback}" from the Fidelity file name because no account column was present.`];
   }
 
+  function expectedColumnsForProvider(provider) {
+    return (EXPECTED_IMPORT_COLUMNS[provider] || []).map((item) => ({
+      field: item.field,
+      label: item.label,
+      examples: [...item.examples],
+      required: Boolean(item.required)
+    }));
+  }
+
+  function expectedExamples(provider, fields = []) {
+    const expected = EXPECTED_IMPORT_COLUMNS[provider] || [];
+    return expected
+      .filter((item) => fields.includes(item.field))
+      .flatMap((item) => item.examples);
+  }
+
+  function missingColumnHints(provider, columnMapping = {}) {
+    if (provider !== "fidelity") return [];
+    const hints = [];
+    if (!columnMapping.ticker) {
+      hints.push(`Ticker/symbol column not mapped. Expected one of: ${expectedExamples(provider, ["ticker"]).join(", ")}.`);
+    }
+    if (!columnMapping.marketValue && !(columnMapping.shares && columnMapping.price)) {
+      hints.push(`Value columns not mapped. Expected Current Value/Market Value, or both Quantity and Last Price.`);
+    }
+    if (!columnMapping.shares && !columnMapping.marketValue) {
+      hints.push(`Quantity column not mapped. Expected one of: ${expectedExamples(provider, ["shares"]).join(", ")}.`);
+    }
+    return hints;
+  }
+
+  function recoveryActionsForImport(details = {}) {
+    const actions = [];
+    const provider = details.provider;
+    const missingHints = missingColumnHints(provider, details.columnMapping || {});
+    if (missingHints.length) {
+      actions.push("Open Map columns, choose the matching Fidelity export columns, then preview again.");
+    }
+    if (provider === "fidelity" && looksLikeTransactionExport(details.headers || [])) {
+      actions.push("This looks like a Fidelity activity or transaction export. Export Positions/Holdings instead, then import that file.");
+    }
+    if ((details.rejectedRows || []).some((row) => (row.reasons || []).some((reason) => /column count mismatch/i.test(reason)))) {
+      actions.push("If dollar values contain commas, export as CSV with quoted values or paste the table from a spreadsheet so each value stays in one cell.");
+    }
+    if ((details.rejectedRows || []).some((row) => (row.reasons || []).some((reason) => /invalid number format|negative quantity|negative price|negative market value/i.test(reason)))) {
+      actions.push("Fix the flagged row values in the source file, or remove rows that are not current holdings before importing again.");
+    }
+    if (!actions.length && (details.rejectedRows || []).length) {
+      actions.push("Review the flagged rows below, fix the source values, and import again. Accepted rows can still be previewed before applying.");
+    }
+    return Array.from(new Set(actions));
+  }
+
+  function fileShapeWarnings(headers = [], provider, columnMapping = {}) {
+    if (provider !== "fidelity") return [];
+    const warnings = [];
+    if (looksLikeTransactionExport(headers) && !columnMapping.marketValue) {
+      warnings.push("This file looks like a Fidelity activity/transaction export, not a positions export. Import the Positions/Holdings export for current portfolio holdings.");
+    }
+    return warnings;
+  }
+
+  function looksLikeTransactionExport(headers = []) {
+    const normalized = new Set(headers.map(normalizeHeader));
+    const transactionSignals = [
+      "transactiondate",
+      "settlementdate",
+      "action",
+      "transactiontype",
+      "activity",
+      "amount",
+      "commission",
+      "fees"
+    ];
+    const signalCount = transactionSignals.filter((signal) => normalized.has(signal)).length;
+    const hasPositionValue = ["currentvalue", "marketvalue", "mktval", "costbasis", "totalcostbasis"].some((signal) => normalized.has(signal));
+    return signalCount >= 2 && !hasPositionValue;
+  }
+
   function buildFailedImportResult({ provider, fileName, message }) {
     const report = {
       provider,
@@ -1262,6 +1432,9 @@
       }],
       duplicateRows: [],
       missingRequiredFields: [],
+      expectedColumns: expectedColumnsForProvider(provider),
+      missingColumnHints: missingColumnHints(provider, {}),
+      recoveryActions: recoveryActionsForImport({ provider, headers: [], columnMapping: {}, rejectedRows: [] }),
       columnMapping: {},
       mappingWarnings: [],
       totalMarketValue: 0,
@@ -1294,7 +1467,7 @@
       if (!column) return [];
       const raw = readText(lookup, [normalizeHeader(column)]);
       if (!raw || isBlankNumericPlaceholder(raw)) return [];
-      return Number.isFinite(parseNumeric(raw)) ? [] : [`invalid number format in ${field}`];
+      return Number.isFinite(parseNumeric(raw)) ? [] : [`invalid number format in ${field} (${column}: ${raw})`];
     });
   }
 
@@ -1353,15 +1526,23 @@
     const imported = report.holdingsImported || 0;
     const rows = report.rowsParsed || 0;
     const missingTicker = (report.missingRequiredFields || []).some((item) => item.field === "ticker");
+    const expected = shortExpectedColumnList(report.expectedColumns);
 
     if (!rows) {
       return { status: "Failed", tone: "error", message: "Failed: no CSV rows were parsed." };
     }
+    if (!imported && (report.mappingWarnings || []).some((warning) => /activity\/transaction export/i.test(warning))) {
+      return {
+        status: "Failed",
+        tone: "error",
+        message: `Failed: this looks like a Fidelity activity/transaction export, not a positions export. Expected holdings columns include ${expected}.`
+      };
+    }
     if (!imported && (missingTicker || !hasTickerMapping(report.columnMapping))) {
-      return { status: "Needs manual mapping", tone: "error", message: "Needs manual mapping: no importable ticker column was detected." };
+      return { status: "Needs manual mapping", tone: "error", message: `Needs manual mapping: no importable ticker/symbol column was detected. Expected columns include ${expected}.` };
     }
     if (!imported) {
-      return { status: "Failed", tone: "error", message: "Failed: no holdings were imported." };
+      return { status: "Failed", tone: "error", message: `Failed: no holdings were imported. Expected columns include ${expected}.` };
     }
     if (rejected) {
       const nonHoldingRows = (report.rejectedRows || []).filter((row) => row.classification === "non-holding row").length;
@@ -1371,6 +1552,18 @@
       return { status: "Partial success", tone: "warning", message: `Imported ${imported} row${imported === 1 ? "" : "s"}, rejected ${rejected} row${rejected === 1 ? "" : "s"}. Review rejected rows below.` };
     }
     return { status: "Success", tone: "success", message: `Imported ${imported} holding${imported === 1 ? "" : "s"} across ${report.accountsDetected.length || 1} account${report.accountsDetected.length === 1 ? "" : "s"} totaling ${formatReportCurrency(report.totalMarketValue)}.` };
+  }
+
+  function shortExpectedColumnList(expectedColumns = []) {
+    const columns = Array.isArray(expectedColumns)
+      ? expectedColumns
+      : Object.values(expectedColumns || {}).flat();
+    const importantFields = new Set(["ticker", "shares", "price", "marketValue", "costBasis"]);
+    const examples = columns
+      .filter((item) => importantFields.has(item.field))
+      .flatMap((item) => item.examples || [])
+      .slice(0, 8);
+    return examples.length ? examples.join(", ") : "Symbol, Quantity, Last Price, Current Value, Cost Basis";
   }
 
   function hasTickerMapping(mapping = {}) {
