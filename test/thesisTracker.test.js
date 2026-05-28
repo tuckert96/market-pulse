@@ -4,7 +4,7 @@ import { buildAlphaSignals, demoAlphaEvents, demoThesisProfiles } from "../src/a
 import { analyzePortfolio } from "../src/portfolioAnalytics.js";
 import { normalizeHoldings } from "../src/portfolioSchema.js";
 import { buildTargetAllocationPlan, defaultTargetAllocations } from "../src/targetAllocations.js";
-import { buildThesisAlerts, buildThesisRows, normalizeThesisProfile, thesisSummary } from "../src/thesisTracker.js";
+import { buildThesisAlerts, buildThesisRiskSummary, buildThesisRows, normalizeThesisProfile, thesisSummary } from "../src/thesisTracker.js";
 import { tuckerDemoHoldings } from "../src/portfolioDemoData.js";
 
 test("thesis rows aggregate imported holdings by ticker and include target drift", () => {
@@ -53,9 +53,56 @@ test("thesis tracker flags missing, stale, above-target weak, and leveraged guar
   assert.equal(soxl.aboveTargetWithWeakOrStale, true);
   assert.equal(nvda.stale, true);
   assert.ok(summary.needsAttention >= 2);
+  assert.equal(summary.largeWeakThesis >= 1, true);
   assert.ok(alerts.some((alert) => alert.id === "thesis-missing:SOXL"));
   assert.ok(alerts.some((alert) => alert.id === "thesis-leverage-guardrail:SOXL"));
   assert.ok(alerts.every((alert) => !/\bbuy\b|\bsell\b/i.test(`${alert.title} ${alert.detail}`)));
+});
+
+test("thesis risk summary labels deterministic source and exposes review gaps", () => {
+  const row = {
+    ticker: "SOXL",
+    thesisStatus: "Needs review",
+    confidenceLevel: "Low",
+    whyOwned: "",
+    portfolioWeight: 0.12,
+    targetWeight: 0.06,
+    missing: true,
+    stale: true,
+    largeWeakThesis: true,
+    aboveTargetWithWeakOrStale: true,
+    leveragedGuardrailMissing: true,
+    keyRisks: [],
+    invalidationCriteria: [],
+    reviewAction: "Review thesis"
+  };
+  const summary = buildThesisRiskSummary(row);
+
+  assert.equal(summary.sourceLabel, "Local deterministic");
+  assert.equal(summary.status, "Needs review");
+  assert.match(summary.summary, /Own thesis is not documented/);
+  assert.ok(summary.flags.some((flag) => /No thesis documented/i.test(flag)));
+  assert.ok(summary.flags.some((flag) => /Leveraged position/i.test(flag)));
+  assert.deepEqual(summary.keyRisks, ["Not documented"]);
+  assert.deepEqual(summary.invalidationCriteria, ["Not documented"]);
+  assert.equal(/\bbuy\b|\bsell\b/i.test(`${summary.summary} ${summary.flags.join(" ")} ${summary.reviewAction}`), false);
+});
+
+test("large low-confidence holding gets thesis alert even when not above target", () => {
+  const holdings = normalizeHoldings([
+    { ticker: "BIG", account: "Taxable", marketValue: 10000, assetClass: "Equity", thesis: "Needs work" },
+    { ticker: "CASH", account: "Taxable", marketValue: 10000, assetClass: "Cash" }
+  ]);
+  const analysis = analyzePortfolio(holdings);
+  const rows = buildThesisRows(analysis.holdings, {
+    BIG: { whyOwned: "Needs work", confidenceLevel: "Low", lastReviewedDate: "2026-05-20" }
+  }, { asOf: "2026-05-23", totalValue: analysis.overview.totalValue, largeHoldingThreshold: 0.05 });
+  const big = rows.find((row) => row.ticker === "BIG");
+  const alerts = buildThesisAlerts(rows);
+
+  assert.equal(big.largeWeakThesis, true);
+  assert.equal(big.aboveTargetWithWeakOrStale, false);
+  assert.ok(alerts.some((alert) => alert.id === "thesis-large-weak:BIG"));
 });
 
 test("Alpha signals support, weaken, and break thesis rows", () => {

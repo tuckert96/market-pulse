@@ -17,7 +17,9 @@ test("local API config reports only credential presence", () => {
     REDDIT_CLIENT_SECRET: "reddit-secret",
     REDDIT_USER_AGENT: "market-pulse-test",
     REDDIT_REFRESH_TOKEN: "reddit-refresh",
-    X_BEARER_TOKEN: "x-bearer-secret"
+    X_BEARER_TOKEN: "x-bearer-secret",
+    OPENAI_API_KEY: "openai-secret",
+    OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED: "true"
   });
 
   assert.equal(status.exposesSecretValues, false);
@@ -42,6 +44,8 @@ test("local API config reports only credential presence", () => {
   assert.equal(status.xProviderConfig.status, "configured-not-connected");
   assert.equal(status.xProviderConfig.liveProviderCalls, false);
   assert.equal(status.xProviderStatuses.xApi.configured, true);
+  assert.equal(status.aiProviders.openai.configured, true);
+  assert.equal(status.aiProviders.openai.liveProviderCalls, true);
   assert.equal(status.politicianTradeProviderConfig.status, "mock/sample mode");
   assert.equal(status.politicianTradeProviderStatuses.senateStockWatcher.configured, false);
   assert.equal(JSON.stringify(status).includes("finnhub-secret"), false);
@@ -49,6 +53,7 @@ test("local API config reports only credential presence", () => {
   assert.equal(JSON.stringify(status).includes("reddit-secret"), false);
   assert.equal(JSON.stringify(status).includes("reddit-refresh"), false);
   assert.equal(JSON.stringify(status).includes("x-bearer-secret"), false);
+  assert.equal(JSON.stringify(status).includes("openai-secret"), false);
 });
 
 test("local API config keeps missing market data credentials safely not connected", () => {
@@ -70,6 +75,8 @@ test("local API config keeps missing market data credentials safely not connecte
   assert.equal(status.xProviderConfig.status, "not configured");
   assert.equal(status.xProviderConfig.liveProviderCalls, false);
   assert.deepEqual(status.xProviderConfig.missingEnv, ["X_BEARER_TOKEN"]);
+  assert.equal(status.aiProviders.openai.status, "not configured");
+  assert.equal(status.aiProviders.openai.liveProviderCalls, false);
   assert.equal(status.politicianTradeProviderConfig.liveProviderCalls, false);
   assert.equal(status.politicianTradeProviderStatuses.senateStockWatcher.liveProviderCalls, false);
 });
@@ -84,6 +91,7 @@ test("local API config treats whitespace credentials as missing", () => {
     REDDIT_CLIENT_SECRET: " ",
     REDDIT_USER_AGENT: " ",
     X_BEARER_TOKEN: " ",
+    OPENAI_API_KEY: " ",
     POLITICIAN_TRADES_PROVIDER: "senate-stock-watcher",
     POLITICIAN_TRADES_LIVE_ENABLED: "true",
     POLITICIAN_TRADES_SOURCE_URL: " "
@@ -95,6 +103,7 @@ test("local API config treats whitespace credentials as missing", () => {
   assert.equal(status.marketDataConfig.status, "not configured");
   assert.equal(status.redditProviderConfig.status, "not configured");
   assert.equal(status.xProviderConfig.status, "not configured");
+  assert.equal(status.aiProviders.openai.status, "not configured");
   assert.equal(status.politicianTradeProviderConfig.configured, true);
   assert.equal(status.politicianTradeProviderConfig.usesDefaultSourceUrl, true);
   assert.deepEqual(status.politicianTradeProviderConfig.missingEnv, []);
@@ -108,7 +117,8 @@ test("local API config treats placeholder credentials as missing", () => {
     REDDIT_CLIENT_ID: "your_reddit_client_id_here",
     REDDIT_CLIENT_SECRET: "client_secret_here",
     REDDIT_USER_AGENT: "change_me",
-    X_BEARER_TOKEN: "your_x_bearer_token_here"
+    X_BEARER_TOKEN: "your_x_bearer_token_here",
+    OPENAI_API_KEY: "your_openai_api_key_here"
   });
 
   assert.equal(status.marketData.finnhub, false);
@@ -116,6 +126,127 @@ test("local API config treats placeholder credentials as missing", () => {
   assert.equal(status.marketDataConfig.status, "not configured");
   assert.equal(status.redditProviderConfig.status, "not configured");
   assert.equal(status.xProviderConfig.status, "not configured");
+  assert.equal(status.aiProviders.openai.status, "not configured");
+});
+
+test("portfolio explanation endpoint returns deterministic fallback when OpenAI is missing", async () => {
+  let fetchCalls = 0;
+  const result = await apiResponse(
+    "POST",
+    "/api/portfolio/explanation",
+    new URLSearchParams(),
+    {
+      overview: { totalValue: 100000 },
+      holdings: [{ ticker: "MU", accountNumber: "123456789", account: "Brokerage 123456789", marketValue: 20000, portfolioWeight: 0.2 }],
+      marketDataStatus: { status: "not configured" },
+      alerts: [{ title: "MU needs review", detail: "Position size" }]
+    },
+    {},
+    {
+      fetchImpl() {
+        fetchCalls += 1;
+        throw new Error("OpenAI should not be called without config");
+      }
+    }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(fetchCalls, 0);
+  assert.equal(result.payload.fallbackUsed, true);
+  assert.equal(result.payload.openai.status, "not configured");
+  assert.match(result.payload.explanation.summary, /local explanation/i);
+  const text = JSON.stringify(result.payload);
+  assert.equal(text.includes("123456789"), false);
+});
+
+test("portfolio explanation endpoint does not call OpenAI when disabled", async () => {
+  let fetchCalls = 0;
+  const result = await apiResponse(
+    "POST",
+    "/api/portfolio/explanation",
+    new URLSearchParams(),
+    { holdings: [{ ticker: "NVDA", marketValue: 5000, portfolioWeight: 0.05 }] },
+    { OPENAI_API_KEY: "openai-secret", OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED: "false" },
+    {
+      fetchImpl() {
+        fetchCalls += 1;
+        throw new Error("disabled OpenAI should not fetch");
+      }
+    }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(fetchCalls, 0);
+  assert.equal(result.payload.openai.status, "configured-not-connected");
+  assert.equal(result.payload.fallbackUsed, true);
+  assert.equal(JSON.stringify(result.payload).includes("openai-secret"), false);
+});
+
+test("portfolio explanation endpoint returns mocked OpenAI response without exposing secrets", async () => {
+  const calls = [];
+  const result = await apiResponse(
+    "POST",
+    "/api/portfolio/explanation",
+    new URLSearchParams(),
+    {
+      overview: { totalValue: 100000 },
+      holdings: [{ ticker: "MU", accountId: "acct-secret-id-123456789", account: "Brokerage 123456789", marketValue: 20000, portfolioWeight: 0.2 }],
+      sourceStatuses: { portfolio: "Imported", marketData: "Live" },
+      marketDataStatus: { status: "connected", label: "Live market data" }
+    },
+    {
+      OPENAI_API_KEY: "openai-secret-value",
+      OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED: "true",
+      OPENAI_PORTFOLIO_MODEL: "gpt-test"
+    },
+    {
+      fetchImpl: async (url, options = {}) => {
+        calls.push({ url: String(url), options });
+        assert.equal(String(url), "https://api.openai.com/v1/responses");
+        assert.equal(options.headers.Authorization, "Bearer openai-secret-value");
+        const body = JSON.parse(options.body);
+        assert.equal(body.model, "gpt-test");
+        assert.equal(body.store, false);
+        assert.equal(JSON.stringify(body).includes("acct-secret-id"), false);
+        assert.equal(JSON.stringify(body).includes("123456789"), false);
+        return mockResponse({ output_text: "Portfolio is concentrated in MU. Review concentration and source freshness before changing position size." });
+      }
+    }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(result.payload.fallbackUsed, false);
+  assert.equal(result.payload.provider, "openai");
+  assert.equal(result.payload.model, "gpt-test");
+  assert.match(result.payload.explanation.narrative, /Portfolio is concentrated/);
+  const text = JSON.stringify(result.payload);
+  assert.equal(text.includes("openai-secret-value"), false);
+  assert.equal(text.includes("acct-secret-id"), false);
+  assert.equal(text.includes("123456789"), false);
+});
+
+test("portfolio explanation endpoint falls back and redacts provider errors", async () => {
+  const result = await apiResponse(
+    "POST",
+    "/api/portfolio/explanation",
+    new URLSearchParams(),
+    { holdings: [{ ticker: "MU", marketValue: 20000, portfolioWeight: 0.2 }] },
+    {
+      OPENAI_API_KEY: "openai-secret-value",
+      OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED: "true"
+    },
+    {
+      fetchImpl: async () => mockResponse({ error: { message: "rate limited Bearer openai-secret-value token=another-secret" } }, 429)
+    }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.fallbackUsed, true);
+  assert.equal(result.payload.status, "error");
+  assert.equal(JSON.stringify(result.payload).includes("openai-secret-value"), false);
+  assert.equal(JSON.stringify(result.payload).includes("another-secret"), false);
+  assert.match(result.payload.lastError, /\[redacted\]/);
 });
 
 test("local API blocks cross-site requests before provider work", async () => {

@@ -6,6 +6,7 @@ import { normalizeTicker } from "./portfolioSchema.js";
 import { countHoldingRowsNeedingReview, isRealPortfolioUiState } from "./portfolioState.js";
 import { summarizeRedditMentions } from "./redditSignals.js";
 import { buildTechnicalAnalysisSnapshot } from "./technicalAnalysis.js";
+import { buildThesisRiskSummary } from "./thesisTracker.js";
 import { buildTickerResearchLens } from "./tickerResearch.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
 
@@ -3197,6 +3198,10 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     confidenceLevel: thesisRow?.confidenceLevel || watchlistIdea?.conviction || firstHolding.confidenceLevel || "Unrated",
     marketDataStatus: options.marketDataStatus || options.marketDataSnapshot?.status || {}
   };
+  model.thesisRiskSummary = buildThesisRiskSummary(thesisRow || {}, {
+    holding: firstHolding,
+    sourceMode: options.thesisSummarySourceMode || "local deterministic"
+  });
   model.researchLens = buildTickerResearchLens({
     ...firstHolding,
     ticker,
@@ -3854,12 +3859,13 @@ function renderTickerTechnicalAnalysis(model) {
 }
 
 function renderTickerThesisSummaryCard(model) {
+  const summary = model.thesisRiskSummary || buildThesisRiskSummary(model.thesisRow || {}, { holding: model.holdings?.[0] || {} });
   return `
     <article class="ticker-note-card">
-      <span>Thesis / risk</span>
+      <span>Thesis / risk · ${escapeHtml(summary.sourceLabel || "Local deterministic")}</span>
       <b>${escapeHtml(model.thesisStatus)} · ${escapeHtml(model.confidenceLevel)}</b>
-      <p>${escapeHtml(model.thesisRow?.whyOwned || model.holdings[0]?.thesis || "No thesis note documented yet.")}</p>
-      <small>${escapeHtml(model.thesisRow?.nextReviewTrigger || model.thesisRow?.reviewAction || "Open Thesis to add review triggers and invalidation criteria.")}</small>
+      <p>${escapeHtml(summary.summary || model.thesisRow?.whyOwned || model.holdings[0]?.thesis || "No thesis note documented yet.")}</p>
+      <small>${escapeHtml(summary.flags?.[0] || summary.nextReview || "Open Thesis to add review triggers and invalidation criteria.")}</small>
       <a class="button-link" href="#thesis">Open Thesis</a>
     </article>
   `;
@@ -4038,6 +4044,7 @@ function renderTickerPoliticianActivity(model) {
 
 function renderTickerThesisRisk(model) {
   const row = model.thesisRow;
+  const summary = model.thesisRiskSummary || buildThesisRiskSummary(row || {}, { holding: model.holdings?.[0] || {} });
   const list = (items = [], fallback = "Not documented") => {
     const values = Array.isArray(items) ? items.filter(Boolean) : String(items || "").split(/\n|;/).map((item) => item.trim()).filter(Boolean);
     return values.length ? `<ul class="why-list">${values.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="section-note">${escapeHtml(fallback)}</p>`;
@@ -4053,18 +4060,31 @@ function renderTickerThesisRisk(model) {
             <div><span>Last reviewed</span><b>${escapeHtml(row.lastReviewedDate || "Not set")}</b></div>
             <div><span>Target weight</span><b>${Number.isFinite(Number(row.targetWeight)) ? formatPct(Number(row.targetWeight)) : "--"}</b></div>
           </div>
-          <p>${escapeHtml(row.whyOwned || "No thesis note documented yet.")}</p>
+          <div class="provider-status-note">
+            <b>${escapeHtml(summary.sourceLabel || "Local deterministic")} thesis/risk summary</b>
+            <span>${escapeHtml(summary.summary || "No thesis note documented yet.")}</span>
+          </div>
+          <div class="mini-list">
+            ${summary.flags.slice(0, 4).map((flag) => `<div><span>Review flag</span><b>${escapeHtml(flag)}</b><small>${escapeHtml(summary.reviewAction || "Review thesis")}</small></div>`).join("")}
+          </div>
           <details class="signal-details">
             <summary>Thesis details</summary>
             <h3>Bullish assumptions</h3>
             ${list(row.bullishAssumptions)}
             <h3>Key risks</h3>
-            ${list(row.keyRisks)}
+            ${list(summary.keyRisks || row.keyRisks)}
             <h3>Invalidation criteria</h3>
-            ${list(row.invalidationCriteria || row.thesisBreakingConditions)}
+            ${list(summary.invalidationCriteria || row.invalidationCriteria || row.thesisBreakingConditions)}
+            <h3>What would make Tucker add</h3>
+            ${list(summary.addConditions || row.addConditions)}
+            <h3>What would make Tucker trim</h3>
+            ${list(summary.trimConditions || row.trimConditions)}
+            <h3>What would make Tucker exit/review</h3>
+            ${list(summary.exitReviewConditions || row.exitReviewConditions)}
             <h3>Review triggers</h3>
             ${list([row.nextReviewTrigger, row.whatWouldMakeMeTrim, row.whatWouldMakeMeExitReview].filter(Boolean), "No review triggers documented.")}
             ${row.notes ? `<h3>Notes</h3><p>${escapeHtml(row.notes)}</p>` : ""}
+            <p class="section-note">${escapeHtml(summary.caveat || "Local deterministic summary; no AI text was generated.")}</p>
           </details>
         ` : '<div class="empty"><strong>No thesis profile yet.</strong><span>Open Thesis to document why Tucker owns or tracks this ticker, invalidation criteria, and review triggers.</span><a class="button-link" href="#thesis">Open Thesis</a></div>'}
       </div>
@@ -5449,6 +5469,19 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: fidelityImported ? dataModeLabel(DATA_MODES.IMPORTED) : plaidLinked ? dataModeLabel(DATA_MODES.LIVE) : plaidCachedSync ? dataModeLabel(DATA_MODES.CACHED) : /demo/i.test(String(fidelityStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : plaidConfigured ? "Configured" : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
       guidance: fidelityImported ? "CSV import is active; no direct Fidelity credentials are stored." : plaidLinked ? "Plaid investment holdings are available through the local backend. Access tokens never enter browser code." : plaidCachedSync ? "Reconnect or sync Plaid before relying on brokerage-linked freshness." : plaidConfigured ? "Open Plaid Link from Imports to authorize Fidelity. The dashboard does not collect Fidelity usernames or passwords." : "Use CSV import, or add Plaid credentials to .env for tokenized account linking.",
       className: fidelityImported ? "imported-local" : plaidLinked ? "configured" : plaidCachedSync ? "configured-pending" : undefined
+    },
+    {
+      label: "OpenAI explanations",
+      status: readiness.aiProviders?.openai?.configured ? "Configured" : "Not configured",
+      detail: readiness.aiProviders?.openai?.detail || "Optional AI-assisted explanations are off. Local deterministic summaries remain available.",
+      configured: Boolean(readiness.aiProviders?.openai?.configured),
+      configuredPending: false,
+      demoReady: !readiness.aiProviders?.openai?.configured,
+      availabilityLabel: readiness.aiProviders?.openai?.configured ? "Configured" : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
+      guidance: readiness.aiProviders?.openai?.configured
+        ? "API calls stay server-side through the local backend. Explanations must remain grounded in dashboard data."
+        : "Add OPENAI_API_KEY to local .env only if Tucker wants AI-assisted explanations. Never commit the key.",
+      className: readiness.aiProviders?.openai?.configured ? "configured" : "missing"
     }
   ];
   target.innerHTML = rows.map((row) => `
