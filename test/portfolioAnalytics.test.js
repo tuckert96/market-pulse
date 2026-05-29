@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { analyzePortfolio, buildDecisionRiskDashboard, riskStatusForWeight } from "../src/portfolioAnalytics.js";
+import {
+  POSITION_CONCENTRATION_THRESHOLDS,
+  analyzePortfolio,
+  buildDecisionRiskDashboard,
+  concentrationThresholdFlags,
+  riskStatusForWeight
+} from "../src/portfolioAnalytics.js";
 import { tuckerDemoHoldings } from "../src/portfolioDemoData.js";
 
 test("portfolio overview includes value, risk, alerts, and breakdowns", () => {
@@ -42,12 +48,22 @@ test("risk status thresholds classify portfolio weights", () => {
   assert.equal(riskStatusForWeight(0.21), "extreme");
 });
 
+test("position concentration threshold flags are deterministic", () => {
+  assert.deepEqual(concentrationThresholdFlags(0.049).map((row) => row.label), []);
+  assert.deepEqual(concentrationThresholdFlags(0.05).map((row) => row.label), ["Above 5%"]);
+  assert.deepEqual(concentrationThresholdFlags(0.1).map((row) => row.label), ["Above 5%", "Above 10%"]);
+  assert.deepEqual(concentrationThresholdFlags(0.2).map((row) => row.label), ["Above 5%", "Above 10%", "Above 20%"]);
+  assert.deepEqual(concentrationThresholdFlags(0.3).map((row) => row.label), ["Above 5%", "Above 10%", "Above 20%", "Above 30%"]);
+  assert.equal(POSITION_CONCENTRATION_THRESHOLDS[POSITION_CONCENTRATION_THRESHOLDS.length - 1].interpretation, "single-position outcome risk");
+});
+
 test("decision risk dashboard includes decision-grade sections and explanations", () => {
   const analysis = analyzePortfolio(tuckerDemoHoldings());
   const dashboard = analysis.risk.decisionDashboard;
 
   assert.ok(dashboard.topPositionWeights.length > 0);
   assert.ok(dashboard.topPositionWeights.every((row) => row.status && row.statusLabel && row.explanation));
+  assert.ok(dashboard.topPositionWeights.every((row) => row.thresholdLabel && row.securityType));
   assert.ok(dashboard.sectorConcentration.every((row) => row.name !== "Cash"));
   assert.ok(dashboard.accountConcentration.length > 0);
   assert.ok(dashboard.themeExposure.some((row) => row.name === "AI / semiconductor" && row.tickers.includes("MU")));
@@ -56,10 +72,41 @@ test("decision risk dashboard includes decision-grade sections and explanations"
   assert.ok(dashboard.leveragedEtfExposure.notionalValue > dashboard.leveragedEtfExposure.directValue);
   assert.ok(["normal", "elevated", "high", "extreme"].includes(dashboard.leveragedEtfExposure.status));
   assert.ok(dashboard.assetMix.individualStock.explanation.includes("Individual stocks"));
+  assert.ok(dashboard.assetMix.normalEtf.explanation.includes("separate from leveraged ETFs"));
+  assert.ok(dashboard.assetMix.leveragedEtf.explanation.includes("daily reset leverage"));
+  assert.ok(dashboard.securityTypeExposure.some((row) => row.name === "Single stocks"));
+  assert.ok(dashboard.securityTypeExposure.some((row) => row.name === "Normal ETFs / funds"));
+  assert.ok(dashboard.securityTypeExposure.some((row) => row.name === "Leveraged ETFs"));
+  assert.ok(dashboard.concentrationInterpretation.summary.includes("deterministic local read"));
+  assert.ok(dashboard.concentrationInterpretation.summary.includes("not an OpenAI-generated recommendation"));
+  assert.ok(dashboard.concentrationInterpretation.drivers.some((driver) => driver.includes("Top 5 holdings")));
   assert.ok(dashboard.cashExposure.explanation.includes("not downside risk"));
   assert.equal(dashboard.correlationRisk.label, "Correlation and overlap");
   assert.ok(Array.isArray(dashboard.correlationRisk.groups));
   assert.equal(dashboard.correlationPlaceholder, dashboard.correlationRisk);
+});
+
+test("decision risk dashboard separates stock, normal ETF, leveraged ETF, and cash exposure", () => {
+  const dashboard = buildDecisionRiskDashboard([
+    { ticker: "MU", name: "Micron Technology", account: "Taxable", marketValue: 30000, assetClass: "Equity", sector: "Semiconductors" },
+    { ticker: "NVDA", name: "Nvidia", account: "Taxable", marketValue: 10000, assetClass: "Equity", sector: "Semiconductors" },
+    { ticker: "QQQ", name: "Invesco QQQ Trust ETF", account: "Taxable", marketValue: 15000, assetClass: "ETF", sector: "Technology" },
+    { ticker: "UPRO", name: "ProShares UltraPro S&P500", account: "Taxable", marketValue: 5000, assetClass: "ETF", sector: "Leveraged growth", isLeveragedEtf: true, leveragedMultiple: 3 },
+    { ticker: "SPAXX", name: "Fidelity Government Money Market", account: "Taxable", marketValue: 40000, assetClass: "Cash", sector: "Cash", strategySleeve: "Cash" }
+  ], 100000);
+
+  assert.equal(dashboard.topPositionWeights[0].name, "MU");
+  assert.equal(dashboard.topPositionWeights[0].thresholdLabel, "Above 30%");
+  assert.equal(dashboard.topPositionWeights[0].securityType, "Single stocks");
+  assert.equal(dashboard.topPositionWeights.some((row) => row.name === "SPAXX"), false);
+  assert.equal(dashboard.assetMix.individualStock.weight, 0.4);
+  assert.equal(dashboard.assetMix.normalEtf.weight, 0.15);
+  assert.equal(dashboard.assetMix.leveragedEtf.weight, 0.05);
+  assert.equal(dashboard.cashExposure.weight, 0.4);
+  assert.equal(dashboard.leveragedEtfExposure.notionalWeight, 0.15);
+  assert.ok(dashboard.securityTypeExposure.some((row) => row.name === "Cash / money market" && row.weight === 0.4));
+  assert.ok(dashboard.concentrationInterpretation.drivers.some((driver) => driver.includes("MU is the largest position at 30%")));
+  assert.ok(dashboard.concentrationInterpretation.drivers.some((driver) => driver.includes("Leveraged ETFs are 5% direct and 15% estimated notional exposure.")));
 });
 
 test("decision risk dashboard calculates measured correlations when history exists", () => {
