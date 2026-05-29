@@ -904,9 +904,11 @@ assert(eventCalendarSummary.next7 >= 1, "event calendar summary should count nea
 assert(eventCalendarImport.eventsImported === 1 && eventCalendarImport.records[0].sourceMode === "imported", "calendar CSV import should normalize imported event rows");
 assert(indexHtml.includes('id="watchlistIdeasPanel"'), "Watchlist route should include idea rows panel");
 assert(indexHtml.includes('id="watchlistSummaryPanel"'), "Watchlist route should include summary panel");
+assert(indexHtml.includes('id="watchlistQuickTicker"') && indexHtml.includes('id="quickAddWatchlistBtn"'), "Watchlist route should expose a quick add ticker flow");
 assert(indexHtml.includes('id="watchlistStatusFilter"') && indexHtml.includes('id="watchlistSourceFilter"'), "Watchlist route should include status and source filters");
 assert(routerJs.includes('watchlist: { title: "Watchlist"'), "router should expose Watchlist route metadata");
 assert(appJs.includes("growthDashboardWatchlistIdeas"), "app should persist watchlist ideas locally");
+assert(appJs.includes("quickAddWatchlistIdea"), "app should support simple user-managed watchlist add flow");
 assert(appJs.includes("promoteTickerSignalToIdea"), "app should let ticker signals promote into the idea pipeline");
 assert(indexHtml.includes('class="overview-digest-grid command-brief-grid overview-priority-grid"'), "Overview should use a compact command brief grid");
 assert(indexHtml.includes("Portfolio Value & Daily Move"), "Overview should lead with portfolio value and daily move");
@@ -1240,6 +1242,7 @@ assert(portfolioViewJs.includes("Data refresh"), "Settings should include data r
 assert(portfolioViewJs.includes("Risk thresholds"), "Settings should include risk threshold configuration placeholder");
 assert(portfolioViewJs.includes("Watchlist preferences"), "Settings should include watchlist preference placeholder");
 assert(portfolioViewJs.includes("renderWatchlistIdeas"), "Portfolio view should render Watchlist / Ideas workflow");
+assert(portfolioViewJs.includes("<span>Quote</span>"), "Watchlist cards should show quote context when available");
 assert(portfolioViewJs.includes('data-watchlist-action="promote-signal"'), "Signal cards should expose Track idea promotion controls");
 assert(watchlistIdeaRows.some((row) => row.status === "owned" && row.owned), "watchlist rows should derive owned status from holdings");
 assert(filterWatchlistIdeaRows(watchlistIdeaRows, { status: "candidate" }).every((row) => row.status === "candidate"), "watchlist status filter should work");

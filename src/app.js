@@ -2333,6 +2333,32 @@ function saveWatchlistIdeaFromEditor() {
   render();
 }
 
+function quickAddWatchlistIdea() {
+  const ticker = normalizeTicker($("watchlistQuickTicker")?.value || "");
+  if (!ticker) {
+    showWatchlistStatus("Enter a valid ticker to add it to the watchlist.", "error");
+    return;
+  }
+  const status = $("watchlistQuickStatus")?.value || "watching";
+  const existing = state.watchlistIdeas.find((row) => normalizeTicker(row.ticker) === ticker);
+  const record = normalizeWatchlistIdea({
+    ...(existing || {}),
+    ticker,
+    status,
+    thesis: existing?.thesis || "Added from the quick watchlist flow. Add a thesis before treating this as a candidate.",
+    sourceOfIdea: existing?.sourceOfIdea || "Manual watchlist",
+    dateAdded: existing?.dateAdded || today(),
+    updatedAt: new Date().toISOString()
+  });
+  state.watchlistIdeas = upsertWatchlistIdea(state.watchlistIdeas, record);
+  saveWatchlistIdeas();
+  setInputValue("watchlistQuickTicker", "");
+  fillWatchlistEditor(record);
+  showWatchlistStatus(`${ticker} saved to the local watchlist. Portfolio holdings were not changed.`, "success");
+  window.location.hash = "#watchlist";
+  render();
+}
+
 function deleteWatchlistIdeaFromEditor() {
   const ticker = normalizeTicker($("watchlistTicker")?.value || "");
   if (!ticker) {
@@ -3584,6 +3610,10 @@ function wireEvents() {
   $("marketDataLiveModeInterval")?.addEventListener("change", (event) => setMarketDataLiveModeInterval(event.target.value));
   $("saveAlertThresholdsBtn").addEventListener("click", saveAlertThresholdsFromUi);
   $("resetAlertThresholdsBtn").addEventListener("click", resetAlertThresholds);
+  $("quickAddWatchlistBtn")?.addEventListener("click", quickAddWatchlistIdea);
+  $("watchlistQuickTicker")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") quickAddWatchlistIdea();
+  });
   $("saveWatchlistIdeaBtn")?.addEventListener("click", saveWatchlistIdeaFromEditor);
   $("clearWatchlistIdeaBtn")?.addEventListener("click", clearWatchlistEditor);
   $("deleteWatchlistIdeaBtn")?.addEventListener("click", deleteWatchlistIdeaFromEditor);

@@ -293,6 +293,8 @@ function enrichIdeaRow(idea, { holding, thesisRow, quote, tickerSignal, saved = 
     portfolioWeight,
     quotePrice: quote?.price || null,
     dailyChangePercent: quote?.dailyChangePercent || holding?.dailyChangePercent || 0,
+    quoteStatus: quote?.status || quote?.sourceStatus || quote?.providerStatus || "",
+    quoteSourceLabel: quote?.sourceLabel || quote?.provider || quote?.source || "",
     thesisStatus: thesisRow?.thesisStatus || holding?.thesisStatus || "",
     linkedThesis: Boolean(thesisRow),
     signalScore: Number(tickerSignal?.combinedScore || 0),

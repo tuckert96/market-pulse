@@ -2640,6 +2640,7 @@ function renderWatchlistIdeaCard(row = {}) {
       </div>
       <div class="ticker-mini-metrics">
         <div><span>Exposure</span><b>${row.owned ? formatCurrency(row.marketValue) : "Not owned"}</b><small>${row.owned ? formatPct(row.portfolioWeight) : "Watchlist only"}</small></div>
+        <div><span>Quote</span><b>${row.quotePrice ? formatCurrency(row.quotePrice) : "Not available"}</b><small>${row.quotePrice ? `${formatSignedPct(row.dailyChangePercent || 0)} today${row.quoteSourceLabel ? ` · ${escapeHtml(row.quoteSourceLabel)}` : ""}` : "Refresh market data to fill"}</small></div>
         <div><span>Signal score</span><b>${row.signalScore ? `${Math.round(row.signalScore)}/100` : "--"}</b><small>${escapeHtml(row.signalAction || "No current signal")}</small></div>
         <div><span>Source</span><b>${escapeHtml(watchlistSourceLabel(row.signalSource))}</b><small>${escapeHtml(row.sourceOfIdea || "Manual")}</small></div>
         <div><span>Review</span><b>${escapeHtml(row.reviewState || "needs review")}</b><small>${escapeHtml(row.lastReviewed || "Not reviewed")}</small></div>
