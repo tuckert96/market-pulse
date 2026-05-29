@@ -1352,6 +1352,14 @@ function skippedNonHoldingRows(report = {}) {
   return (report.rejectedRows || []).filter((row) => row.classification === "non-holding row");
 }
 
+function flattenExpectedColumns(expectedColumns = []) {
+  if (Array.isArray(expectedColumns)) return expectedColumns;
+  if (expectedColumns && typeof expectedColumns === "object") {
+    return Object.values(expectedColumns).flat().filter(Boolean);
+  }
+  return [];
+}
+
 function renderImportDebugPanel(result, options = {}) {
   const target = $("importDebugPanel");
   if (!target) return;
@@ -1418,6 +1426,32 @@ function renderImportDebugPanel(result, options = {}) {
   const duplicates = (report.duplicateRows || [])
     .map((row) => `<li>${escapeHtml(row.ticker || "Unknown")} in ${escapeHtml(row.account || "Unassigned")} merged from row${(row.rowNumbers || []).length === 1 ? "" : "s"} ${escapeHtml((row.rowNumbers || []).join(", ") || "unknown")}.</li>`)
     .join("");
+  const expectedColumns = flattenExpectedColumns(report.expectedColumns)
+    .filter((item) => item.required)
+    .map((item) => `<li>${escapeHtml(item.label)}: ${escapeHtml((item.examples || []).join(", "))}</li>`)
+    .join("");
+  const missingHints = (report.missingColumnHints || [])
+    .map((hint) => `<li>${escapeHtml(hint)}</li>`)
+    .join("");
+  const recoveryActions = (report.recoveryActions || [])
+    .map((action) => `<li>${escapeHtml(action)}</li>`)
+    .join("");
+  const visibleReviewRows = reviewRows.slice(0, 3)
+    .map((row) => `<li>Row ${escapeHtml(row.rowNumber)}: ${escapeHtml((row.reasons || []).join(", "))}</li>`)
+    .join("");
+  const troubleshooting = (friendly?.tone === "error" || holdingRowsNeedingReview > 0 || missingHints || recoveryActions)
+    ? `
+      <div class="import-preview-card" role="${friendly?.tone === "error" ? "alert" : "region"}" aria-label="CSV import troubleshooting">
+        <div>
+          <b>${friendly?.tone === "error" ? "Import needs a fix" : "Rows need review before they can be imported"}</b>
+          <span>${missingHints ? "The parser could not confidently map every required Fidelity holdings column." : "Accepted holdings are safe to preview/apply; the rows below were left out for review."}</span>
+        </div>
+        ${visibleReviewRows ? `<p><b>First rows needing review</b></p><ul>${visibleReviewRows}</ul>` : ""}
+        ${missingHints ? `<p><b>Columns to check</b></p><ul>${missingHints}</ul>` : ""}
+        ${recoveryActions ? `<p><b>What to try next</b></p><ul>${recoveryActions}</ul>` : ""}
+      </div>
+    `
+    : "";
 
   target.hidden = false;
   target.innerHTML = `
@@ -1435,10 +1469,12 @@ function renderImportDebugPanel(result, options = {}) {
       <div><b>Total market value</b><span>${formatCurrency(report.totalMarketValue)}</span></div>
     </div>
     ${changeSummary ? renderImportChangeSummary(changeSummary) : ""}
+    ${troubleshooting}
     ${canApply ? renderImportPreview(result) : successCta}
     <details>
       <summary>Technical import details</summary>
       <p><b>Detected columns:</b> ${escapeHtml((report.detectedColumns || []).join(", ") || "none")}</p>
+      ${expectedColumns ? `<p><b>Expected Fidelity holdings columns</b></p><ul>${expectedColumns}</ul>` : ""}
       <p><b>Tickers detected:</b> ${escapeHtml((report.tickersDetected || []).join(", ") || "none")}</p>
       <p><b>Accounts detected:</b> ${escapeHtml((report.accountsDetected || []).join(", ") || "none")}</p>
       <div class="import-mapping-used">${mappingRows || "<span>No automatic mapping detected.</span>"}</div>
