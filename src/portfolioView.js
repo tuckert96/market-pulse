@@ -31,6 +31,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderOverviewMarketSnapshot(options.marketEvents || [], analysis.holdings, options.uiState, options.tickerSignals || [], options.marketDataStatus);
   renderOverviewMarketDriversSnapshot(options.marketDrivers);
   renderOverviewConnectionStatus(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.marketDataStatus);
+  renderPortfolioAttribution(options.portfolioAttribution, options.uiState);
   renderBreakdowns(analysis.breakdowns, options.uiState, analysis.holdings);
   renderAccountAllocationPanel(options.accountScope, options.uiState);
   renderAttentionAlerts(analysis.alerts, options.alertLifecycle, options.uiState);
@@ -614,6 +615,86 @@ function renderOverviewTopMovers(holdings = [], uiState = "SAMPLE_MODE", marketD
       </div>
     `).join("")
     : '<div class="empty"><strong>Market data not configured.</strong><span>Imported CSV values load positions, but Live daily movers are Not configured.</span></div>';
+}
+
+function renderPortfolioAttribution(attribution = {}, uiState = "SAMPLE_MODE") {
+  const target = byId("portfolioAttributionPanel");
+  if (!target) return;
+  if (!isImportedState(uiState)) {
+    target.innerHTML = `
+      <div class="empty">
+        <strong>No real attribution yet.</strong>
+        <span>Import a portfolio to see which holdings drove daily, 5-day, 20-day, and since-cost-basis movement.</span>
+      </div>
+    `;
+    return;
+  }
+  const rows = attribution.rows || [];
+  if (!rows.length) {
+    target.innerHTML = `
+      <div class="empty">
+        <strong>No attribution rows available.</strong>
+        <span>Holdings need market value data before the app can estimate contribution to return.</span>
+      </div>
+    `;
+    return;
+  }
+  const periods = attribution.periods || {};
+  const daily = periods.daily || {};
+  const weekly = periods.weekly || {};
+  const monthly = periods.monthly || {};
+  const total = periods.total || {};
+  target.innerHTML = `
+    <div class="provider-status-note">
+      <b>${escapeHtml(attribution.summary || "Attribution ready.")}</b>
+      <span>Contribution is estimated from active imported holdings, provider daily moves, historical closes when available, and imported cost basis. Missing history is shown instead of backfilled.</span>
+    </div>
+    <div class="ticker-mini-metrics">
+      ${renderAttributionMetric("Daily impact", daily)}
+      ${renderAttributionMetric("5-day impact", weekly)}
+      ${renderAttributionMetric("20-day impact", monthly)}
+      ${renderAttributionMetric("Since cost basis", total)}
+    </div>
+    <div class="grid-two">
+      ${renderAttributionPeriodList("Biggest daily contributors", daily, "daily")}
+      ${renderAttributionPeriodList("Biggest 20-day contributors", monthly, "monthly")}
+    </div>
+    ${Number(attribution.missingDataCount || 0) ? `<p class="section-note">${formatNumber(attribution.missingDataCount)} ticker${Number(attribution.missingDataCount) === 1 ? "" : "s"} have at least one missing attribution period because history, daily move, or cost basis is unavailable.</p>` : ""}
+  `;
+}
+
+function renderAttributionMetric(label, period = {}) {
+  const missing = Number(period.missingCount || 0);
+  return `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <b class="${Number(period.totalDollar || 0) >= 0 ? "positive" : "negative"}">${period.availableCount ? formatSignedCurrency(period.totalDollar) : "Not available"}</b>
+      <small>${period.availableCount ? `${formatSignedPct(period.totalContributionPct)} contribution` : "Waiting on source data"}${missing ? ` · ${formatNumber(missing)} missing` : ""}</small>
+    </div>
+  `;
+}
+
+function renderAttributionPeriodList(title, period = {}, periodKey = "daily") {
+  const rows = (period.sorted || []).slice(0, 5);
+  return `
+    <section class="mini-panel attribution-panel">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="mini-list ticker-section-list">
+        ${rows.length ? rows.map((row) => renderAttributionRow(row, periodKey)) : '<div class="empty"><strong>Not enough data yet.</strong><span>Refresh market data with historical prices or import daily move fields.</span></div>'}
+      </div>
+    </section>
+  `;
+}
+
+function renderAttributionRow(row = {}, periodKey = "daily") {
+  const period = row[periodKey] || {};
+  return `
+    <div>
+      <span>${renderTickerLink(row.ticker)} · ${escapeHtml(row.sourceLabel || "Local data")}</span>
+      <b class="${Number(period.dollar || 0) >= 0 ? "positive" : "negative"}">${period.status === "available" ? formatSignedCurrency(period.dollar) : "Not available"}</b>
+      <small>${period.status === "available" ? `${formatSignedPct(period.contributionPct)} portfolio contribution · ${formatSignedPct(period.returnPct)} ${escapeHtml(periodKey)} return` : escapeHtml(period.explanation || "Missing source data.")}</small>
+    </div>
+  `;
 }
 
 function renderOverviewConcentrationWarnings(risk = {}, overview = {}, uiState = "SAMPLE_MODE") {
