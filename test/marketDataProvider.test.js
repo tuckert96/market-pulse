@@ -176,9 +176,21 @@ test("market data status exposes per-ticker quote coverage diagnostics", () => {
   assert.equal(mu.quote, "live");
   assert.equal(mu.profile, "deferred");
   assert.equal(mu.history, "skipped");
-  assert.ok(mu.missingFields.includes("history"));
+  assert.ok(mu.missingFields.includes("volume"));
+  assert.ok(mu.deferredFields.includes("historical candles"));
+  assert.ok(mu.unavailableFields.includes("52-week high/low"));
+  assert.match(mu.coverageSummary, /1\/8 fields available/);
   assert.equal(bad.dataFreshness, "missing");
-  assert.deepEqual(bad.missingFields, ["quote"]);
+  assert.deepEqual(bad.missingFields, [
+    "quote/current price",
+    "52-week high/low",
+    "volume",
+    "average volume",
+    "market cap",
+    "company profile",
+    "sector/industry",
+    "historical candles"
+  ]);
 });
 
 test("live provider configuration reports safe missing-key and live-ready configured states", () => {
@@ -258,7 +270,8 @@ test("Finnhub live provider normalizes quote profile and historical candles", as
       metrics: {
         metric: {
           "52WeekHigh": 157.54,
-          "52WeekLow": 84.12
+          "52WeekLow": 84.12,
+          "10DayAverageTradingVolume": 19800000
         }
       },
       candles: {
@@ -290,6 +303,7 @@ test("Finnhub live provider normalizes quote profile and historical candles", as
   assert.equal(quote.dayHigh, 133);
   assert.equal(quote.dayLow, 128.7);
   assert.equal(quote.marketCap, 147000000000);
+  assert.equal(quote.averageVolume, 19800000);
   assert.equal(quote.sector, "Semiconductors");
   assert.equal(quote.industry, "Semiconductors");
   assert.equal(quote.fiftyTwoWeekHigh, 157.54);
@@ -300,6 +314,71 @@ test("Finnhub live provider normalizes quote profile and historical candles", as
   assert.deepEqual(quote.historicalPrices.map((row) => row.low), [127.9, 129.8]);
   assert.deepEqual(quote.historicalPrices.map((row) => row.volume), [100, 120]);
   assert.equal(JSON.stringify(snapshot).includes("finnhub-secret-value"), false);
+});
+
+test("Finnhub diagnostics expose per-ticker field coverage without secrets", async () => {
+  const snapshot = await fetchMarketDataSnapshot({
+    provider: createFinnhubProvider({
+      env: { FINNHUB_API_KEY: "finnhub-secret-value" },
+      fetchImpl: finnhubFetchMock({
+        quote: { c: 132.1, d: 2.6, dp: 2.0077, h: 133, l: 128.7, o: 129.2, pc: 129.5, t: 1779552000 },
+        profile: { ticker: "MU", name: "Micron Technology, Inc.", marketCapitalization: 147000, finnhubIndustry: "Semiconductors" },
+        metrics: { metric: { "52WeekHigh": 157.54, "52WeekLow": 84.12, "10DayAverageTradingVolume": 19800000 } },
+        candles: { s: "ok", c: [132.1], t: [1779552000], v: [24600000] }
+      })
+    }),
+    tickers: ["MU"],
+    asOf: "2026-05-23T12:00:00-04:00",
+    now: "2026-05-23T12:30:00-04:00"
+  });
+  const row = snapshot.status.quoteDiagnostics.find((item) => item.ticker === "MU");
+
+  assert.equal(row.coverageStatus, "complete");
+  assert.equal(row.coverageSummary, "8/8 fields available");
+  assert.deepEqual(row.missingFields, []);
+  assert.deepEqual(row.unavailableFields, []);
+  assert.deepEqual(row.fieldCoverage.map((field) => [field.key, field.status]), [
+    ["quote", "live"],
+    ["week52Range", "live"],
+    ["volume", "live"],
+    ["averageVolume", "live"],
+    ["marketCap", "live"],
+    ["companyProfile", "live"],
+    ["sectorIndustry", "live"],
+    ["historicalCandles", "live"]
+  ]);
+  assert.equal(JSON.stringify(row).includes("finnhub-secret-value"), false);
+});
+
+test("Finnhub diagnostics list partial missing and deferred fields by ticker", async () => {
+  const snapshot = await fetchMarketDataSnapshot({
+    provider: createFinnhubProvider({
+      env: { FINNHUB_API_KEY: "finnhub-secret-value" },
+      requestBudget: { maxQuoteTickers: 50, enrichmentTickerLimit: 1 },
+      fetchImpl: finnhubFetchMock({
+        quote: { c: 132.1, d: 2.6, dp: 2.0077, h: 133, l: 128.7, o: 129.2, pc: 129.5, t: 1779552000 },
+        profile: { ticker: "MU", name: "Micron Technology, Inc.", finnhubIndustry: "Semiconductors" },
+        metrics: { metric: { "52WeekHigh": 157.54, "52WeekLow": 84.12 } },
+        candles: { s: "ok", c: [132.1], t: [1779552000] }
+      })
+    }),
+    tickers: ["MU", "NVDA"],
+    asOf: "2026-05-23T12:00:00-04:00",
+    now: "2026-05-23T12:30:00-04:00"
+  });
+  const mu = snapshot.status.quoteDiagnostics.find((item) => item.ticker === "MU");
+  const nvda = snapshot.status.quoteDiagnostics.find((item) => item.ticker === "NVDA");
+
+  assert.equal(mu.coverageStatus, "partial");
+  assert.ok(mu.missingFields.includes("volume"));
+  assert.ok(mu.missingFields.includes("average volume"));
+  assert.ok(mu.missingFields.includes("market cap"));
+  assert.match(mu.coverageSummary, /5\/8 fields available/);
+  assert.equal(nvda.coverageStatus, "partial");
+  assert.ok(nvda.deferredFields.includes("52-week high/low"));
+  assert.ok(nvda.deferredFields.includes("company profile"));
+  assert.ok(nvda.deferredFields.includes("historical candles"));
+  assert.ok(nvda.unavailableFields.includes("average volume"));
 });
 
 test("Finnhub blocked candle access does not stale otherwise usable quote data", async () => {
@@ -786,6 +865,9 @@ test("Finnhub stale cache falls back when refresh fails", async () => {
   assert.equal(stale.quotesByTicker.MU.price, 132.1);
   assert.equal(stale.quotesByTicker.MU.cacheStatus, "stale");
   assert.match(stale.status.detail, /refresh failed/i);
+  const diagnostic = stale.status.quoteDiagnostics.find((item) => item.ticker === "MU");
+  assert.equal(diagnostic.coverageStatus, "stale");
+  assert.ok(diagnostic.staleFields.includes("Quote"));
   assert.equal(JSON.stringify(stale).includes("finnhub-secret-value"), false);
 });
 
@@ -889,6 +971,9 @@ test("Finnhub invalid credentials, invalid tickers, and rate limits stay safe", 
   assert.match(invalidTicker.status.detail, /no quote/i);
   assert.equal(rateLimited.status.status, "rate limited");
   assert.match(rateLimited.status.detail, /rate limit|quota/i);
+  assert.equal(rateLimited.status.quoteDiagnostics[0].coverageStatus, "missing");
+  assert.ok(rateLimited.status.quoteDiagnostics[0].missingFields.includes("quote/current price"));
+  assert.match(rateLimited.status.quoteDiagnostics[0].lastError, /rate limit|quota/i);
   assert.equal(JSON.stringify(invalidCredentials).includes("finnhub-secret-value"), false);
   assert.equal(JSON.stringify(invalidTicker).includes("finnhub-secret-value"), false);
   assert.equal(JSON.stringify(rateLimited).includes("finnhub-secret-value"), false);

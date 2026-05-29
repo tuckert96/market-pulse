@@ -408,6 +408,64 @@ test("market data diagnostics show request budget and deferred enrichment", () =
   assert.match(html, /history/);
 });
 
+test("market data diagnostics render field-level ticker coverage", () => {
+  const html = marketDataDiagnosticsHtml({
+    requestedTickers: ["MU"],
+    quoteDiagnostics: [{
+      ticker: "MU",
+      status: "connected",
+      dataFreshness: "live",
+      cacheStatus: "live",
+      coverageSummary: "8/8 fields available",
+      fieldCoverage: [
+        { key: "quote", label: "Quote", missingLabel: "quote/current price", available: true, status: "live" },
+        { key: "week52Range", label: "52-week high/low", missingLabel: "52-week high/low", available: true, status: "live" },
+        { key: "volume", label: "Volume", missingLabel: "volume", available: true, status: "live" },
+        { key: "averageVolume", label: "Average volume", missingLabel: "average volume", available: true, status: "live" },
+        { key: "marketCap", label: "Market cap", missingLabel: "market cap", available: true, status: "live" },
+        { key: "companyProfile", label: "Company profile", missingLabel: "company profile", available: true, status: "live" },
+        { key: "sectorIndustry", label: "Sector/industry", missingLabel: "sector/industry", available: true, status: "live" },
+        { key: "historicalCandles", label: "Historical candles", missingLabel: "historical candles", available: true, status: "live" }
+      ],
+      missingFields: [],
+      unavailableFields: [],
+      staleFields: [],
+      fetchedAt: "2026-05-23T16:00:00.000Z"
+    }, {
+      ticker: "AMD",
+      status: "partial data",
+      dataFreshness: "live",
+      cacheStatus: "live",
+      coverageSummary: "4/8 fields available",
+      fieldCoverage: [
+        { key: "quote", label: "Quote", missingLabel: "quote/current price", available: true, status: "live" },
+        { key: "week52Range", label: "52-week high/low", missingLabel: "52-week high/low", available: false, status: "missing" },
+        { key: "volume", label: "Volume", missingLabel: "volume", available: true, status: "live" },
+        { key: "averageVolume", label: "Average volume", missingLabel: "average volume", available: false, status: "missing" },
+        { key: "marketCap", label: "Market cap", missingLabel: "market cap", available: false, status: "missing" },
+        { key: "companyProfile", label: "Company profile", missingLabel: "company profile", available: false, status: "deferred" },
+        { key: "sectorIndustry", label: "Sector/industry", missingLabel: "sector/industry", available: true, status: "cached" },
+        { key: "historicalCandles", label: "Historical candles", missingLabel: "historical candles", available: false, status: "stale" }
+      ],
+      missingFields: ["52-week high/low", "average volume", "market cap"],
+      deferredFields: ["company profile"],
+      unavailableFields: ["52-week high/low", "average volume", "market cap", "company profile"],
+      staleFields: ["Historical candles"],
+      fetchedAt: "2026-05-23T16:00:00.000Z"
+    }]
+  }, {
+    selectedLabel: "Finnhub",
+    configured: true
+  });
+
+  assert.match(html, /52-week/);
+  assert.match(html, /Avg volume/);
+  assert.match(html, /8\/8 fields available/);
+  assert.match(html, /4\/8 fields available/);
+  assert.match(html, /Missing: 52-week high\/low, average volume, market cap, company profile/);
+  assert.match(html, /Stale: Historical candles/);
+});
+
 test("market data quote labels distinguish live cached stale and missing quote states", () => {
   assert.equal(marketDataQuoteSourceLabel({ status: "connected", dataFreshness: "live" }), "Live quote");
   assert.equal(marketDataQuoteSourceLabel({ status: "cached", dataFreshness: "cached" }), "Cached quote");

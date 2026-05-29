@@ -3199,7 +3199,8 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     riskLevel: thesisRow?.riskLevel || firstHolding.riskLevel || "Unrated",
     thesisStatus: thesisRow?.thesisStatus || firstHolding.thesisStatus || "No thesis",
     confidenceLevel: thesisRow?.confidenceLevel || watchlistIdea?.conviction || firstHolding.confidenceLevel || "Unrated",
-    marketDataStatus: options.marketDataStatus || options.marketDataSnapshot?.status || {}
+    marketDataStatus: options.marketDataStatus || options.marketDataSnapshot?.status || {},
+    providerCoverage: tickerProviderCoverage(options.marketDataStatus || options.marketDataSnapshot?.status || {}, ticker, quote)
   };
   model.thesisRiskSummary = buildThesisRiskSummary(thesisRow || {}, {
     holding: firstHolding,
@@ -4137,6 +4138,7 @@ function renderTickerDataQuality(model) {
           <b>${escapeHtml(model.dataQuality.summary)}</b>
           <span>${escapeHtml(model.dataQuality.detail)}</span>
         </div>
+        ${renderTickerProviderCoverage(model)}
         <div class="ticker-coverage-grid">
           ${model.dataQuality.rows.map((row) => `
             <div class="ticker-coverage-item ${escapeHtml(row.tone)}"><span>${escapeHtml(row.label)}</span><b>${escapeHtml(row.status)}</b><small>${escapeHtml(row.detail)}</small></div>
@@ -4145,6 +4147,78 @@ function renderTickerDataQuality(model) {
       </div>
     </section>
   `;
+}
+
+function renderTickerProviderCoverage(model = {}) {
+  const coverage = model.providerCoverage || {};
+  const fields = Array.isArray(coverage.fieldCoverage) ? coverage.fieldCoverage : [];
+  if (!fields.length) {
+    return `
+      <div class="ticker-provider-coverage">
+        <div>
+          <b>Provider coverage</b>
+          <span>No per-ticker provider diagnostics yet. Refresh market data from Data Sources after loading a portfolio.</span>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="ticker-provider-coverage">
+      <div>
+        <b>Provider coverage</b>
+        <span>${escapeHtml(coverage.coverageSummary || "Coverage pending")} · ${escapeHtml(coverageGapSummary(coverage))}</span>
+      </div>
+      <div class="coverage-chip-row" aria-label="Provider field coverage for ${escapeHtml(model.ticker)}">
+        ${fields.map((field) => `
+          <span class="coverage-chip ${coverageFieldBadgeClass(field)}">
+            <b>${escapeHtml(field.label)}</b>
+            <small>${escapeHtml(coverageFieldStatusLabel(field))}</small>
+          </span>
+        `).join("")}
+      </div>
+      ${coverage.lastError ? `<p class="section-note">Provider note: ${escapeHtml(String(coverage.lastError))}</p>` : ""}
+    </div>
+  `;
+}
+
+function tickerProviderCoverage(marketDataStatus = {}, ticker = "", quote = null) {
+  const normalizedTicker = normalizeTicker(ticker);
+  const diagnostics = Array.isArray(marketDataStatus.quoteDiagnostics) ? marketDataStatus.quoteDiagnostics : [];
+  const row = diagnostics.find((item) => normalizeTicker(item.ticker) === normalizedTicker);
+  if (row) return row;
+  if (!quote) return { ticker: normalizedTicker, fieldCoverage: [] };
+  const status = quote.dataFreshness || quote.cacheStatus || "unknown";
+  const field = (key, label, available, resourceStatus = status) => ({
+    key,
+    label,
+    missingLabel: label.toLowerCase(),
+    available,
+    status: available ? resourceStatus : "missing",
+    resourceStatus
+  });
+  const fields = [
+    field("quote", "Quote", Number(quote.price || 0) > 0),
+    field("week52Range", "52-week high/low", Number(quote.fiftyTwoWeekHigh || 0) > 0 && Number(quote.fiftyTwoWeekLow || 0) > 0),
+    field("volume", "Volume", Number(quote.volume || 0) > 0),
+    field("averageVolume", "Average volume", Number(quote.averageVolume || 0) > 0),
+    field("marketCap", "Market cap", Number(quote.marketCap || 0) > 0),
+    field("companyProfile", "Company profile", Boolean(quote.name && normalizeTicker(quote.name) !== normalizeTicker(quote.ticker))),
+    field("sectorIndustry", "Sector/industry", Boolean((quote.sector && quote.sector !== "Unknown") || (quote.industry && quote.industry !== "Unknown"))),
+    field("historicalCandles", "Historical candles", Array.isArray(quote.historicalPrices) && quote.historicalPrices.length > 0)
+  ];
+  const available = fields.filter((item) => item.available).map((item) => item.label);
+  const missing = fields.filter((item) => !item.available).map((item) => item.missingLabel);
+  return {
+    ticker: normalizedTicker,
+    fieldCoverage: fields,
+    availableFields: available,
+    missingFields: missing,
+    unavailableFields: missing,
+    staleFields: status === "stale" ? available : [],
+    coverageSummary: `${available.length}/${fields.length} fields available`,
+    coverageStatus: missing.length ? "partial" : "complete",
+    lastError: quote.lastError?.message || quote.lastError || ""
+  };
 }
 
 function buildTickerDataQuality(model) {
@@ -6358,6 +6432,68 @@ function resourceCoverageLabel(value = "") {
   return dataModeLabel(marketDataMode({ status: text, dataFreshness: text, cacheStatus: text }));
 }
 
+const PROVIDER_COVERAGE_FIELD_ORDER = Object.freeze([
+  ["quote", "Quote"],
+  ["week52Range", "52-week"],
+  ["volume", "Volume"],
+  ["averageVolume", "Avg volume"],
+  ["marketCap", "Market cap"],
+  ["companyProfile", "Profile"],
+  ["sectorIndustry", "Sector/industry"],
+  ["historicalCandles", "History"]
+]);
+
+function coverageFieldsByKey(row = {}) {
+  const fields = Array.isArray(row.fieldCoverage) ? row.fieldCoverage : [];
+  const map = Object.fromEntries(fields.map((field) => [field.key, field]));
+  if (fields.length) return map;
+  return {
+    quote: legacyCoverageField("quote", "Quote", row.quote),
+    week52Range: legacyCoverageField("week52Range", "52-week high/low", row.metric),
+    volume: legacyCoverageField("volume", "Volume", row.quote),
+    averageVolume: legacyCoverageField("averageVolume", "Average volume", row.metric),
+    marketCap: legacyCoverageField("marketCap", "Market cap", row.profile),
+    companyProfile: legacyCoverageField("companyProfile", "Company profile", row.profile),
+    sectorIndustry: legacyCoverageField("sectorIndustry", "Sector/industry", row.profile),
+    historicalCandles: legacyCoverageField("historicalCandles", "Historical candles", row.history)
+  };
+}
+
+function legacyCoverageField(key, label, status) {
+  const normalized = String(status || "unknown").toLowerCase();
+  const available = !["missing", "deferred", "skipped", "disabled", "unknown", ""].includes(normalized);
+  return { key, label, missingLabel: label.toLowerCase(), available, status: normalized || "unknown", resourceStatus: normalized || "unknown" };
+}
+
+function coverageFieldStatusLabel(field = {}) {
+  const status = String(field.status || "").toLowerCase();
+  if (status === "available") return "Available";
+  return resourceCoverageLabel(status || field.resourceStatus || "");
+}
+
+function coverageFieldBadgeClass(field = {}) {
+  const status = String(field.status || "").toLowerCase();
+  if (["live", "available"].includes(status)) return "badge-source-live";
+  if (status === "cached") return "badge-source-cached";
+  if (status === "mock") return "badge-source-sample";
+  if (["stale", "deferred", "skipped"].includes(status)) return "badge-source-stale";
+  if (["missing", "disabled", "unknown"].includes(status)) return "badge-source-not-configured";
+  return dataModeBadgeClass(marketDataMode({ status, dataFreshness: status, cacheStatus: status }));
+}
+
+function coverageGapSummary(row = {}) {
+  const stale = Array.isArray(row.staleFields) ? row.staleFields : [];
+  const unavailable = Array.isArray(row.unavailableFields) && row.unavailableFields.length
+    ? row.unavailableFields
+    : Array.isArray(row.missingFields)
+      ? row.missingFields
+      : [];
+  const parts = [];
+  if (unavailable.length) parts.push(`Missing: ${unavailable.slice(0, 4).join(", ")}${unavailable.length > 4 ? ` +${unavailable.length - 4} more` : ""}`);
+  if (stale.length) parts.push(`Stale: ${stale.slice(0, 4).join(", ")}${stale.length > 4 ? ` +${stale.length - 4} more` : ""}`);
+  return parts.join(" · ") || "Complete";
+}
+
 function marketDataCoverageTableHtml(rows = []) {
   const visible = rows.slice(0, 16);
   if (!visible.length) {
@@ -6370,27 +6506,33 @@ function marketDataCoverageTableHtml(rows = []) {
           <tr>
             <th scope="col">Ticker</th>
             <th scope="col">Status</th>
+            <th scope="col">Coverage</th>
             <th scope="col">Quote</th>
+            <th scope="col">52-week</th>
+            <th scope="col">Volume</th>
+            <th scope="col">Avg volume</th>
+            <th scope="col">Market cap</th>
             <th scope="col">Profile</th>
-            <th scope="col">Fundamentals</th>
+            <th scope="col">Sector / industry</th>
             <th scope="col">History</th>
-            <th scope="col">Missing fields</th>
+            <th scope="col">Missing / stale</th>
             <th scope="col">Last fetch</th>
           </tr>
         </thead>
         <tbody>
           ${visible.map((row) => {
             const mode = marketDataMode({ status: row.status, dataFreshness: row.dataFreshness, cacheStatus: row.cacheStatus });
-            const missingFields = Array.isArray(row.missingFields) && row.missingFields.length ? row.missingFields.join(", ") : "None";
+            const fields = coverageFieldsByKey(row);
             return `
               <tr>
                 <th scope="row">${escapeHtml(row.ticker || "Unknown")}</th>
                 <td><span class="status-badge ${dataModeBadgeClass(mode)}">${escapeHtml(dataModeLabel(mode))}</span></td>
-                <td>${escapeHtml(resourceCoverageLabel(row.quote))}</td>
-                <td>${escapeHtml(resourceCoverageLabel(row.profile))}</td>
-                <td>${escapeHtml(resourceCoverageLabel(row.metric))}</td>
-                <td>${escapeHtml(resourceCoverageLabel(row.history))}</td>
-                <td>${escapeHtml(missingFields)}</td>
+                <td>${escapeHtml(row.coverageSummary || "Coverage pending")}</td>
+                ${PROVIDER_COVERAGE_FIELD_ORDER.map(([key]) => {
+                  const field = fields[key] || {};
+                  return `<td><span class="data-tag ${coverageFieldBadgeClass(field)}">${escapeHtml(coverageFieldStatusLabel(field))}</span></td>`;
+                }).join("")}
+                <td>${escapeHtml(coverageGapSummary(row))}</td>
                 <td>${row.fetchedAt ? escapeHtml(formatDateTime(row.fetchedAt)) : "Not available"}</td>
               </tr>
             `;

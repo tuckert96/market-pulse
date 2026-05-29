@@ -845,7 +845,8 @@
       }
 
       .data-tag.badge-source-live,
-      .status-badge.badge-source-live {
+      .status-badge.badge-source-live,
+      .coverage-chip.badge-source-live {
         background: var(--good-bg);
         color: #17631f;
         border-color: #b7dfbf;
@@ -853,8 +854,10 @@
 
       .data-tag.badge-source-cached,
       .status-badge.badge-source-cached,
+      .coverage-chip.badge-source-cached,
       .data-tag.badge-source-imported,
-      .status-badge.badge-source-imported {
+      .status-badge.badge-source-imported,
+      .coverage-chip.badge-source-imported {
         background: rgba(0, 122, 255, 0.09);
         color: #075985;
         border-color: rgba(0, 122, 255, 0.2);
@@ -862,17 +865,21 @@
 
       .data-tag.badge-source-stale,
       .status-badge.badge-source-stale,
+      .coverage-chip.badge-source-stale,
       .data-tag.badge-source-partial,
       .status-badge.badge-source-partial,
+      .coverage-chip.badge-source-partial,
       .data-tag.badge-source-rate-limited,
-      .status-badge.badge-source-rate-limited {
+      .status-badge.badge-source-rate-limited,
+      .coverage-chip.badge-source-rate-limited {
         background: var(--warn-bg);
         color: #8a4b00;
         border-color: #f0d49c;
       }
 
       .data-tag.badge-source-error,
-      .status-badge.badge-source-error {
+      .status-badge.badge-source-error,
+      .coverage-chip.badge-source-error {
         background: var(--bad-bg);
         color: #9f261d;
         border-color: #f3b8b3;
@@ -880,8 +887,10 @@
 
       .data-tag.badge-source-not-configured,
       .status-badge.badge-source-not-configured,
+      .coverage-chip.badge-source-not-configured,
       .data-tag.badge-source-empty,
-      .status-badge.badge-source-empty {
+      .status-badge.badge-source-empty,
+      .coverage-chip.badge-source-empty {
         background: rgba(118, 118, 128, 0.1);
         color: var(--text-secondary);
         border-color: var(--line);
@@ -894,7 +903,7 @@
 
       .provider-coverage-table {
         width: 100%;
-        min-width: 760px;
+        min-width: 1180px;
         border-collapse: collapse;
         font-size: 12px;
       }
@@ -1260,6 +1269,53 @@
       .ticker-section-list {
         display: grid;
         gap: 12px;
+      }
+
+      .ticker-provider-coverage {
+        display: grid;
+        gap: 12px;
+        margin: 14px 0;
+        padding: 14px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .ticker-provider-coverage b {
+        display: block;
+        color: var(--text-primary);
+      }
+
+      .ticker-provider-coverage span,
+      .ticker-provider-coverage small {
+        color: var(--text-secondary);
+      }
+
+      .coverage-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .coverage-chip {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 118px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 10px;
+        background: rgba(118, 118, 128, 0.08);
+      }
+
+      .coverage-chip b {
+        font-size: 12px;
+        line-height: 1.2;
+      }
+
+      .coverage-chip small {
+        font-size: 11px;
+        line-height: 1.2;
       }
 
       .research-terminal-panel {
