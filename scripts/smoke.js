@@ -1190,9 +1190,11 @@ assert(portfolioViewJs.includes("renderRiskCorrelationPanel"), "Risk route shoul
 assert(portfolioAnalyticsJs.includes("POSITION_CONCENTRATION_THRESHOLDS"), "Risk analytics should expose explicit 5/10/20/30 concentration thresholds");
 assert(portfolioAnalyticsJs.includes("buildConcentrationInterpretation"), "Risk analytics should generate deterministic concentration interpretations");
 assert(portfolioAnalyticsJs.includes("securityTypeExposure"), "Risk analytics should separate single stocks, normal ETFs, leveraged ETFs, and cash");
+assert(portfolioAnalyticsJs.includes("LEVERAGED_ETF_UNDERLYING_DRAWDOWNS") && portfolioAnalyticsJs.includes("buildLeveragedEtfDrawdownScenarios"), "Risk analytics should model leveraged ETF drawdown scenarios");
 assert(portfolioViewJs.includes("Measured pairs"), "Risk correlation panel should display measured pair correlations when history exists");
 assert(indexHtml.includes("riskConcentrationSummaryPanel") && indexHtml.includes("riskThemeExposurePanel") && indexHtml.includes("riskCashExposurePanel") && indexHtml.includes("riskCorrelationPanel"), "Risk route should include decision-grade risk panel targets");
 assert(indexHtml.includes(".risk-summary-card") && indexHtml.includes(".risk-summary-drivers"), "Risk concentration summary should have stable responsive styling");
+assert(indexHtml.includes(".leveraged-scenario-grid") && indexHtml.includes("repeat(auto-fit, minmax(8rem, 1fr))") && portfolioViewJs.includes("riskLeveragedVolatilityDragModule") && portfolioViewJs.includes("Volatility Drag + Drawdown Scenarios"), "Risk route should show leveraged ETF volatility drag scenarios");
 assert(indexHtml.includes("grid-template-columns: minmax(18rem, 1fr) max-content"), "Risk rows should reserve readable label width before value/action columns");
 assert(indexHtml.includes(".risk-row-main.ranked") && indexHtml.includes("grid-template-columns: auto minmax(0, 1fr)"), "Top position risk rows should align rank and label horizontally");
 assert(indexHtml.includes(".risk-row-main b,") && indexHtml.includes("word-break: keep-all"), "Risk ticker labels should not wrap one character per line");

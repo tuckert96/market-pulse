@@ -2428,6 +2428,56 @@
         color: var(--text-primary);
       }
 
+      .leveraged-education {
+        display: grid;
+        gap: 12px;
+        margin-top: 4px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 16px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .leveraged-education h3,
+      .leveraged-education p {
+        margin: 0;
+      }
+
+      .leveraged-education p {
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .leveraged-scenario-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+        gap: 10px;
+      }
+
+      .leveraged-scenario-grid div {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 11px;
+        background: rgba(118, 118, 128, 0.07);
+      }
+
+      .leveraged-scenario-grid span,
+      .leveraged-scenario-grid small {
+        display: block;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .leveraged-scenario-grid b {
+        display: block;
+        margin: 4px 0;
+        color: var(--danger);
+        font-size: 18px;
+      }
+
       .risk-list {
         display: grid;
         gap: 10px;
@@ -5637,6 +5687,7 @@
         .what-if-summary-grid,
         .what-if-grid,
         .daily-brief-stats,
+        .leveraged-scenario-grid,
         .cash-plan div,
         .guardrail-list div,
         .risk-grid,

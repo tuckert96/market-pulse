@@ -245,6 +245,8 @@ test("brief and risk layouts do not collapse labels into one-character columns",
   assert.doesNotMatch(indexHtml, /\.risk-row-main b,\s*[\r\n]+\s*\.risk-row-main span/);
   assert.match(indexHtml, /\.risk-row-value\s*\{[\s\S]*min-width:\s*8\.5rem/);
   assert.match(indexHtml, /\.risk-row-value \.button-link,[\s\S]*\.risk-row \.compact-link\s*\{[\s\S]*white-space:\s*nowrap/);
+  assert.match(indexHtml, /\.leveraged-scenario-grid\s*\{[\s\S]*repeat\(auto-fit, minmax\(8rem, 1fr\)\)/);
+  assert.match(portfolioViewJs, /<article id="riskLeveragedVolatilityDragModule" class="leveraged-education">/);
   assert.match(indexHtml, /\.market-tape-scroll\s*\{[\s\S]*max-width:\s*100%[\s\S]*overflow-x:\s*auto/);
   assert.match(indexHtml, /@media \(max-width: 720px\)[\s\S]*\.workspace-nav\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(indexHtml, /\.risk-row > p\s*\{[\s\S]*grid-column:\s*1 \/ -1/);

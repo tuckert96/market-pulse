@@ -2924,10 +2924,33 @@ function renderLeveragedExposurePanel(leverageSummary = {}, holdings = [], overv
       <div class="risk-row-value">
         <b>${formatCurrency(leverageSummary.notionalValue ?? overview.leveragedNotionalExposure)}</b>
         <span>${formatPct(leverageSummary.notionalWeight ?? divide(overview.leveragedNotionalExposure, overview.totalValue))} notional</span>
+        <span>${formatCurrency(leverageSummary.directValue ?? overview.leveragedEtfExposure)} direct · ${formatPct(leverageSummary.directWeight ?? divide(overview.leveragedEtfExposure, overview.totalValue))}</span>
         ${renderRiskStatusBadge(leverageSummary.status || "normal")}
       </div>
     </article>
+    ${renderLeveragedDrawdownScenarios(leverageSummary)}
     ${marketDataStatus.status ? `<p class="section-note">Market data source: ${escapeHtml(marketDataDisplayLabel(marketDataStatus))}. ${escapeHtml(marketDataDisplayDetail(marketDataStatus))}</p>` : ""}
+  `;
+}
+
+export function renderLeveragedDrawdownScenarios(leverageSummary = {}) {
+  const scenarios = Array.isArray(leverageSummary.scenarios) ? leverageSummary.scenarios : [];
+  if (!scenarios.length) return "";
+  return `
+    <article id="riskLeveragedVolatilityDragModule" class="leveraged-education">
+      <h3>Volatility Drag + Drawdown Scenarios</h3>
+      <p>${escapeHtml(leverageSummary.dailyResetExplanation || "Daily-reset leveraged ETFs target their stated multiple for one trading day, not over every long-term holding period.")}</p>
+      <div id="riskLeveragedDrawdownScenarios" class="leveraged-scenario-grid">
+        ${scenarios.map((scenario) => `
+          <div>
+            <span>Underlying ${escapeHtml(scenario.underlyingMoveLabel || formatPct(scenario.underlyingMove || 0))}</span>
+            <b>${formatSignedPct(scenario.estimatedProductMove || 0)}</b>
+            <small>${formatSignedCurrency(scenario.estimatedPortfolioImpact || 0)} portfolio impact · ${formatSignedPct(scenario.estimatedPortfolioImpactPct || 0)}</small>
+          </div>
+        `).join("")}
+      </div>
+      <p>${escapeHtml(leverageSummary.volatilityDragExplanation || "Volatility drag can make multi-day results differ from a simple multiple of the underlying index return.")}</p>
+    </article>
   `;
 }
 
