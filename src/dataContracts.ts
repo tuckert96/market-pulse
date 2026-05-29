@@ -12,6 +12,8 @@ export type CalendarEventType = "earnings" | "ex-dividend" | "investor-day" | "p
 export type CalendarEventImportance = "low" | "medium" | "high";
 export type CalendarEventSourceMode = "mock" | "imported" | "manual" | "live" | "stale" | "error";
 export type WhatIfAction = "add" | "trim-dollar" | "trim-percent" | "remove" | "rebalance-target";
+export type HoldingRiskCategory = "core_mega_cap" | "cyclical_high_beta" | "speculative_growth" | "leveraged_etf" | "broad_index";
+export type RiskAction = "hold" | "review" | "trim" | "exit";
 export type RecommendationType =
   | "investigate"
   | "watch"
@@ -64,6 +66,7 @@ export interface Holding {
   strategySleeve?: string;
   thesisStatus?: string;
   riskLevel?: string;
+  riskCategory?: HoldingRiskCategory | string;
   quant?: number;
   valuationGrade?: string;
   growthGrade?: string;

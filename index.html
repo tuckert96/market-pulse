@@ -2964,6 +2964,88 @@
         padding: 7px 8px;
       }
 
+      .guardrail-summary-grid {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      }
+
+      .guardrail-key-list {
+        margin-top: 12px;
+      }
+
+      .guardrail-table {
+        min-width: 1320px;
+      }
+
+      .guardrail-table th:first-child,
+      .guardrail-table td:first-child {
+        min-width: 190px;
+      }
+
+      .guardrail-table th,
+      .guardrail-table td {
+        white-space: nowrap;
+      }
+
+      .guardrail-table td:last-child {
+        max-width: 360px;
+        white-space: normal;
+      }
+
+      .guardrail-details summary {
+        cursor: pointer;
+        font-weight: 800;
+        line-height: 1.35;
+      }
+
+      .guardrail-details ul {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .guardrail-details p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .risk-action-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        padding: 5px 8px;
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      .risk-action-pill.hold {
+        background: rgba(52, 199, 89, 0.12);
+        border-color: rgba(52, 199, 89, 0.24);
+        color: #1f7a3b;
+      }
+
+      .risk-action-pill.review {
+        background: rgba(94, 92, 230, 0.11);
+        border-color: rgba(94, 92, 230, 0.24);
+        color: #4b49c9;
+      }
+
+      .risk-action-pill.trim {
+        background: var(--warn-bg);
+        border-color: #f0d49c;
+        color: #8a4b00;
+      }
+
+      .risk-action-pill.exit {
+        background: var(--bad-bg);
+        border-color: #f3b8b3;
+        color: #9f261d;
+      }
+
       .target-section-row td {
         color: #344054;
         font-size: 12px;
@@ -6253,6 +6335,7 @@
               <a href="#imports">Imports</a>
               <a href="#holdings">Holdings</a>
               <a href="#risk">Risk</a>
+              <a href="#risk-guardrails">Risk Guardrails</a>
               <a href="#alerts">Alerts</a>
               <a href="#alpha">Alpha Engine</a>
               <a href="#market-drivers">Market Drivers</a>
@@ -6331,6 +6414,11 @@
                 <h3>Concentration Warnings</h3>
                 <div class="mini-list" id="overviewConcentrationWarnings"></div>
                 <a class="button-link" href="#risk">Review risk</a>
+              </article>
+              <article class="digest-card" data-route="#risk-guardrails" role="link" tabindex="0" aria-label="Open Equity Risk Guardrails from guardrails card">
+                <h3>Equity Risk Guardrails</h3>
+                <div class="mini-list" id="overviewRiskGuardrails"></div>
+                <a class="button-link" href="#risk-guardrails">Open guardrails</a>
               </article>
               <article class="digest-card" data-route="#alerts" role="link" tabindex="0" aria-label="Open Alerts from recent alerts card">
                 <h3>Recent Alerts</h3>
@@ -6814,6 +6902,68 @@
               <div class="panel">
                 <div class="panel-head"><div><h2>Portfolio Data Quality</h2><p>Post-import validation, portfolio totals, cash, concentration, and data warnings.</p></div></div>
                 <div class="body-pad quality-list" id="dataQualityPanel"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" id="risk-guardrails" data-screen="risk-guardrails" aria-label="Equity Risk Guardrails" hidden>
+            <div class="screen-header">
+              <span>Risk Guardrails</span>
+              <h2>Hold, review, trim, or exit-review triggers for each holding.</h2>
+              <p>Deterministic risk monitoring based on position size, cost-basis loss, drawdown from recent high, and moving-average breaks. Decision support only.</p>
+            </div>
+            <div class="screen-guidance" aria-label="Risk guardrails guide">
+              <div class="guidance-item"><span>What</span><b>Position-level triggers</b><small>Every equity/fund row gets a transparent score and action label.</small></div>
+              <div class="guidance-item"><span>Why</span><b>Rules before emotion</b><small>Size, loss, drawdown, and trend breaks are separated so the reason is visible.</small></div>
+              <div class="guidance-item"><span>Next</span><b>Open the row</b><small>Use the trigger details to decide what thesis work is needed.</small></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><div><h2>Guardrail Summary</h2><p>Risk queue, highest-risk holding, concentration, trend breaks, and missing data.</p></div></div>
+              <div class="body-pad" id="riskGuardrailsSummaryPanel"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Holding Guardrails</h2>
+                  <p>Sortable, filterable review table. Labels are monitoring prompts, not trade orders.</p>
+                </div>
+                <div class="filters compact">
+                  <label>
+                    <span>Filter</span>
+                    <select id="riskGuardrailFilter">
+                      <option value="all">All</option>
+                      <option value="hold">Hold</option>
+                      <option value="review">Review</option>
+                      <option value="trim">Trim</option>
+                      <option value="exit">Exit</option>
+                      <option value="missing-data">Missing data</option>
+                      <option value="above-target">Above target weight</option>
+                      <option value="below-200dma">Below 200DMA</option>
+                      <option value="down-20">Down more than 20%</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <p id="riskGuardrailTableStatus" class="sr-only" aria-live="polite"></p>
+              <div class="table-wrap guardrail-table-wrap">
+                <table id="riskGuardrailsTable" class="guardrail-table">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-risk-sort-key="symbol"><button class="sort-button" type="button">Symbol</button></th>
+                      <th scope="col" data-risk-sort-key="riskCategory"><button class="sort-button" type="button">Risk category</button></th>
+                      <th scope="col" data-risk-sort-key="portfolioWeightPct"><button class="sort-button" type="button">Portfolio weight</button></th>
+                      <th scope="col" data-risk-sort-key="gainLossFromCostPct"><button class="sort-button" type="button">Gain/loss from cost</button></th>
+                      <th scope="col" data-risk-sort-key="drawdownFromRecentHighPct"><button class="sort-button" type="button">Drawdown from high</button></th>
+                      <th scope="col" data-risk-sort-key="currentPrice"><button class="sort-button" type="button">Current price</button></th>
+                      <th scope="col" data-risk-sort-key="fiftyDayMovingAverage"><button class="sort-button" type="button">50DMA</button></th>
+                      <th scope="col" data-risk-sort-key="twoHundredDayMovingAverage"><button class="sort-button" type="button">200DMA</button></th>
+                      <th scope="col" data-risk-sort-key="riskScore"><button class="sort-button" type="button">Risk score</button></th>
+                      <th scope="col" data-risk-sort-key="riskAction"><button class="sort-button" type="button">Guardrail prompt</button></th>
+                      <th scope="col">Trigger summary</th>
+                    </tr>
+                  </thead>
+                  <tbody id="riskGuardrailsTableBody"></tbody>
+                </table>
               </div>
             </div>
           </section>

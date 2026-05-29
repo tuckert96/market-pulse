@@ -45,6 +45,7 @@ import {
   summarizeJournal,
   upsertJournalEntry
 } from "./decisionJournal.js";
+import { buildEquityRiskGuardrails } from "./equityRiskGuardrails.js";
 import { mergeHoldingsByAccountAndTicker, normalizeHoldings, normalizeTicker } from "./portfolioSchema.js";
 import { populatePortfolioFilters, renderPortfolioCommandCenter, renderTickerLink } from "./portfolioView.js";
 import {
@@ -225,6 +226,8 @@ const state = {
   sortDirection: -1,
   holdingSortKey: "marketValue",
   holdingSortDirection: -1,
+  riskGuardrailSortKey: "riskScore",
+  riskGuardrailSortDirection: -1,
   accountScope: loadAccountScope(),
   holdings: loadHoldings(),
   fidelityStatus: loadFidelityStatus(),
@@ -754,6 +757,9 @@ function render() {
   }));
   const activeAlphaSignals = filterVisibleAlphaSignals(alphaSignals, state.alertState);
   const analysis = analyzePortfolio(scopedHoldings, { ...analysisOptions, marketAlerts: [...marketAlerts, ...alphaAlerts] });
+  const equityRiskGuardrails = buildEquityRiskGuardrails(analysis.holdings, {
+    totalValue: analysis.overview.totalValue
+  });
   const targetPlan = buildTargetAllocationPlan(analysis.holdings, state.targetAllocations, { mode: $("rebalanceMode").value });
   const sleeves = summarizeSleeves(analysis.holdings);
   const thesisRows = buildThesisRows(analysis.holdings, state.thesisProfiles, {
@@ -935,6 +941,10 @@ function render() {
     tickerSignals,
     signalReviewRows,
     signalReviewFilter: $("signalReviewFilter")?.value || "all",
+    equityRiskGuardrails,
+    riskGuardrailFilter: $("riskGuardrailFilter")?.value || "all",
+    riskGuardrailSortKey: state.riskGuardrailSortKey,
+    riskGuardrailSortDirection: state.riskGuardrailSortDirection,
     decisionBrief,
     dailyBrief,
     portfolioHealth,
@@ -982,6 +992,7 @@ function render() {
   syncAlertThresholdInputs();
   updateMarketDataLiveModeControls();
   updateHoldingSortHeaders();
+  updateRiskGuardrailSortHeaders();
   applyRoute();
   updateWhatIfInputVisibility();
 }
@@ -1160,6 +1171,41 @@ function handleHoldingSortKeydown(event) {
   if (event.target.closest?.(".sort-button")) return;
   if (!["Enter", " "].includes(event.key)) return;
   handleHoldingSort(event);
+}
+
+function updateRiskGuardrailSortHeaders() {
+  document.querySelectorAll("#riskGuardrailsTable th[data-risk-sort-key]").forEach((header) => {
+    const active = header.dataset.riskSortKey === state.riskGuardrailSortKey;
+    const label = header.textContent.trim();
+    const direction = active ? (state.riskGuardrailSortDirection === 1 ? "ascending" : "descending") : "not sorted";
+    header.classList.toggle("sort-active", active);
+    header.dataset.sortDirection = active ? (state.riskGuardrailSortDirection === 1 ? "asc" : "desc") : "none";
+    header.setAttribute("aria-sort", active ? (state.riskGuardrailSortDirection === 1 ? "ascending" : "descending") : "none");
+    const button = header.querySelector(".sort-button");
+    if (button) {
+      button.setAttribute("aria-label", `Sort risk guardrails by ${label}. Current state: ${direction}.`);
+      button.setAttribute("title", `Sort risk guardrails by ${label}`);
+    }
+  });
+}
+
+function handleRiskGuardrailSort(event) {
+  const header = event.target.closest?.("#riskGuardrailsTable th[data-risk-sort-key]");
+  if (!header || !event.target.closest?.(".sort-button")) return;
+  event.preventDefault();
+  const key = header.dataset.riskSortKey;
+  if (state.riskGuardrailSortKey === key) {
+    state.riskGuardrailSortDirection *= -1;
+  } else {
+    state.riskGuardrailSortKey = key;
+    state.riskGuardrailSortDirection = defaultRiskGuardrailSortDirection(key);
+  }
+  render();
+}
+
+function defaultRiskGuardrailSortDirection(key = "") {
+  const ascending = new Set(["symbol", "riskCategory", "riskAction", "gainLossFromCostPct", "drawdownFromRecentHighPct"]);
+  return ascending.has(key) ? 1 : -1;
 }
 
 function defaultHoldingSortDirection(key = "") {
@@ -3713,7 +3759,7 @@ function renderSeekingAlphaStatus() {
 }
 
 function wireEvents() {
-  ["query", "holdingViewMode", "portfolioGroup", "portfolioGroupValue", "riskFilter", "thesisFilter", "rebalanceMode", "hideTinyCash", "signalReviewFilter", "alphaRecommendationFilter", "watchlistQuery", "watchlistStatusFilter", "watchlistSectorFilter", "watchlistSourceFilter", "watchlistConvictionFilter", "journalQuery", "journalTickerFilter", "journalDecisionFilter", "journalConvictionFilter", "journalFromDate", "journalToDate", "calendarTickerFilter", "calendarTypeFilter", "calendarImportanceFilter", "calendarSourceFilter", "calendarWindowFilter", "whatIfAction", "whatIfTicker", "whatIfAmount", "whatIfPercent", "whatIfTargetWeight", "whatIfFundingMode"].forEach((id) => $(id)?.addEventListener("input", render));
+  ["query", "holdingViewMode", "portfolioGroup", "portfolioGroupValue", "riskFilter", "thesisFilter", "rebalanceMode", "hideTinyCash", "signalReviewFilter", "alphaRecommendationFilter", "riskGuardrailFilter", "watchlistQuery", "watchlistStatusFilter", "watchlistSectorFilter", "watchlistSourceFilter", "watchlistConvictionFilter", "journalQuery", "journalTickerFilter", "journalDecisionFilter", "journalConvictionFilter", "journalFromDate", "journalToDate", "calendarTickerFilter", "calendarTypeFilter", "calendarImportanceFilter", "calendarSourceFilter", "calendarWindowFilter", "whatIfAction", "whatIfTicker", "whatIfAmount", "whatIfPercent", "whatIfTargetWeight", "whatIfFundingMode"].forEach((id) => $(id)?.addEventListener("input", render));
   $("fidelityFile").addEventListener("change", (event) => {
     importFile(event.target.files[0], "fidelity");
     event.target.value = "";
@@ -3785,6 +3831,7 @@ function wireEvents() {
   $("attentionAlerts").addEventListener("click", handleAlertLifecycleAction);
   $("portfolioHoldingsTable").addEventListener("click", handleHoldingSort);
   $("portfolioHoldingsTable").addEventListener("keydown", handleHoldingSortKeydown);
+  $("riskGuardrailsTable")?.addEventListener("click", handleRiskGuardrailSort);
   document.addEventListener("click", handleDigestRouteClick);
   document.addEventListener("keydown", handleDigestRouteKeydown);
   document.addEventListener("click", (event) => {
