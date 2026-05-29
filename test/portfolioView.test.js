@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzePortfolio } from "../src/portfolioAnalytics.js";
 import {
+  buildDataSourceHealthSummary,
   buildAffectedExposureSummary,
   buildAlphaSourceIssueRows,
   buildRankedAlphaHoldingRows,
   buildTickerDetailModel,
+  dataSourceAvailabilityMode,
   dataSourceAvailabilityLabel,
   filterHoldings,
   marketDataBadgeClass,
@@ -18,6 +20,7 @@ import {
   portfolioImportSourceStatus,
   providerStatusDisplay,
   renderAffectedExposureSummary,
+  renderDataSourceHealth,
   renderTickerLink,
   safeExternalHref,
   sortHoldingsForView,
@@ -113,6 +116,126 @@ test("provider and data source status helpers avoid misleading live labels", () 
   assert.equal(marketDataSourceAvailability({ status: "error" }, {}).label, "Error");
   assert.equal(marketDataSourceAvailability({}, { configured: true }).label, "Not configured");
   assert.equal(dataSourceAvailabilityLabel({ configured: false, demoReady: true }), "Sample");
+});
+
+test("data source health summary separates usable provider data from local/sample fallbacks", () => {
+  const rows = [
+    { label: "Manual holdings", availabilityLabel: "Imported", providerBacked: false },
+    { label: "Finnhub", availabilityLabel: "Live", providerBacked: true },
+    { label: "Cached quotes", availabilityLabel: "Cached", providerBacked: true },
+    { label: "Sample Reddit", availabilityLabel: "Sample", providerBacked: false },
+    { label: "Stale disclosures", configuredPending: true, providerBacked: true },
+    { label: "OpenAI", availabilityLabel: "Not configured", providerBacked: false }
+  ];
+  const summary = buildDataSourceHealthSummary(rows);
+
+  assert.equal(dataSourceAvailabilityMode(rows[4]), "stale");
+  assert.equal(summary.sourceCount, 6);
+  assert.equal(summary.usableCount, 3);
+  assert.equal(summary.reviewCount, 1);
+  assert.equal(summary.providerBackedCount, 3);
+  assert.equal(summary.localOnlyCount, 3);
+});
+
+test("data sources health screen renders standardized source labels and freshness metadata", () => {
+  const previousDocument = globalThis.document;
+  const elements = new Map([
+    ["dataSourceHealthPanel", { innerHTML: "", hidden: false }],
+    ["syncRedditMentionsBtn", { hidden: false }],
+    ["syncXUpdatesBtn", { hidden: false }],
+    ["syncPoliticianTradesBtn", { hidden: false }]
+  ]);
+  globalThis.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+
+  try {
+    renderDataSourceHealth(
+      {
+        connectors: { plaid: { configured: true, linked: false } },
+        marketDataConfig: { selectedLabel: "Finnhub", configured: true, liveProviderCalls: true, detail: "Finnhub key is present on the local backend." },
+        redditProviderConfig: { configured: false, liveProviderCalls: false, detail: "Reddit API not configured." },
+        redditProviderStatuses: { redditApi: { configured: false } },
+        xProviderConfig: { configured: true, liveProviderCalls: true, detail: "X API configured through the local backend." },
+        xProviderStatuses: { xApi: { configured: true, liveProviderCalls: true } },
+        politicianTradeProviderConfig: { configured: true, liveProviderCalls: true, detail: "Public disclosure provider configured." },
+        aiProviders: { openai: { configured: true, liveProviderCalls: false, detail: "OpenAI key present, explanations disabled." } }
+      },
+      { mode: "csv-imported", provider: "csv-import", lastSync: "2026-05-28T12:00:00.000Z" },
+      { connected: true, mode: "csv-import", lastSync: "2026-05-28T12:05:00.000Z" },
+      {
+        realPortfolioImport: true,
+        fileName: "positions.csv",
+        importedAt: "2026-05-28T12:00:00.000Z",
+        rowsParsed: 42,
+        holdingsImported: 40,
+        rejectedRows: [{ classification: "non-holding row" }]
+      },
+      {
+        status: "connected",
+        label: "Finnhub cached quotes",
+        dataFreshness: "cached",
+        providerLabel: "Finnhub",
+        fetchedAt: "2026-05-28T12:10:00.000Z",
+        lastSuccessfulRefresh: "2026-05-28T12:10:00.000Z",
+        quoteCount: 40,
+        cache: { status: "cached", quoteCount: 40, hitCount: 40 }
+      },
+      {
+        mode: "local-file",
+        fileName: "disclosures.csv",
+        tradesImported: 1,
+        rowsParsed: 1,
+        rejectedRows: [],
+        importedAt: "2026-05-28T12:12:00.000Z"
+      },
+      [{ ticker: "MU", sourceMode: "local-file" }],
+      {
+        mode: "local-json",
+        fileName: "reddit.json",
+        mentionsImported: 2,
+        rowsParsed: 2,
+        rejectedRows: [],
+        importedAt: "2026-05-28T12:15:00.000Z"
+      },
+      [{ ticker: "MU", sourceMode: "local-file" }],
+      { realPortfolio: true, uiState: "IMPORTED_CLEAN", holdingCount: 40, loadedAt: "2026-05-28T12:00:00.000Z" },
+      { combined: { accountCount: 4 } },
+      {
+        mode: "x-api",
+        updatesImported: 3,
+        dataFreshness: "stale",
+        fetchedAt: "2026-05-28T12:20:00.000Z",
+        detail: "X provider refresh failed; using stale cache."
+      },
+      [{ ticker: "NVDA", providerId: "x-api" }]
+    );
+
+    const html = elements.get("dataSourceHealthPanel").innerHTML;
+    assert.match(html, /Data source health summary/);
+    assert.match(html, /provider-backed/);
+    assert.match(html, /Manual\/imported holdings/);
+    assert.match(html, /positions\.csv/);
+    assert.match(html, /Imported/);
+    assert.match(html, /Market data/);
+    assert.match(html, /Finnhub/);
+    assert.match(html, /Cached/);
+    assert.match(html, /Type: Provider-backed quotes/);
+    assert.match(html, /Last success:/);
+    assert.match(html, /Reddit \/ social mentions/);
+    assert.match(html, /Imported/);
+    assert.match(html, /X \/ Twitter/);
+    assert.match(html, /Stale/);
+    assert.match(html, /Federal disclosures/);
+    assert.match(html, /disclosures\.csv/);
+    assert.match(html, /OpenAI key detected/);
+    assert.match(html, /Not configured/);
+    assert.match(html, /Deterministic local explanation fallback/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });
 
 test("portfolio import status distinguishes clean, skipped, partial, and failed imports", () => {

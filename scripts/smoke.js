@@ -1197,6 +1197,8 @@ assert(indexHtml.includes(".sidebar-card.account-scope-card") && indexHtml.inclu
 assert(indexHtml.includes("normal") && indexHtml.includes("elevated") && indexHtml.includes("extreme"), "Risk status labels should have visible styles");
 assert(portfolioViewJs.includes("renderMarketTickerSignals"), "Market Intelligence route should render ticker watchlist signal cards");
 assert(portfolioViewJs.includes("renderDataSourceHealth"), "Data Sources route should render future-source readiness matrix");
+assert(portfolioViewJs.includes("buildDataSourceHealthSummary") && portfolioViewJs.includes("provider-backed") && portfolioViewJs.includes("Last success:") && portfolioViewJs.includes("Fallback:"), "Data Sources health should summarize provider-backed/local status, freshness, and fallback reasons");
+assert(indexHtml.includes(".source-health-summary"), "Data Sources health summary should have dedicated responsive styling");
 assert(portfolioViewJs.includes("renderSettingsConfiguration"), "Settings route should render local configuration placeholders");
 assert(portfolioViewJs.includes("Manual/imported holdings"), "Data Sources should show manual/imported holdings readiness");
 assert(portfolioViewJs.includes("Reddit"), "Data Sources should include future Reddit source status");
