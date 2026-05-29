@@ -177,6 +177,7 @@ Current real-data workflow repair checkpoint:
 - Data Sources now includes safe Finnhub diagnostics: provider selected, key present yes/no, requested tickers, successful/missing responses, cache status, truncation, and last error.
 - Local backend quote responses include request truncation metadata and `.env` loading repairs whitespace shell credentials that would otherwise shadow the local key.
 - Added Portfolio Health Score v1 as a compact command-center readout on Overview and Daily Brief. It uses existing local portfolio state, import diagnostics, risk analytics, thesis rows, target drift, visible alerts, and market-data status; sample/no-data states stay unscored and route to Imports.
+- Added score transparency pass: Portfolio Health, portfolio concentration, holding risk contributors, and Alpha Engine holding rows now expose `Explain score` details with local deterministic math, factor weights, missing-data handling, and explicit non-AI/non-trade-advice guardrails.
 
 Current Finnhub market data checkpoint:
 

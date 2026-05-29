@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  HOLDING_RISK_SCORE_WEIGHTS,
   POSITION_CONCENTRATION_THRESHOLDS,
   analyzePortfolio,
+  buildConcentrationScoreBreakdown,
   buildDecisionRiskDashboard,
+  buildHoldingRiskScoreBreakdown,
   buildLeveragedEtfDrawdownScenarios,
   concentrationThresholdFlags,
   riskStatusForWeight
@@ -59,6 +62,56 @@ test("inverse leveraged ETFs use absolute leverage for risk and notional exposur
   assert.ok(sqqq.riskScore > 20);
   assert.equal(analysis.overview.leveragedNotionalExposure, 30000);
   assert.ok(analysis.alerts.some((alert) => alert.type === "leverage" && alert.detail.includes("$30,000")));
+});
+
+test("holding risk score breakdown exposes deterministic factors and missing-data handling", () => {
+  const breakdown = buildHoldingRiskScoreBreakdown({
+    ticker: "SOXL",
+    name: "Direxion Daily Semiconductor Bull 3X",
+    marketValue: 15000,
+    costBasis: 12000,
+    assetClass: "ETF",
+    isLeveragedEtf: true,
+    leveragedMultiple: 3,
+    beta: 2.1,
+    quant: 2.2,
+    valuationGrade: "D",
+    revisionsGrade: "C-"
+  }, 100000);
+
+  const expected = breakdown.components.reduce((total, component) => total + component.points, 0);
+
+  assert.equal(HOLDING_RISK_SCORE_WEIGHTS.concentrationRisk, 0.3);
+  assert.equal(breakdown.finalScore, Math.round(expected));
+  assert.equal(breakdown.generatedBy, "Calculated local risk score. Not an AI explanation.");
+  assert.ok(breakdown.components.some((component) => component.key === "leverageRisk" && component.points > 0));
+  assert.ok(breakdown.components.every((component) => Number.isFinite(component.points) && Number.isFinite(component.weight)));
+  assert.doesNotMatch(JSON.stringify(breakdown), /\b(buy now|sell now|guaranteed|prediction)\b/i);
+});
+
+test("holding risk score breakdown records neutral fallbacks when data is missing", () => {
+  const breakdown = buildHoldingRiskScoreBreakdown({
+    ticker: "XYZ",
+    marketValue: 5000,
+    assetClass: "Equity"
+  }, 0);
+
+  assert.equal(breakdown.inputs.portfolioWeight, 0);
+  assert.ok(breakdown.missingData.some((item) => /Portfolio total/i.test(item)));
+  assert.ok(breakdown.missingData.some((item) => /rating input/i.test(item)));
+  assert.ok(breakdown.missingData.some((item) => /Beta/i.test(item)));
+});
+
+test("concentration score breakdown shows portfolio-level formula", () => {
+  const breakdown = buildConcentrationScoreBreakdown({
+    top5Weight: 0.5,
+    top10Weight: 0.7,
+    topSectorWeight: 0.4
+  });
+
+  assert.equal(breakdown.finalScore, Math.round(0.5 * 60 + 0.7 * 25 + 0.4 * 45));
+  assert.match(breakdown.formula, /top 5 weight x 60/i);
+  assert.ok(breakdown.components.every((component) => component.detail && Number.isFinite(component.points)));
 });
 
 test("persisted false cash classifications are repaired during portfolio analysis", () => {

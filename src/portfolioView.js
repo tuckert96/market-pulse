@@ -427,6 +427,10 @@ function renderPortfolioHealthPanel(health = {}, uiState = "SAMPLE_MODE") {
           <span>/100</span>
         </div>
       </div>
+      <details class="alpha-rank-details score-explain-details">
+        <summary aria-label="Explain Portfolio Health Score">Explain score</summary>
+        ${renderTransparentScoreBreakdown(health.scoreBreakdown, "Portfolio Health Score")}
+      </details>
       <div class="health-component-grid">
         ${components.map((component) => `
           <a class="health-component" href="${escapeHtml(safeHashHref(component.href || "#daily"))}">
@@ -1445,7 +1449,7 @@ function renderAlphaHoldingRankTable(rows = [], activeFilter = "all") {
             <th scope="col">Thesis + factors</th>
             <th scope="col">Review priority</th>
             <th scope="col">Risk + source quality</th>
-            <th scope="col">Factors</th>
+            <th scope="col">Explain</th>
           </tr>
         </thead>
         <tbody>
@@ -1483,7 +1487,7 @@ function renderAlphaHoldingRankRow(row) {
       </td>
       <td class="details-cell">
         <details class="alpha-rank-details">
-          <summary aria-label="Show Alpha Engine factors and rank for ${escapeHtml(row.ticker)}">Factors & rank</summary>
+          <summary aria-label="Explain Alpha Engine score for ${escapeHtml(row.ticker)}">Explain score</summary>
           <div class="alpha-rank-details-grid">
             <div>
               <b>Quality evidence</b>
@@ -1527,7 +1531,7 @@ function renderAlphaHoldingRankRow(row) {
             <div><b>Updated</b><span>${escapeHtml(row.updatedLabel)}</span></div>
           </div>
           ${row.academicValidationWarnings.length ? `<p><b>Validation guardrail:</b> ${escapeHtml(row.academicValidationWarnings.slice(0, 2).join("; "))}</p>` : ""}
-          <p><b>Guardrail:</b> Quality rank and review priority are separate. Inspect the evidence; do not treat this as a forecast or trade instruction.</p>
+          <p><b>Guardrail:</b> Quality rank and review priority are calculated local signals, not AI-generated advice. Inspect the evidence; do not treat this as a forecast or trade instruction.</p>
           <a class="button-link" href="${tickerDetailHash(row.ticker)}">Open ${escapeHtml(row.ticker)} analysis</a>
         </details>
       </td>
@@ -1768,7 +1772,7 @@ function renderAlphaQualityScoreBreakdown(items = []) {
   const visible = (items || []).filter((item) => item?.label);
   if (!visible.length) return "<span>No score component details loaded yet.</span>";
   const finalScore = Math.round(Math.max(0, Math.min(100, visible.reduce((total, item) => total + (Number(item.points) || 0), 0))));
-  return `<span class="alpha-rank-footnote">Final quality = ${escapeHtml(finalScore)}/100 from weighted components and penalties.</span><ul class="alpha-factor-list alpha-score-breakdown">${visible.map((item) => {
+  return `<span class="alpha-rank-footnote">Final quality = ${escapeHtml(finalScore)}/100 from weighted components and penalties. Calculated local score; not an AI explanation.</span><ul class="alpha-factor-list alpha-score-breakdown">${visible.map((item) => {
     const points = Number(item.points) || 0;
     const sign = points > 0 ? "+" : "";
     return `
@@ -1780,6 +1784,39 @@ function renderAlphaQualityScoreBreakdown(items = []) {
   }).join("")}</ul>`;
 }
 
+function renderTransparentScoreBreakdown(breakdown = {}, finalLabel = "Final score") {
+  const components = (breakdown.components || []).filter((item) => item?.label);
+  if (!components.length) return "<span>No score component details loaded yet.</span>";
+  const finalScore = Number.isFinite(Number(breakdown.finalScore)) ? Math.round(Number(breakdown.finalScore)) : Math.round(Math.max(0, Math.min(100, components.reduce((total, item) => total + (Number(item.points) || 0), 0))));
+  const missing = (breakdown.missingData || []).filter(Boolean);
+  return `
+    <span class="alpha-rank-footnote">${escapeHtml(finalLabel)} = ${escapeHtml(finalScore)}/100. ${escapeHtml(breakdown.generatedBy || "Calculated local score. Not an AI explanation.")}</span>
+    ${breakdown.formula ? `<span class="alpha-rank-footnote">Formula: ${escapeHtml(breakdown.formula)}.</span>` : ""}
+    <ul class="alpha-factor-list alpha-score-breakdown">
+      ${components.map((item) => {
+        const points = Number(item.points) || 0;
+        const sign = points > 0 ? "+" : "";
+        return `
+          <li>
+            <b>${escapeHtml(item.label)} · ${sign}${points.toFixed(1)} pts</b>
+            <span>${escapeHtml(scoreComponentInputLabel(item))} · ${Math.round(Math.abs(Number(item.weight) || 0) * 100)}% ${points < 0 ? "penalty" : "weight"}</span>
+            ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
+          </li>
+        `;
+      }).join("")}
+    </ul>
+    ${missing.length ? `<p class="alpha-rank-footnote"><b>Missing-data handling:</b> ${escapeHtml(missing.slice(0, 3).join(" "))}</p>` : '<p class="alpha-rank-footnote"><b>Missing-data handling:</b> No major missing input is affecting this score.</p>'}
+  `;
+}
+
+function scoreComponentInputLabel(item = {}) {
+  if (item.inputLabel) return item.inputLabel;
+  const score = Number(item.score);
+  if (!Number.isFinite(score)) return "No numeric input";
+  if (Math.abs(score) <= 1) return `${Math.round(score01(score) * 100)}/100 input`;
+  return `${Math.round(Math.max(0, Math.min(100, score)))}/100 input`;
+}
+
 function renderAlphaReviewPriorityBreakdown(breakdown = {}) {
   if (!breakdown || !Number.isFinite(Number(breakdown.score))) {
     return "<span>No review-priority math loaded yet.</span>";
@@ -1788,7 +1825,7 @@ function renderAlphaReviewPriorityBreakdown(breakdown = {}) {
   const contributors = (rankMath.topContributors?.length ? rankMath.topContributors : rankMath.components || []).slice(0, 4);
   const penalties = (rankMath.penalties || []).filter((penalty) => Number(penalty.points));
   return `
-    <span class="alpha-rank-footnote">Review priority = max(ticker signal ${formatScore100(breakdown.signalScore)}, top recommendation ${formatScore100(breakdown.recommendationScore)}). It does not lift quality.</span>
+    <span class="alpha-rank-footnote">Review priority = max(ticker signal ${formatScore100(breakdown.signalScore)}, top recommendation ${formatScore100(breakdown.recommendationScore)}). It does not lift quality. Calculated local score; not an AI explanation.</span>
     <ul class="alpha-factor-list alpha-score-breakdown">
       <li>
         <b>${escapeHtml(titleCase(breakdown.source || "review priority"))} · ${formatScore100(breakdown.score)}</b>
@@ -3369,6 +3406,10 @@ function renderRiskPanel(risk, overview, uiState = "SAMPLE_MODE") {
       <div class="risk-stat"><span>QQQ/VGT/NVDA stack</span><b>${formatCurrency(risk.overlap.qqqVgtNvdaStack)}</b></div>
       <div class="risk-stat"><span>Semiconductor stack</span><b>${formatCurrency(risk.overlap.semiconductorStack)}</b></div>
     </div>
+    <details class="alpha-rank-details score-explain-details">
+      <summary aria-label="Explain concentration score">Explain score</summary>
+      ${renderTransparentScoreBreakdown(risk.concentrationScoreBreakdown, "Concentration score")}
+    </details>
     <h3>Stress Tests</h3>
     <div class="stress-list">
       ${risk.stressTests.map((test) => `
@@ -3382,7 +3423,15 @@ function renderRiskPanel(risk, overview, uiState = "SAMPLE_MODE") {
     <h3>Top Risk Contributors</h3>
     <div class="mini-list">
       ${risk.riskContributors.slice(0, 10).map((holding) => `
-        <div><span>${renderTickerLink(holding.ticker)}</span><b>${holding.riskScore}/100</b><small>${formatPct(holding.portfolioWeight)}</small></div>
+        <div class="risk-contributor-row">
+          <span>${renderTickerLink(holding.ticker)}</span>
+          <b>${holding.riskScore}/100</b>
+          <small>${formatPct(holding.portfolioWeight)}</small>
+          <details class="alpha-rank-details score-explain-details">
+            <summary aria-label="Explain risk score for ${escapeHtml(holding.ticker || holding.name || "holding")}">Explain score</summary>
+            ${renderTransparentScoreBreakdown(holding.riskScoreBreakdown, `${holding.ticker || "Holding"} risk score`)}
+          </details>
+        </div>
       `).join("")}
     </div>
   `;

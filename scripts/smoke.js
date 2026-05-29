@@ -1225,7 +1225,9 @@ assert(indexHtml.includes('id="alphaRecommendationFilter"'), "Alpha Engine shoul
 assert(indexHtml.includes("alpha-ranking-table"), "Alpha Engine should render a table-based holdings rank");
 assert(portfolioViewJs.includes("buildRankedAlphaHoldingRows"), "Alpha route should build ranked holding rows");
 assert(portfolioViewJs.includes("renderAlphaHoldingRankTable"), "Alpha route should render a table-based holdings rank");
-assert(portfolioViewJs.includes("alpha-rank-details") && /Why this rank\?/.test(alphaEngineDoc), "Holding rank details should explain score drivers");
+assert(portfolioViewJs.includes("alpha-rank-details") && portfolioViewJs.includes("Explain score") && /Why this rank\?/.test(alphaEngineDoc), "Holding rank details should explain score drivers");
+assert(portfolioAnalyticsJs.includes("riskScoreBreakdown") && portfolioViewJs.includes("renderTransparentScoreBreakdown"), "Risk and Alpha scores should expose transparent score math");
+assert(portfolioViewJs.includes("Calculated local score; not an AI explanation") && portfolioViewJs.includes("Missing-data handling"), "Score explanation UI should distinguish calculated signals from AI explanations and missing-data handling");
 assert(portfolioViewJs.includes("do not treat this as a forecast or trade instruction"), "Alpha Engine should avoid trade-command framing");
 assert(portfolioViewJs.includes("buildAffectedExposureSummary"), "Market Intelligence should use a shared affected exposure summary helper");
 assert(portfolioViewJs.includes("ticker-chips"), "Market Intelligence should render deduplicated ticker chips");

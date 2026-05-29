@@ -205,7 +205,9 @@ test("Alpha Engine uses a semantic holdings ranking table with native details", 
   assert.match(portfolioViewJs, /<th scope="col">Quality score<\/th>/);
   assert.match(portfolioViewJs, /<th scope="col">Review priority<\/th>/);
   assert.match(portfolioViewJs, /<details class="alpha-rank-details">/);
-  assert.match(portfolioViewJs, /<summary aria-label="Show Alpha Engine factors and rank for \$\{escapeHtml\(row\.ticker\)\}">Factors & rank<\/summary>/);
+  assert.match(portfolioViewJs, /<summary aria-label="Explain Alpha Engine score for \$\{escapeHtml\(row\.ticker\)\}">Explain score<\/summary>/);
+  assert.match(portfolioViewJs, /renderTransparentScoreBreakdown/);
+  assert.match(portfolioViewJs, /Calculated local score; not an AI explanation/);
   assert.match(portfolioViewJs, /The Quant Lens is now a first-class Alpha quality input/);
   assert.match(indexHtml, /Quality score = Institutional Quant Lens \+ academic factor discipline \+ thesis \+ source quality/);
   assert.match(indexHtml, /Review priority is a separate urgency read/);
