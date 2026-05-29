@@ -4250,6 +4250,23 @@
         margin-top: 14px;
       }
 
+      .settings-group {
+        display: grid;
+        gap: 12px;
+      }
+
+      .settings-group + .settings-group {
+        margin-top: 18px;
+      }
+
+      .provider-setup-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .provider-setup-grid .provider-status-note {
+        grid-column: 1 / -1;
+      }
+
       .provider-status-note,
       .provider-status-card {
         border: 1px solid var(--line);
@@ -5970,6 +5987,7 @@
         .import-debug-grid,
         .manual-mapping-grid,
         .source-health-summary,
+        .provider-setup-grid,
         .provider-status-card,
         .alert-item,
         .risk-row,

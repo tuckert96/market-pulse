@@ -3944,10 +3944,11 @@ async function refreshProviderReadiness() {
       redditProviderStatuses: config.redditProviderStatuses || redditProviderStatuses({}, state.redditSettings),
       xProviderConfig: config.xProviderConfig || buildXProviderConfig({}, state.xSettings),
       xProviderStatuses: config.xProviderStatuses || xProviderStatuses({}, state.xSettings),
+      aiProviders: config.aiProviders || {},
       message: marketDataConfig.liveProviderCalls
         ? "Local backend readiness loaded. Market data calls run through the server-side proxy."
         : "Local backend readiness loaded. Sample market data remains active until credentials are configured.",
-      liveProviderCalls: Boolean(marketDataConfig.liveProviderCalls || config.politicianTradeProviderConfig?.liveProviderCalls || config.redditProviderConfig?.liveProviderCalls || config.xProviderConfig?.liveProviderCalls)
+      liveProviderCalls: Boolean(marketDataConfig.liveProviderCalls || config.politicianTradeProviderConfig?.liveProviderCalls || config.redditProviderConfig?.liveProviderCalls || config.xProviderConfig?.liveProviderCalls || config.aiProviders?.openai?.liveProviderCalls)
     };
     if (canRunMarketDataLiveRefresh()) {
       await refreshMarketDataSnapshot({ renderAfter: false, reason: "live-mode" });
@@ -3975,6 +3976,7 @@ async function refreshProviderReadiness() {
       redditProviderStatuses: redditProviderStatuses({}, state.redditSettings),
       xProviderConfig: buildXProviderConfig({}, state.xSettings),
       xProviderStatuses: xProviderStatuses({}, state.xSettings),
+      aiProviders: {},
       message: "Sample mode. Run npm run dev to check local backend key presence.",
       liveProviderCalls: false
     };

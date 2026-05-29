@@ -206,6 +206,8 @@ The thesis layer stores manual profiles in `localStorage`. Profiles include why 
 
 The local backup layer serializes dashboard state to JSON. It deliberately excludes passwords and API keys, validates backups before restore, and shows a change preview before writing restored data to localStorage. Backup files still contain holdings and should be treated as sensitive financial records.
 
+Settings mirrors the Data Sources truth model for provider setup. It shows whether market data, OpenAI explanations, Plaid/Fidelity, Reddit, X/social, federal disclosures, and Seeking Alpha imports are Live, Imported, Cached, Stale, Error, or Not configured; it also shows key-presence state, last successful use, last visible error, and setup-document links without exposing secret values.
+
 Canonical schemas are documented in `docs/schemas.md`. Safety rules are documented in `docs/safety-model.md`.
 
 ## Non-Goals

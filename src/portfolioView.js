@@ -84,7 +84,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderPoliticianTrades(options.politicianTrades || [], options.politicianTradeImportReport);
   renderMarketPoliticianTrades(options.politicianTrades || [], options.politicianTradeImportReport);
   renderProviderReadiness(options.providerReadiness);
-  renderSettingsConfiguration(options.alertThresholds);
+  renderSettingsConfiguration(options.alertThresholds, options);
 }
 
 export function filterHoldings(holdings, options = {}) {
@@ -6290,7 +6290,7 @@ function formatTradeRange(trade = {}) {
   return `${formatCurrency(low)}-${formatCurrency(high)}`;
 }
 
-function renderSettingsConfiguration(thresholds = {}) {
+function renderSettingsConfiguration(thresholds = {}, options = {}) {
   const target = byId("settingsConfigurationPanel");
   if (!target) return;
   const position = Number(thresholds.maxPositionWeight ?? 0.12);
@@ -6299,6 +6299,7 @@ function renderSettingsConfiguration(thresholds = {}) {
   const targetDrift = Number(thresholds.minActionDrift ?? 0.015);
   const tickerScore = Number(thresholds.tickerSignalScore ?? 70);
   const redditAcceleration = Number(thresholds.redditMentionAcceleration ?? 0.6);
+  const providerRows = buildSettingsProviderStatusRows(options.providerReadiness || {}, options);
   const settings = [
     {
       title: "Data refresh",
@@ -6321,13 +6322,230 @@ function renderSettingsConfiguration(thresholds = {}) {
       value: "In-app only"
     }
   ];
-  target.innerHTML = settings.map((item) => `
-    <div class="note">
-      <b>${escapeHtml(item.title)}</b>
-      <p>${escapeHtml(item.detail)}</p>
-      <span class="status-badge safe">${escapeHtml(item.value)}</span>
+  target.innerHTML = `
+    <section class="settings-group" aria-label="Local rule settings">
+      ${settings.map((item) => `
+        <div class="note">
+          <b>${escapeHtml(item.title)}</b>
+          <p>${escapeHtml(item.detail)}</p>
+          <span class="status-badge safe">${escapeHtml(item.value)}</span>
+        </div>
+      `).join("")}
+    </section>
+    <section class="settings-group provider-setup-grid" aria-label="Provider configuration status">
+      <div class="provider-status-note">
+        <b>Provider configuration status</b>
+        <span>Keys and tokens stay in the local backend. Settings shows presence, freshness, and safe next steps without revealing secret values.</span>
+      </div>
+      ${providerRows.map((row) => renderSettingsProviderStatusCard(row)).join("")}
+    </section>
+  `;
+}
+
+export function buildSettingsProviderStatusRows(readiness = {}, context = {}) {
+  const marketDataStatus = context.marketDataStatus || {};
+  const marketDataConfig = readiness.marketDataConfig || {};
+  const marketAvailability = marketDataSourceAvailability(marketDataStatus, marketDataConfig);
+  const plaid = readiness.connectors?.plaid || {};
+  const openai = readiness.aiProviders?.openai || {};
+  const redditConfig = readiness.redditProviderConfig || {};
+  const redditStatus = (readiness.redditProviderStatuses || {}).redditApi || {};
+  const xConfig = readiness.xProviderConfig || {};
+  const xStatus = (readiness.xProviderStatuses || {}).xApi || {};
+  const politicianConfig = readiness.politicianTradeProviderConfig || {};
+  const politicianStatus = readiness.politicianTradeProviderStatuses?.selected || readiness.politicianTradeProviderStatuses?.senateStockWatcher || {};
+  const seekingAlphaStatus = context.seekingAlphaStatus || {};
+  const fidelityStatus = context.fidelityStatus || {};
+  const latestImportReport = context.latestImportReport || {};
+  const redditReport = context.redditImportReport || {};
+  const xReport = context.xUpdateImportReport || {};
+  const politicianReport = context.politicianTradeImportReport || {};
+
+  return [
+    settingsProviderRow({
+      id: "market-data-provider",
+      title: marketDataConfig.selectedLabel || marketDataStatus.providerLabel || "Market data provider",
+      statusMode: marketAvailability.label,
+      credentialState: credentialStateLabel(marketDataConfig),
+      detail: marketAvailability.guidance,
+      lastSuccess: marketDataStatus.lastSuccessfulRefresh || marketDataStatus.fetchedAt || marketDataStatus.asOf,
+      lastError: providerVisibleError(marketDataStatus, marketDataConfig),
+      setupHint: "Add a market data provider key to the local .env, restart the dev server, then refresh market data.",
+      docsHref: "docs/market-data-provider-config.md",
+      sourceType: "Server-side quote provider",
+      providerBacked: true
+    }),
+    settingsProviderRow({
+      id: "openai-explanations",
+      title: "OpenAI explanations",
+      statusMode: openai.liveProviderCalls ? DATA_MODES.LIVE : DATA_MODES.NOT_CONFIGURED,
+      credentialState: credentialStateLabel(openai),
+      detail: openai.detail || "Optional AI-assisted explanations are off. Deterministic local explanations remain available.",
+      lastSuccess: openai.lastSuccessfulRefresh || openai.lastSync,
+      lastError: providerVisibleError(openai),
+      setupHint: "Add the OpenAI key in local .env only if AI explanations are wanted; deterministic summaries work without it.",
+      docsHref: "docs/local-backend.md",
+      sourceType: "Server-side explanation provider",
+      providerBacked: true
+    }),
+    settingsProviderRow({
+      id: "fidelity-plaid",
+      title: "Fidelity / Plaid",
+      statusMode: plaid.linked ? DATA_MODES.LIVE : fidelityStatus.connected && /csv|import|local-file/i.test(String(fidelityStatus.mode || "")) ? DATA_MODES.IMPORTED : plaid.configured ? DATA_MODES.NOT_CONFIGURED : DATA_MODES.NOT_CONFIGURED,
+      credentialState: plaid.linked ? "Linked locally" : credentialStateLabel(plaid, { configuredLabel: "Credentials present" }),
+      detail: plaid.detail || "CSV import works without brokerage credentials. Plaid linking uses the local backend when configured.",
+      lastSuccess: plaid.lastSync || fidelityStatus.lastSync || latestImportReport.importedAt,
+      lastError: providerVisibleError(plaid, fidelityStatus),
+      setupHint: "Use CSV import first, or add Plaid credentials to local .env and start Plaid Link from Imports.",
+      docsHref: "docs/fidelity-live-connector.md",
+      sourceType: "Brokerage import or tokenized connector",
+      providerBacked: Boolean(plaid.linked || fidelityStatus.provider === "plaid")
+    }),
+    settingsProviderRow({
+      id: "reddit-api",
+      title: "Reddit API",
+      statusMode: providerModeFromConfigAndReport(redditConfig, redditStatus, redditReport),
+      credentialState: credentialStateLabel(redditConfig, { configuredLabel: "OAuth fields present" }),
+      detail: redditConfig.detail || redditStatus.detail || "Sample/local Reddit rows remain active until OAuth is configured and enabled.",
+      lastSuccess: redditReport.lastSuccessfulRefresh || redditReport.fetchedAt || redditReport.importedAt,
+      lastError: providerVisibleError(redditStatus, redditConfig, redditReport),
+      setupHint: "Configure Reddit OAuth fields in local .env and enable live sync only when ready.",
+      docsHref: "docs/reddit-signal-provider.md",
+      sourceType: "Server-side social provider",
+      providerBacked: Boolean(redditConfig.liveProviderCalls || redditStatus.liveProviderCalls)
+    }),
+    settingsProviderRow({
+      id: "x-social-api",
+      title: "X / social API",
+      statusMode: providerModeFromConfigAndReport(xConfig, xStatus, xReport),
+      credentialState: credentialStateLabel(xConfig),
+      detail: xConfig.detail || xStatus.detail || "Sample/local X rows remain active until a compliant provider is configured and enabled.",
+      lastSuccess: xReport.lastSuccessfulRefresh || xReport.fetchedAt || xReport.importedAt,
+      lastError: providerVisibleError(xStatus, xConfig, xReport),
+      setupHint: "Add the social API token to local .env and enable the provider only for compliant API access.",
+      docsHref: "docs/x-provider-setup.md",
+      sourceType: "Server-side social provider",
+      providerBacked: Boolean(xConfig.liveProviderCalls || xStatus.liveProviderCalls)
+    }),
+    settingsProviderRow({
+      id: "federal-disclosures",
+      title: "Federal disclosures",
+      statusMode: providerModeFromConfigAndReport(politicianConfig, politicianStatus, politicianReport),
+      credentialState: politicianConfig.configured ? "Provider selected" : "No provider selected",
+      detail: politicianConfig.detail || politicianStatus.detail || "Local CSV/JSON import is available. Public dataset sync is config-gated.",
+      lastSuccess: politicianReport.lastSuccessfulRefresh || politicianReport.fetchedAt || politicianReport.importedAt,
+      lastError: providerVisibleError(politicianStatus, politicianConfig, politicianReport),
+      setupHint: "Use local disclosure import first; public dataset sync should stay source-attributed and delayed-context only.",
+      docsHref: "docs/politician-trade-ingestion.md",
+      sourceType: "Disclosure import or public dataset",
+      providerBacked: Boolean(politicianConfig.liveProviderCalls || politicianStatus.liveProviderCalls)
+    }),
+    settingsProviderRow({
+      id: "seeking-alpha-import",
+      title: "Seeking Alpha ratings",
+      statusMode: seekingAlphaStatus.connected ? DATA_MODES.IMPORTED : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? DATA_MODES.SAMPLE : DATA_MODES.NOT_CONFIGURED,
+      credentialState: seekingAlphaStatus.connected ? "Imported data loaded" : "No credentials stored",
+      detail: seekingAlphaStatus.message || seekingAlphaStatus.mode || "Use authorized manual exports. The dashboard does not store Seeking Alpha passwords.",
+      lastSuccess: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt,
+      lastError: providerVisibleError(seekingAlphaStatus),
+      setupHint: "Import an authorized CSV/XLSX export when ratings are needed; no unattended scraping or login storage.",
+      docsHref: "docs/seeking-alpha-connector.md",
+      sourceType: "Manual premium-rating import",
+      providerBacked: false
+    })
+  ];
+}
+
+function renderSettingsProviderStatusCard(row = {}) {
+  return `
+    <div class="provider-status-card ${escapeHtml(row.className)}" data-provider-settings-row="${escapeHtml(row.id)}">
+      <div>
+        <b>${escapeHtml(row.title)}</b>
+        <span>${escapeHtml(row.detail)}</span>
+      </div>
+      <div>
+        <strong>${escapeHtml(row.credentialState)}</strong>
+        <span class="status-badge ${escapeHtml(dataModeBadgeClass(row.statusMode))}">${escapeHtml(dataModeLabel(row.statusMode))}</span>
+      </div>
+      <p class="source-meta">${escapeHtml(row.metadata)}</p>
+      <p>${escapeHtml(row.setupHint)} <a href="${escapeHtml(settingsDocsHref(row.docsHref))}">Setup notes</a></p>
     </div>
-  `).join("");
+  `;
+}
+
+function settingsProviderRow(row = {}) {
+  const statusMode = normalizeDataMode(row.statusMode || DATA_MODES.NOT_CONFIGURED);
+  const lastSuccess = row.lastSuccess ? shortDateTime(row.lastSuccess) : "Not yet";
+  const lastError = cleanProviderStatusText(row.lastError || "None");
+  return {
+    ...row,
+    statusMode,
+    lastError,
+    detail: cleanProviderStatusText(row.detail || "Provider status unavailable."),
+    credentialState: cleanProviderStatusText(row.credentialState || "Not configured"),
+    setupHint: cleanProviderStatusText(row.setupHint || "Review setup docs before enabling provider calls."),
+    metadata: [
+      `Type: ${row.sourceType || (row.providerBacked ? "Provider-backed" : "Local/imported")}`,
+      `Last success: ${lastSuccess}`,
+      `Last error: ${lastError}`
+    ].join(" · "),
+    className: dataModeProviderClass(statusMode)
+  };
+}
+
+function credentialStateLabel(config = {}, options = {}) {
+  if (config.liveProviderCalls) return options.activeLabel || "Configured and active";
+  if (config.configured || config.oauthReady) return options.configuredLabel || "Key present; not active";
+  return "Not configured";
+}
+
+function providerModeFromConfigAndReport(config = {}, status = {}, report = {}) {
+  const text = `${config.status || ""} ${status.status || ""} ${report.status || ""} ${report.mode || ""} ${report.dataFreshness || ""} ${report.cacheStatus || ""}`.toLowerCase();
+  if (/rate/.test(text)) return DATA_MODES.RATE_LIMITED;
+  if (/error|failed/.test(text)) return DATA_MODES.ERROR;
+  if (/stale/.test(text)) return DATA_MODES.STALE;
+  if (/cached/.test(text)) return DATA_MODES.CACHED;
+  if (report.importedAt || report.mentionsImported || report.updatesImported || report.tradesImported || /import/.test(text)) return DATA_MODES.IMPORTED;
+  if (/configured-not-connected|not configured|disabled/.test(text)) return DATA_MODES.NOT_CONFIGURED;
+  if (config.liveProviderCalls || status.liveProviderCalls || /\blive\b|connected|synced/.test(text)) return DATA_MODES.LIVE;
+  if (config.configured || status.configured || /configured/.test(text)) return DATA_MODES.NOT_CONFIGURED;
+  return DATA_MODES.NOT_CONFIGURED;
+}
+
+function dataModeProviderClass(mode) {
+  const normalized = normalizeDataMode(mode);
+  if ([DATA_MODES.LIVE, DATA_MODES.CACHED, DATA_MODES.IMPORTED].includes(normalized)) return "configured";
+  if ([DATA_MODES.STALE, DATA_MODES.ERROR, DATA_MODES.PARTIAL, DATA_MODES.RATE_LIMITED].includes(normalized)) return "configured-pending";
+  return "missing";
+}
+
+function providerVisibleError(...sources) {
+  const values = sources.flatMap((source) => {
+    if (!source || typeof source !== "object") return [];
+    return [
+      source.lastError?.message,
+      source.lastError,
+      source.error,
+      source.warning,
+      source.errorMessage,
+      source.detail && /error|failed|rate|stale/i.test(source.detail) ? source.detail : ""
+    ];
+  }).filter(Boolean);
+  return values.length ? values[0] : "";
+}
+
+function settingsDocsHref(href = "") {
+  const text = String(href || "").trim();
+  if (/^docs\/[a-z0-9._/-]+\.md$/i.test(text)) return text;
+  return safeExternalHref(text);
+}
+
+function cleanProviderStatusText(value = "") {
+  return String(value || "")
+    .replace(/Bearer\s+[A-Za-z0-9._:-]+/gi, "Bearer [redacted]")
+    .replace(/\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|password|secret)=([^&\s]+)/gi, "$1=[redacted]")
+    .replace(/\b[A-Za-z0-9._-]{32,}\b/g, "[redacted]")
+    .trim();
 }
 
 function targetMetric(label, value) {

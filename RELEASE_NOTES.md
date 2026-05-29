@@ -21,6 +21,7 @@ Date: 2026-05-24
 - Alpha Engine ranking is more transparent: recommendation rank math and holding-quality math now expose component weights, source/freshness penalties, risk penalties, and review-priority separation.
 - Score explanations are now first-class: Portfolio Health, concentration risk, holding risk contributors, and Alpha Engine rows expose `Explain score` details with weights, point contributions, missing-data handling, and clear calculated-vs-AI language.
 - Local backup restore is safer: dashboard state imports now validate the JSON, show a restore preview with changed sections, and require Apply Restore before local state is overwritten.
+- Settings now has a provider configuration status panel for market data, OpenAI, Plaid/Fidelity, Reddit, X/social, federal disclosures, and Seeking Alpha imports, including last success/error metadata and setup links without showing secrets.
 - Market-data status handling is more conservative: stale/error/rate-limited provider states take precedence over generic connected/cached labels, and quote-only refreshes identify skipped profile/history resources instead of overstating freshness.
 - Manual market-data refresh now respects provider rate-limit backoff, so a recent Finnhub quota/rate response cannot be immediately bypassed by a full enrichment refresh.
 - Finnhub refreshes now budget profile/fundamental/history enrichment separately from quote refreshes, protecting free-tier API usage while still updating prices across the active ticker set.

@@ -179,6 +179,7 @@ Current real-data workflow repair checkpoint:
 - Added Portfolio Health Score v1 as a compact command-center readout on Overview and Daily Brief. It uses existing local portfolio state, import diagnostics, risk analytics, thesis rows, target drift, visible alerts, and market-data status; sample/no-data states stay unscored and route to Imports.
 - Added score transparency pass: Portfolio Health, portfolio concentration, holding risk contributors, and Alpha Engine holding rows now expose `Explain score` details with local deterministic math, factor weights, missing-data handling, and explicit non-AI/non-trade-advice guardrails.
 - Added local backup/restore trust pass: state export now runs through a testable backup contract, includes account-scope and market-data live-mode settings, validates restore files, and shows an apply/cancel preview before localStorage is overwritten.
+- Added Settings provider-status trust pass: the Settings screen now summarizes market data, OpenAI, Plaid/Fidelity, Reddit, X/social, federal disclosures, and Seeking Alpha setup with key-presence state, last success/error metadata, and setup links while keeping secrets server-side.
 
 Current Finnhub market data checkpoint:
 
