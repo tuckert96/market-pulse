@@ -93,6 +93,7 @@ function buildWeek5Workflow() {
     redditMentions,
     providerReadiness,
     marketDataStatus,
+    targetPlan,
     thresholds: normalizeAlertThresholds({}),
     watchlist: watchlistIdeaTickers(watchlistIdeaRows),
     asOf

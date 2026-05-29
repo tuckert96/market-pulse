@@ -7353,6 +7353,10 @@
                       <input id="alertStaleHours" type="number" min="1" max="720" step="1" />
                       <small>Hours before imported/cached source data needs review.</small>
                     </label>
+                    <label class="control" for="alertMinTargetDrift">Target drift %
+                      <input id="alertMinTargetDrift" type="number" min="0" max="100" step="0.1" />
+                      <small>Minimum overweight/underweight drift before an in-app review alert appears.</small>
+                    </label>
                   </div>
                   <div class="connector-actions">
                     <button id="saveAlertThresholdsBtn" type="button">Save alert thresholds</button>

@@ -230,8 +230,10 @@ const alertThresholds = normalizeAlertThresholds({
   tickerSignalScore: 60,
   politicianTradeScore: 55,
   redditMentionAcceleration: 50,
+  minActionDrift: 1.5,
   staleHours: 24
 });
+const targetPlan = buildTargetAllocationPlan(analysis.holdings, defaultTargetAllocations(), { mode: "new-contribution" });
 const localAlerts = buildLocalAlerts({
   analysis,
   tickerSignals,
@@ -242,11 +244,11 @@ const localAlerts = buildLocalAlerts({
     marketDataQuoteProviders: marketDataProviderStatuses
   },
   marketDataStatus: marketDataSnapshot.status,
+  targetPlan,
   thresholds: alertThresholds,
   watchlist: ["MU", "NVDA", "AMD", "SOXL", "UPRO", "VGT", "CRDO"],
   asOf: "2026-05-23T12:00:00-04:00"
 });
-const targetPlan = buildTargetAllocationPlan(analysis.holdings, defaultTargetAllocations(), { mode: "new-contribution" });
 const whatIfResult = simulateWhatIf({
   holdings: analysis.holdings,
   scenario: { action: "add", ticker: "SOXL", amount: 25000, fundingMode: "external" },
@@ -629,6 +631,8 @@ assert(researchLensSmoke.buffettChecklist.missingEvidence.some((item) => /cash|d
 assert(researchLensSmoke.valuationContext.note.includes("Margin-of-safety"), "ticker research lens should provide margin-of-safety context");
 assert(tickerSignals.every((signal) => Array.isArray(signal.whyScoreIsHigh) && Array.isArray(signal.missingData)), "combined ticker signals should include explanation fields");
 assert(localAlerts.some((alert) => alert.type === "position-weight"), "local alerts should include position weight threshold rules");
+assert(localAlerts.some((alert) => alert.type === "target-allocation-drift"), "local alerts should include target allocation drift rules");
+assert(localAlerts.filter((alert) => alert.type === "target-allocation-drift").every((alert) => /not a trade command/i.test(alert.detail)), "target drift alerts should use review language");
 assert(localAlerts.some((alert) => alert.type === "ticker-signal"), "local alerts should include ticker signal threshold rules");
 assert(localAlerts.some((alert) => alert.type === "politician-trade-match"), "local alerts should include politician disclosure match rules");
 assert(localAlerts.some((alert) => alert.type === "reddit-mention-acceleration"), "local alerts should include Reddit acceleration rules");

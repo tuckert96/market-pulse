@@ -34,6 +34,7 @@ export function buildLocalAlerts({
   redditMentions = [],
   providerReadiness = {},
   marketDataStatus = {},
+  targetPlan = null,
   thresholds = DEFAULT_ALERT_THRESHOLDS,
   watchlist = [],
   asOf = new Date().toISOString()
@@ -43,6 +44,7 @@ export function buildLocalAlerts({
     ...buildPositionWeightAlerts(analysis, settings, asOf),
     ...buildSectorConcentrationAlerts(analysis, settings, asOf),
     ...buildLeveragedExposureAlerts(analysis, settings, asOf),
+    ...buildTargetDriftAlerts(targetPlan, settings, asOf),
     ...buildTickerSignalAlerts(tickerSignals, settings, asOf, analysis),
     ...buildPoliticianTradeAlerts(analysis, politicianTrades, watchlist, settings, asOf),
     ...buildRedditAccelerationAlerts(analysis, redditMentions, watchlist, settings, asOf),
@@ -52,6 +54,48 @@ export function buildLocalAlerts({
   return dedupeAlerts(alerts)
     .sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || b.score - a.score || a.title.localeCompare(b.title))
     .slice(0, 36);
+}
+
+function buildTargetDriftAlerts(targetPlan, thresholds, asOf) {
+  const rows = Array.isArray(targetPlan?.rows) ? targetPlan.rows : [];
+  return rows
+    .filter((row) => ["overweight", "underweight"].includes(row.status))
+    .filter((row) => Math.abs(Number(row.driftWeight) || 0) >= thresholds.minActionDrift)
+    .filter((row) => Math.abs(Number(row.driftValue) || 0) >= 25)
+    .sort((a, b) => Math.abs(Number(b.driftWeight) || 0) - Math.abs(Number(a.driftWeight) || 0))
+    .slice(0, 10)
+    .map((row) => {
+      const driftWeight = Number(row.driftWeight) || 0;
+      const driftValue = Number(row.driftValue) || 0;
+      const absDrift = Math.abs(driftWeight);
+      const severity = absDrift >= thresholds.minActionDrift * 2 ? "warning" : "watch";
+      const label = targetRowLabel(row);
+      const direction = row.status === "overweight" ? "above" : "below";
+      const actionCategory = severity === "warning" ? "Review" : "Monitor";
+      return alert({
+        id: `alert:target-drift:${row.scope}:${slug(row.key)}`,
+        type: "target-allocation-drift",
+        ruleId: "target-allocation-drift-above-threshold",
+        severity,
+        actionCategory,
+        title: `${label} is ${row.status} versus target`,
+        detail: `${label} is ${formatPct(row.currentWeight)} current versus ${formatPct(row.targetWeight)} target, ${direction} target by ${formatPct(absDrift)} (${formatCurrency(Math.abs(driftValue))}). Review the target plan; this is not a trade command.`,
+        ticker: row.scope === "ticker" ? normalizeTicker(row.key) : undefined,
+        source: "local-alert-engine",
+        score: 62 + Math.round(Math.min(30, absDrift * 300)),
+        createdAt: asOf,
+        metadata: {
+          scope: row.scope,
+          key: row.key,
+          currentWeight: row.currentWeight,
+          targetWeight: row.targetWeight,
+          driftWeight,
+          driftValue,
+          threshold: thresholds.minActionDrift,
+          suggestedAction: row.suggestedAction
+        }
+      });
+    });
 }
 
 function buildPositionWeightAlerts(analysis, thresholds, asOf) {
@@ -389,6 +433,22 @@ function clamp01(value) {
 
 function formatPct(value) {
   return `${Math.round((Number(value) || 0) * 1000) / 10}%`;
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0
+  }).format(Number(value) || 0);
+}
+
+function targetRowLabel(row = {}) {
+  if (row.scope === "ticker") return normalizeTicker(row.key) || "Ticker";
+  if (row.scope === "assetClass") return `${row.key || "Asset class"} allocation`;
+  if (row.scope === "strategySleeve") return `${row.key || "Strategy sleeve"} sleeve`;
+  if (row.scope === "account") return `${row.key || "Account"} account`;
+  return row.key || "Target allocation";
 }
 
 function slug(value = "") {
