@@ -1054,7 +1054,9 @@ function safeErrorMessage(error, fallback = "The operation failed safely.") {
 }
 
 function routeFromHash() {
-  return routeFromHashValue(window.location.hash, routes, routeAliases);
+  const pathname = window.location.pathname || "";
+  const pathRoute = pathname && pathname !== "/" && !/\/index\.html$/i.test(pathname) ? pathname : "";
+  return routeFromHashValue(window.location.hash || pathRoute, routes, routeAliases);
 }
 
 function applyRoute() {

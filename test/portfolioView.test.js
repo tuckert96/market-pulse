@@ -708,7 +708,36 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   const options = {
     selectedTicker: "MU",
     marketDataSnapshot: {
-      status: { status: "mock/sample mode", label: "Sample market data" },
+      status: {
+        status: "mock/sample mode",
+        label: "Sample market data",
+        quoteDiagnostics: [
+          {
+            ticker: "MU",
+            coverageSummary: "6/8 fields available",
+            coverageStatus: "partial",
+            missingFields: ["average volume", "52-week high/low"],
+            staleFields: [],
+            fieldCoverage: [
+              { key: "quote", label: "Quote", available: true, status: "mock" },
+              { key: "volume", label: "Volume", available: true, status: "mock" },
+              { key: "averageVolume", label: "Average volume", available: false, status: "missing" }
+            ]
+          },
+          {
+            ticker: "PLTR",
+            coverageSummary: "2/8 fields available",
+            coverageStatus: "partial",
+            missingFields: ["market cap", "historical candles"],
+            staleFields: [],
+            fieldCoverage: [
+              { key: "quote", label: "Quote", available: true, status: "mock" },
+              { key: "historicalCandles", label: "Historical candles", available: true, status: "mock" },
+              { key: "marketCap", label: "Market cap", available: false, status: "missing" }
+            ]
+          }
+        ]
+      },
       quotesByTicker: {
         MU: {
           ticker: "MU",
@@ -777,6 +806,11 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(owned.ticker, "MU");
   assert.equal(owned.owned, true);
   assert.equal(owned.marketValue, 1200);
+  assert.equal(owned.shares, 10);
+  assert.equal(owned.providerCoverage.coverageSummary, "6/8 fields available");
+  assert.match(owned.providerAvailability.summary, /Sample.*6\/8 fields available/);
+  assert.ok(owned.contextLinks.some((link) => link.href === "#holdings" && /Holdings/.test(link.label)));
+  assert.ok(owned.contextLinks.some((link) => link.href === "#watchlist" && /Watchlist/.test(link.label)));
   assert.equal(owned.researchLens.ticker, "MU");
   assert.equal(owned.researchLens.buffettChecklist.securityKind, "operating-company");
   assert.ok(owned.researchLens.buffettChecklist.summary.includes("MU"));
@@ -809,6 +843,8 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(watchlist.savedWatchlistIdea, true);
   assert.equal(watchlist.externallyDiscovered, false);
   assert.equal(watchlist.marketValue, 0);
+  assert.ok(watchlist.contextLinks.some((link) => link.href === "#watchlist" && /Watchlist/.test(link.label)));
+  assert.match(watchlist.providerAvailability.summary, /2\/8 fields available/);
   assert.equal(watchlist.quote.price, 25);
   assert.equal(watchlist.historicalPrices.length, 2);
   assert.equal(watchlist.calendarEvents.length, 1);
@@ -819,6 +855,7 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(signalOnly.watchlistOnly, false);
   assert.equal(signalOnly.derivedSignalIdea, true);
   assert.equal(signalOnly.externallyDiscovered, true);
+  assert.ok(signalOnly.contextLinks.some((link) => link.href === "#market-intelligence"));
   assert.equal(signalOnly.dataQuality.rows.some((row) => row.label === "Position data" && row.status === "signal-discovered"), true);
   assert.equal(signalWithoutQuote.ticker, "NQTE");
   assert.equal(signalWithoutQuote.owned, false);

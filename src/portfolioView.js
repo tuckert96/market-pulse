@@ -3405,6 +3405,7 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
   const derivedSignalIdea = !owned && !samplePosition && Boolean(watchlistIdea?.derived && !savedWatchlistIdea);
   const displayPrice = quote?.price ?? (shares ? marketValue / shares : firstHolding.price);
   const priceAvailable = Number.isFinite(Number(displayPrice)) && (Boolean(quote) || hasPositionRows);
+  const providerCoverage = tickerProviderCoverage(options.marketDataStatus || options.marketDataSnapshot?.status || {}, ticker, quote);
   const model = {
     ticker,
     name: firstHolding.name || quote?.name || ticker,
@@ -3451,8 +3452,10 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     thesisStatus: thesisRow?.thesisStatus || firstHolding.thesisStatus || "No thesis",
     confidenceLevel: thesisRow?.confidenceLevel || watchlistIdea?.conviction || firstHolding.confidenceLevel || "Unrated",
     marketDataStatus: options.marketDataStatus || options.marketDataSnapshot?.status || {},
-    providerCoverage: tickerProviderCoverage(options.marketDataStatus || options.marketDataSnapshot?.status || {}, ticker, quote)
+    providerCoverage,
+    providerAvailability: tickerProviderAvailability(providerCoverage, quote, options.marketDataStatus || options.marketDataSnapshot?.status || {})
   };
+  model.contextLinks = buildTickerContextLinks(model);
   model.thesisRiskSummary = buildThesisRiskSummary(thesisRow || {}, {
     holding: firstHolding,
     sourceMode: options.thesisSummarySourceMode || "local deterministic"
@@ -3526,13 +3529,7 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
   const marketFreshnessLine = marketDataFreshnessLine(model.marketDataStatus, quote);
   panel.innerHTML = `
     ${model.tracked ? "" : `<div class="empty"><strong>${escapeHtml(model.ticker)} is not in local holdings or sample watch data.</strong><span>Add it to holdings/watchlist data later to populate this page.</span></div>`}
-    <div class="connector-actions ticker-context-actions" aria-label="Ticker page shortcuts">
-      <a class="button-link" href="#holdings">Back to Holdings</a>
-      <a class="button-link" href="#risk">Review Risk</a>
-      <a class="button-link" href="#alpha">Open Alpha</a>
-      <a class="button-link" href="#watchlist">${model.watchlistOnly || model.savedWatchlistIdea ? "Open Watchlist" : "Add research note"}</a>
-      <a class="button-link" href="#journal">Log Decision</a>
-    </div>
+    ${renderTickerContextActions(model)}
     <div class="ticker-detail-grid">
       <div class="ticker-hero">
         <article class="ticker-price-card">
@@ -3574,7 +3571,7 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
         <article class="ticker-note-card">
           <span>Market data status</span>
           <b>${escapeHtml(dataModeLabel(marketDataMode(model.marketDataStatus, quote)))}</b>
-          <p>${escapeHtml(model.marketDataStatus?.detail || "Market data provider: Not configured. Sample data keeps screens wired for later APIs.")}</p>
+          <p>${escapeHtml(model.providerAvailability?.summary || model.marketDataStatus?.detail || "Market data provider: Not configured. Sample data keeps screens wired for later APIs.")}</p>
           ${marketFreshnessLine ? `<p>${escapeHtml(marketFreshnessLine)}</p>` : ""}
         </article>
       </div>
@@ -3617,6 +3614,30 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
       </div>
     </section>
   `;
+}
+
+function renderTickerContextActions(model = {}) {
+  const links = Array.isArray(model.contextLinks) ? model.contextLinks : buildTickerContextLinks(model);
+  return `
+    <div class="connector-actions ticker-context-actions" aria-label="Ticker page shortcuts">
+      ${links.map((link) => `<a class="button-link" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`).join("")}
+    </div>
+  `;
+}
+
+function buildTickerContextLinks(model = {}) {
+  const links = [
+    { href: "#holdings", label: "Back to Holdings", reason: "position" },
+    { href: "#watchlist", label: model.watchlistOnly || model.savedWatchlistIdea ? "Back to Watchlist" : "Open Watchlist", reason: "watchlist" }
+  ];
+  if (model.owned || model.samplePosition) {
+    links.push({ href: "#risk", label: "Review Risk", reason: "risk" });
+  } else {
+    links.push({ href: "#market-intelligence", label: model.watchlistOnly || model.savedWatchlistIdea ? "Open Market Intelligence" : "Back to Signals", reason: "signals" });
+  }
+  links.push({ href: "#alpha", label: "Open Alpha", reason: "alpha" });
+  links.push({ href: "#journal", label: "Log Decision", reason: "journal" });
+  return links;
 }
 
 function renderTickerRecentExternalUpdates(model) {
@@ -4507,6 +4528,37 @@ function tickerProviderCoverage(marketDataStatus = {}, ticker = "", quote = null
     coverageSummary: `${available.length}/${fields.length} fields available`,
     coverageStatus: missing.length ? "partial" : "complete",
     lastError: quote.lastError?.message || quote.lastError || ""
+  };
+}
+
+function tickerProviderAvailability(coverage = {}, quote = null, marketDataStatus = {}) {
+  const fields = Array.isArray(coverage.fieldCoverage) ? coverage.fieldCoverage : [];
+  const availableCount = fields.filter((field) => field.available).length;
+  const missingFields = Array.isArray(coverage.missingFields)
+    ? coverage.missingFields
+    : fields.filter((field) => !field.available).map((field) => field.missingLabel || field.label).filter(Boolean);
+  const staleFields = Array.isArray(coverage.staleFields) ? coverage.staleFields : [];
+  const statusLabel = dataModeLabel(marketDataMode(marketDataStatus, quote));
+  if (!quote && !fields.length) {
+    return {
+      statusLabel,
+      coverageStatus: "missing",
+      availableCount: 0,
+      missingFields,
+      staleFields,
+      summary: `${statusLabel}. No ticker-level quote or provider diagnostics are available yet.`
+    };
+  }
+  const coverageSummary = coverage.coverageSummary || `${availableCount}/${fields.length || 0} fields available`;
+  const missingSummary = missingFields.length ? ` Missing: ${missingFields.slice(0, 4).join(", ")}${missingFields.length > 4 ? `, +${missingFields.length - 4} more` : ""}.` : "";
+  const staleSummary = staleFields.length ? ` Stale: ${staleFields.slice(0, 3).join(", ")}${staleFields.length > 3 ? `, +${staleFields.length - 3} more` : ""}.` : "";
+  return {
+    statusLabel,
+    coverageStatus: coverage.coverageStatus || (missingFields.length ? "partial" : "complete"),
+    availableCount,
+    missingFields,
+    staleFields,
+    summary: `${statusLabel}. ${coverageSummary}.${missingSummary}${staleSummary}`.trim()
   };
 }
 
