@@ -12,7 +12,6 @@ import { buildTickerResearchLens } from "./tickerResearch.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
 
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-const compactCurrency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 export function renderPortfolioCommandCenter(analysis, options = {}) {
@@ -6030,7 +6029,20 @@ function formatCurrency(value) {
 }
 
 function formatCompact(value) {
-  return compactCurrency.format(Number(value) || 0);
+  const numeric = Number(value) || 0;
+  const abs = Math.abs(numeric);
+  const sign = numeric < 0 ? "-" : "";
+  const units = [
+    { value: 1_000_000_000_000, suffix: "T" },
+    { value: 1_000_000_000, suffix: "B" },
+    { value: 1_000_000, suffix: "M" },
+    { value: 1_000, suffix: "K" }
+  ];
+  const unit = units.find((item) => abs >= item.value);
+  if (!unit) return currency.format(numeric);
+  const scaled = abs / unit.value;
+  const label = scaled.toFixed(1).replace(/\.0$/, "");
+  return `${sign}$${label}${unit.suffix}`;
 }
 
 function formatSignedCurrency(value) {
