@@ -1,6 +1,6 @@
 import { isRealPortfolioUiState } from "./portfolioState.js";
 
-const COMPONENT_WEIGHTS = Object.freeze({
+export const PORTFOLIO_HEALTH_COMPONENT_WEIGHTS = Object.freeze({
   dataTrust: 0.22,
   concentration: 0.2,
   thesisCoverage: 0.18,
@@ -21,6 +21,7 @@ export function buildPortfolioHealth({
 } = {}) {
   const realPortfolio = isRealPortfolioUiState(uiState);
   if (!realPortfolio) {
+    const components = emptyComponents();
     return {
       score: 0,
       label: uiState === "SAMPLE_MODE" ? "Sample only" : "Data missing",
@@ -29,7 +30,8 @@ export function buildPortfolioHealth({
       summary: uiState === "SAMPLE_MODE"
         ? "Sample data can demonstrate the workflow, but it is not Tucker's real portfolio."
         : "Import holdings before the dashboard can produce a portfolio health read.",
-      components: emptyComponents(),
+      components,
+      scoreBreakdown: buildPortfolioHealthScoreBreakdown(components, 0, 0),
       strengths: [],
       issues: ["No real imported portfolio is loaded."],
       nextActions: [{ label: "Import portfolio", href: "#imports", reason: "Portfolio health needs real holdings." }]
@@ -66,14 +68,37 @@ export function buildPortfolioHealth({
     generatedAt: asOf,
     summary: healthSummary(score, issues),
     components,
+    scoreBreakdown: buildPortfolioHealthScoreBreakdown(components, rawScore, score),
     strengths,
     issues,
     nextActions: nextActionsForComponents(components).slice(0, 3)
   };
 }
 
+export function buildPortfolioHealthScoreBreakdown(components = [], rawScore = 0, finalScore = 0) {
+  return {
+    type: "portfolio-health",
+    finalScore: Math.round(Math.max(0, Math.min(100, Number(finalScore) || 0))),
+    rawScore: Math.round((Number(rawScore) || 0) * 10) / 10,
+    formula: "weighted average of data trust, concentration, thesis coverage, target discipline, alert load, and market freshness",
+    generatedBy: "Calculated local portfolio health score. Not an AI explanation.",
+    components: components.map((component) => ({
+      key: component.key,
+      label: component.label,
+      score: Math.round(Number(component.score) || 0),
+      weight: (Number(component.weight) || 0) / 100,
+      points: Math.round((Number(component.score) || 0) * ((Number(component.weight) || 0) / 100) * 10) / 10,
+      detail: component.detail
+    })),
+    missingData: components
+      .filter((component) => component.issue)
+      .map((component) => component.issue)
+      .slice(0, 4)
+  };
+}
+
 function emptyComponents() {
-  return Object.entries(COMPONENT_WEIGHTS).map(([key, weight]) => ({
+  return Object.entries(PORTFOLIO_HEALTH_COMPONENT_WEIGHTS).map(([key, weight]) => ({
     key,
     label: componentLabel(key),
     score: 0,
@@ -226,7 +251,7 @@ function component({ key, score, detail, issue = "", strength = "", href = "#" }
     key,
     label: componentLabel(key),
     score: Math.round(Math.max(0, Math.min(100, Number(score) || 0))),
-    weight: Math.round((COMPONENT_WEIGHTS[key] || 0) * 100),
+    weight: Math.round((PORTFOLIO_HEALTH_COMPONENT_WEIGHTS[key] || 0) * 100),
     detail,
     issue,
     strength,

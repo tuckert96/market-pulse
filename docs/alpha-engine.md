@@ -175,7 +175,7 @@ Recommendation inputs currently include:
 - event calendar items
 - market-data source health
 
-Filters are available for All, Owned, Watchlist, Risk, Opportunities, Data issues, Recent, and High confidence. Each holding row expands to a "Why this rank?" explanation naming the score drivers, such as high portfolio impact, recency, low data quality, or elevated concentration risk.
+Filters are available for All, Owned, Watchlist, Risk, Opportunities, Data issues, Recent, and High confidence. Each holding row exposes an `Explain score` control with the weighted quality-score math, review-priority math, missing-data handling, and the "Why this rank?" drivers such as high portfolio impact, recency, low data quality, or elevated concentration risk. These are calculated local scores, not AI explanations.
 
 ## Quant And No-Fake-Precision Guardrails
 

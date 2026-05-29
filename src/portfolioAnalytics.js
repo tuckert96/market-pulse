@@ -23,6 +23,13 @@ export const POSITION_CONCENTRATION_THRESHOLDS = Object.freeze([
 
 export const LEVERAGED_ETF_UNDERLYING_DRAWDOWNS = Object.freeze([-0.1, -0.2, -0.3, -0.5]);
 
+export const HOLDING_RISK_SCORE_WEIGHTS = Object.freeze({
+  ratingRisk: 0.25,
+  concentrationRisk: 0.3,
+  leverageRisk: 0.25,
+  volatilityRisk: 0.2
+});
+
 export function analyzePortfolio(rawHoldings = [], options = {}) {
   const holdings = normalizeHoldings(rawHoldings);
   const totalValue = sum(holdings, "marketValue");
@@ -52,11 +59,8 @@ export function enrichHolding(holding, totalValue = 0) {
   const drift = weight - targetWeight;
   const gainLoss = holding.costBasis > 0 ? holding.marketValue - holding.costBasis : 0;
   const gainLossPercent = holding.costBasis > 0 ? gainLoss / holding.costBasis : 0;
-  const ratingRisk = ratingRiskScore(holding);
-  const concentrationRisk = Math.min(100, weight * 420);
-  const leverageRisk = holding.isLeveragedEtf ? Math.min(100, weight * Math.abs(leverageMultipleFor(holding)) * 350) : 0;
-  const volatilityRisk = Math.min(100, (holding.beta || 1) * 22);
-  const riskScore = Math.round(Math.min(100, ratingRisk * 0.25 + concentrationRisk * 0.3 + leverageRisk * 0.25 + volatilityRisk * 0.2));
+  const riskScoreBreakdown = buildHoldingRiskScoreBreakdown(holding, totalValue);
+  const riskScore = riskScoreBreakdown.finalScore;
 
   return {
     ...holding,
@@ -67,7 +71,80 @@ export function enrichHolding(holding, totalValue = 0) {
     unrealizedGain: holding.unrealizedGain || gainLoss,
     unrealizedGainPercent: holding.unrealizedGainPercent || gainLossPercent,
     riskScore,
-    ratingRisk
+    ratingRisk: riskScoreBreakdown.inputs.ratingRisk,
+    riskScoreBreakdown
+  };
+}
+
+export function buildHoldingRiskScoreBreakdown(holding = {}, totalValue = 0) {
+  const weight = totalValue > 0 ? Number(holding.marketValue || 0) / totalValue : Number(holding.portfolioWeight || 0);
+  const ratingRisk = ratingRiskScore(holding);
+  const concentrationRisk = Math.min(100, weight * 420);
+  const leverageMultiple = Math.abs(leverageMultipleFor(holding));
+  const leverageRisk = holding.isLeveragedEtf ? Math.min(100, weight * leverageMultiple * 350) : 0;
+  const betaInput = Number.isFinite(Number(holding.beta)) ? Number(holding.beta) : 1;
+  const volatilityRisk = Math.min(100, betaInput * 22);
+  const components = [
+    {
+      key: "ratingRisk",
+      label: "Rating / factor risk",
+      score: roundScore(ratingRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.ratingRisk,
+      points: roundScore(ratingRisk * HOLDING_RISK_SCORE_WEIGHTS.ratingRisk),
+      detail: ratingRiskDetail(holding)
+    },
+    {
+      key: "concentrationRisk",
+      label: "Position concentration",
+      score: roundScore(concentrationRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.concentrationRisk,
+      points: roundScore(concentrationRisk * HOLDING_RISK_SCORE_WEIGHTS.concentrationRisk),
+      detail: `${formatPct(weight)} portfolio weight is converted to a 0-100 concentration input.`
+    },
+    {
+      key: "leverageRisk",
+      label: "Leveraged ETF exposure",
+      score: roundScore(leverageRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.leverageRisk,
+      points: roundScore(leverageRisk * HOLDING_RISK_SCORE_WEIGHTS.leverageRisk),
+      detail: holding.isLeveragedEtf
+        ? `${holding.ticker || "This holding"} uses about ${leverageMultiple}x daily reset leverage.`
+        : "No leveraged ETF penalty applied."
+    },
+    {
+      key: "volatilityRisk",
+      label: "Volatility / beta",
+      score: roundScore(volatilityRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.volatilityRisk,
+      points: roundScore(volatilityRisk * HOLDING_RISK_SCORE_WEIGHTS.volatilityRisk),
+      detail: Number.isFinite(Number(holding.beta))
+        ? `Beta input ${roundScore(betaInput)} is converted to a volatility risk input.`
+        : "Beta is missing; the local model falls back to 1.0."
+    }
+  ];
+  const rawScore = components.reduce((total, component) => total + component.points, 0);
+  const finalScore = Math.round(Math.min(100, Math.max(0, rawScore)));
+  const missingData = [];
+  if (!totalValue && !holding.portfolioWeight) missingData.push("Portfolio total is unavailable, so concentration risk is treated as zero.");
+  if (!holding.quant && holding.assetClass === "Equity") missingData.push("Quant/rating input is missing; the local model applies a small equity-data penalty.");
+  if (!Number.isFinite(Number(holding.beta))) missingData.push("Beta is missing; volatility risk uses a neutral 1.0 fallback.");
+
+  return {
+    type: "holding-risk",
+    finalScore,
+    rawScore: roundScore(rawScore),
+    formula: "rating risk 25% + concentration 30% + leveraged exposure 25% + volatility/beta 20%",
+    generatedBy: "Calculated local risk score. Not an AI explanation.",
+    inputs: {
+      ratingRisk: roundScore(ratingRisk),
+      concentrationRisk: roundScore(concentrationRisk),
+      leverageRisk: roundScore(leverageRisk),
+      volatilityRisk: roundScore(volatilityRisk),
+      portfolioWeight: roundRatio(weight),
+      leverageMultiple
+    },
+    components,
+    missingData
   };
 }
 
@@ -184,7 +261,8 @@ function buildRiskAnalytics(holdings, totalValue, breakdowns) {
   const top5Weight = totalValue ? sum(concentrationHoldings.slice(0, 5), "marketValue") / totalValue : 0;
   const top10Weight = totalValue ? sum(concentrationHoldings.slice(0, 10), "marketValue") / totalValue : 0;
   const topSectorWeight = (breakdowns.sector || []).find((row) => row.name !== "Cash")?.weight || 0;
-  const concentrationScore = Math.round(Math.min(100, top5Weight * 60 + top10Weight * 25 + topSectorWeight * 45));
+  const concentrationScoreBreakdown = buildConcentrationScoreBreakdown({ top5Weight, top10Weight, topSectorWeight });
+  const concentrationScore = concentrationScoreBreakdown.finalScore;
   const betaEstimate = totalValue
     ? holdings.reduce((total, holding) => total + (holding.beta || 1) * holding.marketValue, 0) / totalValue
     : 0;
@@ -196,6 +274,7 @@ function buildRiskAnalytics(holdings, totalValue, breakdowns) {
 
   return {
     concentrationScore,
+    concentrationScoreBreakdown,
     top5Weight,
     top10Weight,
     betaEstimate,
@@ -206,6 +285,49 @@ function buildRiskAnalytics(holdings, totalValue, breakdowns) {
     overlap,
     stressTests: buildStressTests(holdings),
     liquidityFlags: holdings.filter((holding) => holding.riskLevel === "Very high" || holding.assetClass === "Speculative")
+  };
+}
+
+export function buildConcentrationScoreBreakdown({
+  top5Weight = 0,
+  top10Weight = 0,
+  topSectorWeight = 0
+} = {}) {
+  const components = [
+    {
+      key: "top5Weight",
+      label: "Top 5 holdings",
+      score: roundRatio(top5Weight),
+      weight: 0.6,
+      points: roundScore(top5Weight * 60),
+      detail: `${formatPct(top5Weight)} in the top 5 holdings.`
+    },
+    {
+      key: "top10Weight",
+      label: "Top 10 holdings",
+      score: roundRatio(top10Weight),
+      weight: 0.25,
+      points: roundScore(top10Weight * 25),
+      detail: `${formatPct(top10Weight)} in the top 10 holdings.`
+    },
+    {
+      key: "topSectorWeight",
+      label: "Largest non-cash sector",
+      score: roundRatio(topSectorWeight),
+      weight: 0.45,
+      points: roundScore(topSectorWeight * 45),
+      detail: `${formatPct(topSectorWeight)} in the largest non-cash sector.`
+    }
+  ];
+  const rawScore = components.reduce((total, component) => total + component.points, 0);
+  return {
+    type: "portfolio-concentration",
+    finalScore: Math.round(Math.min(100, Math.max(0, rawScore))),
+    rawScore: roundScore(rawScore),
+    formula: "top 5 weight x 60 + top 10 weight x 25 + largest non-cash sector weight x 45",
+    generatedBy: "Calculated local concentration score. Not an AI explanation.",
+    components,
+    missingData: top5Weight || top10Weight || topSectorWeight ? [] : ["Portfolio concentration needs imported holdings."]
   };
 }
 
@@ -832,6 +954,15 @@ function ratingRiskScore(holding) {
   return Math.min(100, risk);
 }
 
+function ratingRiskDetail(holding = {}) {
+  const notes = [];
+  if (holding.quant && holding.quant < 3) notes.push(`Quant rating ${holding.quant} adds risk.`);
+  if (numericFromGrade(holding.valuationGrade) && numericFromGrade(holding.valuationGrade) <= 2.5) notes.push(`Valuation grade ${holding.valuationGrade} adds risk.`);
+  if (numericFromGrade(holding.revisionsGrade) && numericFromGrade(holding.revisionsGrade) <= 3) notes.push(`EPS revisions grade ${holding.revisionsGrade} adds risk.`);
+  if (!holding.quant && holding.assetClass === "Equity") notes.push("Missing equity rating data adds a small risk penalty.");
+  return notes.length ? notes.join(" ") : "No weak rating, valuation, or revisions input is currently penalizing this holding.";
+}
+
 function daysUntil(dateText) {
   if (!dateText) return null;
   const date = new Date(`${dateText}T12:00:00`);
@@ -873,6 +1004,10 @@ function clamp(value, min, max) {
 
 function roundRatio(value) {
   return Math.round((Number(value) || 0) * 1000000) / 1000000;
+}
+
+function roundScore(value) {
+  return Math.round((Number(value) || 0) * 10) / 10;
 }
 
 function roundCurrency(value) {
