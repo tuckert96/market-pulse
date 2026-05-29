@@ -719,7 +719,14 @@ function renderOverviewMarketDriversSnapshot(report = null) {
     target.innerHTML = '<div class="empty"><strong>No driver read yet.</strong><span>Refresh market data or load sample data to see market drivers.</span></div>';
     return;
   }
-  target.innerHTML = [report.broadMarket, report.aiTech].map((scope) => `
+  const regime = report.marketRegime ? `
+    <div>
+      <span>Market regime · ${escapeHtml(report.marketRegime.confidenceLabel || "Low")} confidence</span>
+      <b>${escapeHtml(report.marketRegime.label || "Mixed")} · ${escapeHtml(report.marketRegime.sourceStatus || "Source-labeled")}</b>
+      <small>${escapeHtml(report.marketRegime.interpretation || "Rule-based regime context pending.")}</small>
+    </div>
+  ` : "";
+  target.innerHTML = regime + [report.broadMarket, report.aiTech].map((scope) => `
     <div>
       <span>${escapeHtml(scope.label)} · ${escapeHtml(scope.confidenceLabel)} confidence</span>
       <b>${escapeHtml(scope.directionLabel)} · ${escapeHtml(scope.moveLabel || "move unavailable")}</b>
@@ -4599,6 +4606,7 @@ function renderMarketDrivers(report = null) {
   }
   setStatusBadge("marketDriversSourceBadge", report.sourceStatus || "Source-labeled", dataModeBadgeClass(report.sourceMode));
   heroTarget.innerHTML = `
+    ${renderMarketRegimeCard(report.marketRegime)}
     <div class="market-driver-hero-grid">
       ${renderMarketDriverScopeCard(report.broadMarket)}
       ${renderMarketDriverScopeCard(report.aiTech)}
@@ -4612,6 +4620,43 @@ function renderMarketDrivers(report = null) {
     ? driverRows.slice(0, 10).map(renderMarketDriverRow).join("")
     : '<div class="empty"><strong>No ranked drivers yet.</strong><span>Market prices, social rows, or event read-throughs need to be loaded first.</span></div>';
   sourceTarget.innerHTML = renderMarketDriverSourceSummary(report);
+}
+
+function renderMarketRegimeCard(regime = null) {
+  if (!regime) return "";
+  const signals = (regime.signals || []).slice(0, 6);
+  return `
+    <article class="market-driver-card market-regime-card">
+      <div class="badge-row">
+        <span class="status-badge ${escapeHtml(marketRegimeBadgeClass(regime.regime))}">${escapeHtml(regime.label || "Mixed")}</span>
+        <span class="status-badge">${escapeHtml(regime.confidenceLabel || "Low")} confidence</span>
+        <span class="status-badge ${escapeHtml(dataModeBadgeClass(regime.sourceMode))}">${escapeHtml(regime.sourceStatus || "Source-labeled")}</span>
+      </div>
+      <div>
+        <h3>Market Regime</h3>
+        <div class="move-line"><b>${escapeHtml(regime.summary || "Rule-based regime read pending.")}</b></div>
+      </div>
+      <p>${escapeHtml(regime.interpretation || "Use this as source-labeled context only.")}</p>
+      <div class="target-summary-grid">
+        ${targetMetric("Risk-on score", `${escapeHtml(regime.riskOnScore ?? 0)}`)}
+        ${targetMetric("Risk-off score", `${escapeHtml(regime.riskOffScore ?? 0)}`)}
+        ${targetMetric("Defensive score", `${escapeHtml(regime.defensiveScore ?? 0)}`)}
+        ${targetMetric("Data gaps", `${(regime.missingData || []).length}`)}
+      </div>
+      <div class="market-driver-signal-grid">
+        ${signals.map((signal) => `
+          <div class="provider-status-card ${signal.status === "missing" ? "badge-source-not-configured" : ""}">
+            <div><b>${escapeHtml(signal.label)}</b><span>${escapeHtml(titleCase(String(signal.status || "mixed").replaceAll("-", " ")))}</span></div>
+            <p>${escapeHtml(signal.reading || "Data unavailable")}</p>
+          </div>
+        `).join("")}
+      </div>
+      <div class="news-links">
+        <a href="#risk">Review portfolio risk</a>
+        <a href="#data-sources">Check sources</a>
+      </div>
+    </article>
+  `;
 }
 
 function renderMarketDriverScopeCard(scope = {}) {
@@ -4696,6 +4741,13 @@ function marketDriverDirectionClass(direction = "") {
   if (direction === "up") return "safe";
   if (direction === "down") return "medium";
   if (direction === "unknown") return "demo";
+  return "";
+}
+
+function marketRegimeBadgeClass(regime = "") {
+  if (regime === "risk-on") return "safe";
+  if (regime === "risk-off" || regime === "defensive") return "medium";
+  if (regime === "overbought" || regime === "oversold") return "demo";
   return "";
 }
 
