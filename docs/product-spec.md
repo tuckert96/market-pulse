@@ -210,6 +210,8 @@ Settings mirrors the Data Sources truth model for provider setup. It shows wheth
 
 When no active imported portfolio exists, Overview shows a first-run guide instead of an empty-looking dashboard. The guide routes Tucker to local Fidelity CSV/JSON/paste import, Sample mode, Data Sources, and Settings, and it keeps Portfolio, Market data, and Provider setup labels visible so Sample or Not configured states cannot be mistaken for real imported/live data.
 
+Navigation is hash-first for browser back/forward compatibility, but local slash-style paths such as `/holdings`, `/imports`, `/data-sources`, and `/ticker/MU` canonicalize to the same focused screens. The `#alpha-engine` alias resolves to the Alpha Engine route so dashboard cards, sidebar links, and documentation wording stay compatible.
+
 Canonical schemas are documented in `docs/schemas.md`. Safety rules are documented in `docs/safety-model.md`.
 
 ## Non-Goals
