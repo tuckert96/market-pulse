@@ -3577,6 +3577,32 @@
         margin-top: 6px;
       }
 
+      .backup-preview-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .backup-preview-list > div {
+        display: grid;
+        grid-template-columns: minmax(9rem, 0.8fr) minmax(0, 1fr);
+        gap: 4px 12px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fbfcfe;
+      }
+
+      .backup-preview-list > div.changed {
+        border-color: rgba(245, 158, 11, 0.32);
+        background: #fffaf0;
+      }
+
+      .backup-preview-list small {
+        grid-column: 2;
+        color: var(--muted);
+      }
+
       .alpha-rank-details-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5964,6 +5990,14 @@
             "action";
         }
 
+        .backup-preview-list > div {
+          grid-template-columns: 1fr;
+        }
+
+        .backup-preview-list small {
+          grid-column: 1;
+        }
+
         .risk-row-main.ranked {
           grid-template-columns: auto minmax(0, 1fr);
         }
@@ -7436,6 +7470,7 @@
                     <button id="clearPortfolioBtn" type="button">Clear portfolio data</button>
                   </div>
                   <p id="stateStatus" class="connector-status" aria-live="polite">No state import or export yet.</p>
+                  <div id="stateRestorePreview" class="state-restore-preview" hidden></div>
                 </div>
               </div>
             </div>

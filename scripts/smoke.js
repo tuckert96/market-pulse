@@ -1090,6 +1090,9 @@ assert(appJs.includes("targetAllocations: state.targetAllocations"), "state expo
 assert(appJs.includes("buildThesisAlerts"), "app.js should wire thesis alerts into the attention system");
 assert(appJs.includes("growthDashboardThesisSnapshots"), "app.js should persist thesis snapshots locally");
 assert(appJs.includes("thesisSnapshots: state.thesisSnapshots"), "state export should include thesis snapshots");
+assert(appJs.includes("buildDashboardStateRestorePreview") && appJs.includes("pendingStateRestore"), "dashboard state restore should preview before applying local backup data");
+assert(appJs.includes("accountScope: state.accountScope") && appJs.includes("marketDataLiveMode: state.marketDataLiveMode"), "dashboard state backup should include local account scope and market data live-mode settings");
+assert(indexHtml.includes('id="stateRestorePreview"') && appJs.includes("Apply restore") && appJs.includes("Cancel"), "settings should show an apply/cancel restore preview for state backups");
 assert(indexHtml.includes('id="saveThesisSnapshotBtn"') && indexHtml.includes('id="thesisSnapshotPanel"'), "Thesis route should include snapshot save and history UI");
 assert(portfolioViewJs.includes("renderTickerThesisSnapshotHistory"), "Ticker pages should render thesis snapshot history");
 assert(thesisSnapshot.ticker === "MU" && thesisSnapshot.sourceType === "user-written", "thesis snapshots should normalize source labels");

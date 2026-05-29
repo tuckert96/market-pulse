@@ -175,6 +175,9 @@ test("file inputs remain keyboard accessible through focusable controls", () => 
   assert.match(indexHtml, /\.button-label:focus-within/);
   assert.match(indexHtml, /id="fidelityFile" type="file"[^>]+aria-label="Import Fidelity CSV or holdings JSON file"/);
   assert.match(indexHtml, /id="stateFile" type="file"[^>]+aria-label="Import dashboard state JSON file"/);
+  assert.match(indexHtml, /id="stateRestorePreview" class="state-restore-preview" hidden/);
+  assert.match(appJs, /data-state-restore-action/);
+  assert.match(appJs, /Backup preview ready/);
   assert.match(indexHtml, /id="redditJsonFile" type="file"[^>]+aria-label="Import Reddit mention JSON file"/);
   assert.match(indexHtml, /id="politicianTradesFile" type="file"[^>]+aria-label="Import federal disclosure CSV or JSON file"/);
 });

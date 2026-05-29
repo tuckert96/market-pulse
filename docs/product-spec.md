@@ -97,7 +97,8 @@ The product should feel like a research cockpit: fast to scan, easy to filter, a
 1. User opens Data Sources And Safety.
 2. User exports local state as JSON.
 3. Dashboard writes holdings, market events, Alpha Engine events, thesis profiles, alert lifecycle state, and connector status into a local backup file.
-4. User can restore that JSON later without providing brokerage passwords or API keys.
+4. User imports a backup and reviews a restore preview before anything is committed.
+5. User can apply or cancel that restore without providing brokerage passwords or API keys.
 
 ## MVP Scope
 
@@ -203,7 +204,7 @@ The rebalancing layer reads canonical holdings and local thesis-profile override
 
 The thesis layer stores manual profiles in `localStorage`. Profiles include why Tucker owns the holding, bullish assumptions, risks, thesis-breaking conditions, review triggers, target allocation, confidence, catalyst, stop-review trigger, and last reviewed date. These fields support two product goals: better target allocation discipline and cleaner Alpha Engine classification when new events arrive.
 
-The local backup layer serializes dashboard state to JSON. It deliberately excludes passwords and API keys. Backup files still contain holdings and should be treated as sensitive financial records.
+The local backup layer serializes dashboard state to JSON. It deliberately excludes passwords and API keys, validates backups before restore, and shows a change preview before writing restored data to localStorage. Backup files still contain holdings and should be treated as sensitive financial records.
 
 Canonical schemas are documented in `docs/schemas.md`. Safety rules are documented in `docs/safety-model.md`.
 
