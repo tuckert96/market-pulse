@@ -882,6 +882,8 @@ assert(indexHtml.includes('data-screen="market-intelligence"'), "index.html shou
 assert(indexHtml.includes('data-screen="signal-review"'), "index.html should define a focused Signal Review screen");
 assert(indexHtml.includes('data-screen="data-sources"'), "index.html should define a focused Data Sources screen");
 assert(indexHtml.includes('data-screen="settings"'), "index.html should define a focused Settings screen");
+assert(routerJs.includes('"alpha-engine": "alpha"'), "router should support the Alpha Engine route alias from dashboard docs");
+assert(routerJs.includes('replace(/^\\/+/, "")'), "router should normalize slash-style local routes into focused hash screens");
 assert(indexHtml.includes("nav-more"), "secondary research/planning tools should be grouped instead of competing with the main nav");
 assert(indexHtml.includes('<details class="nav-more" open>'), "secondary research/planning tools should stay reachable on mobile");
 assert(!/aside \.nav-more,\s*\.sidebar-card/s.test(indexHtml), "mobile nav should not hide secondary research routes");
