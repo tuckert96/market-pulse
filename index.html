@@ -4928,6 +4928,157 @@
         line-height: 1.4;
       }
 
+      .first-run-onboarding {
+        margin-bottom: 18px;
+      }
+
+      .first-run-onboarding[hidden] {
+        display: none;
+      }
+
+      .first-run-card {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.1fr);
+        gap: 16px;
+        padding: clamp(18px, 2vw, 24px);
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        border-radius: var(--radius-large);
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(241, 247, 255, 0.72)),
+          var(--surface-elevated);
+        box-shadow: var(--shadow-card);
+      }
+
+      .first-run-card.sample {
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.84)),
+          var(--surface-elevated);
+      }
+
+      .first-run-card.import-error {
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(255, 246, 237, 0.74)),
+          var(--surface-elevated);
+      }
+
+      .first-run-copy {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .first-run-badges,
+      .first-run-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .first-run-copy h3 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: clamp(24px, 3vw, 34px);
+        letter-spacing: 0;
+        line-height: 1.08;
+      }
+
+      .first-run-copy p,
+      .first-run-safety {
+        margin: 0;
+        color: var(--text-secondary);
+        line-height: 1.55;
+      }
+
+      .first-run-safety {
+        font-size: 12px;
+      }
+
+      .first-run-steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .first-run-step {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+        padding: 13px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        color: inherit;
+        text-decoration: none;
+        transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+      }
+
+      .first-run-step:hover,
+      .first-run-step:focus-visible {
+        transform: translateY(-1px);
+        border-color: rgba(0, 113, 227, 0.28);
+        background: #fff;
+        outline: none;
+      }
+
+      .first-run-step span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        background: rgba(0, 113, 227, 0.1);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .first-run-step b {
+        color: var(--text-primary);
+      }
+
+      .first-run-step small {
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+
+      .first-run-source-strip {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .first-run-source-strip > div {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid rgba(210, 219, 232, 0.72);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .first-run-source-strip b,
+      .first-run-source-strip small {
+        min-width: 0;
+        overflow-wrap: normal;
+        word-break: normal;
+      }
+
+      .first-run-source-strip b {
+        color: var(--text-primary);
+        font-size: 13px;
+      }
+
+      .first-run-source-strip small {
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
       .overview-digest-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5664,6 +5815,17 @@
         margin-bottom: 4px;
       }
 
+      .holdings-empty-state {
+        text-align: left;
+      }
+
+      .holdings-empty-state .inline-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
       @media (max-width: 1080px) {
         .layout,
         .grid-two,
@@ -5672,7 +5834,9 @@
         .fidelity-import-grid,
         .fidelity-assistant-head,
         .research-quote-grid,
-        .ticker-detail-grid {
+        .ticker-detail-grid,
+        .first-run-card,
+        .first-run-source-strip {
           grid-template-columns: 1fr;
         }
 
@@ -5711,6 +5875,7 @@
         .sa-factor-strip.compact,
         .overview-digest-grid,
         .overview-digest-grid.command-brief-grid,
+        .first-run-steps,
         .watchlist-card-grid,
         .journal-card-head {
           grid-template-columns: repeat(2, 1fr);
@@ -5950,6 +6115,8 @@
         .overview-digest-grid,
         .overview-digest-grid.command-brief-grid,
         .overview-secondary-grid,
+        .first-run-steps,
+        .first-run-source-strip,
         .screen-guidance,
         .watchlist-card-grid,
         .watchlist-quick-add,
@@ -6142,6 +6309,7 @@
               <div class="guidance-item"><span>Why</span><b>Decision first</b><small>Only the highest-signal checks belong here.</small></div>
               <div class="guidance-item"><span>Next</span><b>Follow one link</b><small>Start with the highest-priority card, then drill down.</small></div>
             </div>
+            <div id="firstRunOnboardingPanel" class="first-run-onboarding" aria-label="First-run setup actions"></div>
             <div class="overview-digest-grid command-brief-grid overview-priority-grid" aria-label="Market Pulse command brief">
               <article class="digest-card portfolio-snapshot" data-route="#holdings" role="link" tabindex="0" aria-label="Open Holdings from portfolio value and daily move card">
                 <h3>Portfolio Value & Daily Move</h3>

@@ -16,6 +16,7 @@ const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderDataModeIndicator(options.portfolioStatus, options.marketDataStatus, options.latestImportReport, options.accountScope);
+  renderFirstRunOnboarding(options.portfolioStatus, options.marketDataStatus, options.providerReadiness, options.uiState);
   renderMarketTape(analysis.holdings, options.tickerSignals || [], options.marketDataStatus, options.uiState);
   renderThirtySecondBrief(analysis, options);
   renderDailyCommandBrief(options.dailyBrief, options.uiState);
@@ -152,6 +153,151 @@ export function safeExternalHref(url = "#") {
 function safeHashHref(href = "#overview") {
   const text = String(href || "").trim();
   return text.startsWith("#") ? text : "#overview";
+}
+
+export function buildFirstRunOnboardingModel({
+  portfolioStatus = {},
+  marketDataStatus = {},
+  providerReadiness = {},
+  uiState = "NO_DATA"
+} = {}) {
+  const imported = isImportedState(uiState);
+  const sample = uiState === "SAMPLE_MODE" || portfolioStatus?.samplePortfolio;
+  const failed = uiState === "IMPORT_FAILED";
+  const noData = uiState === "NO_DATA" || !portfolioStatus?.activePortfolio;
+  const marketMode = marketDataMode(marketDataStatus);
+  const providerStatuses = Object.values(providerReadiness?.providerStatuses || {});
+  const configuredProviders = providerStatuses.filter((status) => status.configured && status.id !== "demo").length;
+  const marketLabel = marketDataStatus?.label || dataModeLabel(marketMode);
+
+  if (imported && !failed) {
+    return {
+      visible: false,
+      mode: "imported",
+      title: "Portfolio is loaded",
+      summary: portfolioStatus?.detail || "The command brief is using imported holdings.",
+      primaryAction: { label: "Open daily brief", href: "#daily" },
+      secondaryActions: [],
+      steps: [],
+      statusRows: []
+    };
+  }
+
+  const mode = sample ? "sample" : failed ? "import-error" : "no-data";
+  const title = sample
+    ? "Sample portfolio is active"
+    : failed
+    ? "Import needs review"
+    : "Import your portfolio to begin";
+  const summary = sample
+    ? "This is a safe practice portfolio for learning the workflow. It is not Tucker's real money or Live market data."
+    : failed
+    ? portfolioStatus?.detail || "The last import did not apply holdings. Review diagnostics, adjust the file or mappings, then preview again."
+    : "Start with a local Fidelity CSV, pasted positions, or holdings JSON. Nothing changes until you review and apply the preview.";
+  const badge = sample ? "Sample" : failed ? "Error" : "No data loaded";
+  const badgeMode = sample ? DATA_MODES.SAMPLE : failed ? DATA_MODES.ERROR : DATA_MODES.NO_DATA;
+
+  return {
+    visible: true,
+    mode,
+    badge,
+    badgeMode,
+    title,
+    summary,
+    primaryAction: { label: failed ? "Review import diagnostics" : "Import Fidelity CSV", href: "#imports" },
+    sampleAction: sample ? null : { label: "Try sample data" },
+    secondaryActions: [
+      { label: "Check data sources", href: "#data-sources" },
+      { label: "Open Settings", href: "#settings" }
+    ],
+    steps: [
+      {
+        label: "1",
+        title: "Load holdings",
+        detail: "Upload, drop, or paste Fidelity positions locally. CSV and holdings JSON are supported.",
+        href: "#imports"
+      },
+      {
+        label: "2",
+        title: "Confirm preview",
+        detail: "Review accepted rows, skipped non-holding rows, rejected rows, accounts, and total market value.",
+        href: "#imports"
+      },
+      {
+        label: "3",
+        title: "Turn on context",
+        detail: "Use Data Sources and Settings to verify Finnhub, OpenAI, Plaid, Reddit, X, and imported ratings status.",
+        href: "#data-sources"
+      }
+    ],
+    statusRows: [
+      {
+        label: "Portfolio",
+        value: portfolioStatus?.label || (noData ? "No portfolio loaded" : "Sample portfolio loaded"),
+        mode: portfolioDataMode(portfolioStatus),
+        detail: portfolioStatus?.detail || "Import a local file or load sample data."
+      },
+      {
+        label: "Market data",
+        value: marketLabel,
+        mode: marketMode,
+        detail: marketDataDisplayDetail(marketDataStatus)
+      },
+      {
+        label: "Provider setup",
+        value: `${configuredProviders}/${providerStatuses.length || 0} configured`,
+        mode: configuredProviders ? DATA_MODES.NOT_CONFIGURED : DATA_MODES.NOT_CONFIGURED,
+        detail: configuredProviders ? "Keys are detected; open Data Sources to verify freshness." : "Optional providers can be configured later."
+      }
+    ]
+  };
+}
+
+function renderFirstRunOnboarding(portfolioStatus = {}, marketDataStatus = {}, providerReadiness = {}, uiState = "NO_DATA") {
+  const target = byId("firstRunOnboardingPanel");
+  if (!target) return;
+  const model = buildFirstRunOnboardingModel({ portfolioStatus, marketDataStatus, providerReadiness, uiState });
+  target.hidden = !model.visible;
+  if (!model.visible) {
+    target.innerHTML = "";
+    return;
+  }
+  target.innerHTML = `
+    <section class="first-run-card ${escapeHtml(model.mode)}" data-first-run-mode="${escapeHtml(model.mode)}">
+      <div class="first-run-copy">
+        <div class="first-run-badges">
+          <span class="status-badge ${escapeHtml(dataModeBadgeClass(model.badgeMode))}">${escapeHtml(model.badge)}</span>
+          <span class="status-badge safe">Local first</span>
+        </div>
+        <h3>${escapeHtml(model.title)}</h3>
+        <p>${escapeHtml(model.summary)}</p>
+        <div class="first-run-actions">
+          <a class="button-link primary" href="${escapeHtml(safeHashHref(model.primaryAction.href))}">${escapeHtml(model.primaryAction.label)}</a>
+          ${model.sampleAction ? `<button type="button" data-overview-action="sample">${escapeHtml(model.sampleAction.label)}</button>` : ""}
+          ${model.secondaryActions.map((action) => `<a class="button-link" href="${escapeHtml(safeHashHref(action.href))}">${escapeHtml(action.label)}</a>`).join("")}
+        </div>
+        <small class="first-run-safety">Your portfolio stays in this browser unless you export a backup. No brokerage password, API key, or cookie is shown here.</small>
+      </div>
+      <div class="first-run-steps" aria-label="First-run setup steps">
+        ${model.steps.map((step) => `
+          <a class="first-run-step" href="${escapeHtml(safeHashHref(step.href))}">
+            <span>${escapeHtml(step.label)}</span>
+            <b>${escapeHtml(step.title)}</b>
+            <small>${escapeHtml(step.detail)}</small>
+          </a>
+        `).join("")}
+      </div>
+      <div class="first-run-source-strip" aria-label="Current setup status">
+        ${model.statusRows.map((row) => `
+          <div>
+            <span class="data-mode-pill ${escapeHtml(dataModeBadgeClass(row.mode))}">${escapeHtml(row.label)}: ${escapeHtml(dataModeLabel(row.mode))}</span>
+            <b>${escapeHtml(row.value)}</b>
+            <small>${escapeHtml(row.detail)}</small>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function renderDataModeIndicator(portfolioStatus = {}, marketDataStatus = {}, report = null, accountScope = null) {
@@ -2253,6 +2399,9 @@ function renderHoldingsTable(holdings, uiState = "SAMPLE_MODE") {
       <td colspan="23"><b>Sample holdings only.</b> Import a Fidelity CSV to replace these with Tucker’s real account-level rows.</td>
     </tr>
   `;
+  const emptyRow = uiState === "NO_DATA" || uiState === "IMPORT_FAILED"
+    ? `<tr><td colspan="23" class="empty holdings-empty-state"><strong>No portfolio loaded.</strong><span>Import a Fidelity CSV or holdings JSON to populate this table. You can also try sample data from Overview.</span><div class="inline-actions"><a class="button-link primary" href="#imports">Import portfolio</a><button type="button" data-overview-action="sample">Try sample data</button></div></td></tr>`
+    : '<tr><td colspan="23" class="empty">No holdings match the current filters. Clear search or filters to see loaded rows.</td></tr>';
   target.innerHTML = holdings.length
     ? `${sampleRow}${holdings.map((holding) => `
       <tr>
@@ -2281,7 +2430,7 @@ function renderHoldingsTable(holdings, uiState = "SAMPLE_MODE") {
         <td>${escapeHtml(holding.nextEarnings || "--")}</td>
       </tr>
     `).join("")}`
-    : '<tr><td colspan="23" class="empty">No holdings match the current filters.</td></tr>';
+    : emptyRow;
 }
 
 export function prepareHoldingsForView(holdings, viewMode = "account") {
