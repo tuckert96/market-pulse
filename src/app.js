@@ -13,6 +13,7 @@ import { buildMarketProviderStatuses } from "./marketEventProviders.js";
 import { applyMarketDataToHoldings, buildMarketDataProviderConfig, buildMarketDataProviderStatuses, buildMockMarketDataSnapshot, shouldPreserveMarketDataSnapshot } from "./marketDataProvider.js";
 import { buildMarketIntelligenceAlerts, demoMarketIntelligenceEvents } from "./marketIntelligence.js";
 import { analyzePortfolio } from "./portfolioAnalytics.js";
+import { buildPortfolioAttribution } from "./portfolioAttribution.js";
 import { buildPortfolioDataQualitySummary } from "./portfolioDataQuality.js";
 import { buildPortfolioHealth } from "./portfolioHealth.js";
 import { tuckerDemoHoldings } from "./portfolioDemoData.js";
@@ -888,6 +889,7 @@ function render() {
   });
   const alphaRecommendationFilter = $("alphaRecommendationFilter")?.value || "all";
   const filteredAlphaRecommendations = filterAlphaRecommendations(alphaRecommendations, alphaRecommendationFilter);
+  const portfolioAttribution = buildPortfolioAttribution(analysis.holdings, { totalValue: analysis.overview.totalValue });
   const whatIfScenario = readWhatIfScenario();
   const whatIfResult = simulateWhatIf({
     holdings: analysis.holdings,
@@ -930,6 +932,7 @@ function render() {
     decisionBrief,
     dailyBrief,
     portfolioHealth,
+    portfolioAttribution,
     whatIfScenario,
     whatIfResult,
     alertLifecycle,

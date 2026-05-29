@@ -15,6 +15,7 @@ import { buildTickerMovementExplainer } from "../src/movementExplainer.js";
 import { parseLocalDataFixtureJson, validateLocalDataBundle } from "../src/localDataContracts.js";
 import { buildPoliticianTradeProviderConfig, createPoliticianTradeProvider, demoPoliticianTrades, importPoliticianTradeFile, politicianTradeProviderStatuses } from "../src/politicianTrades.js";
 import { analyzePortfolio } from "../src/portfolioAnalytics.js";
+import { buildPortfolioAttribution } from "../src/portfolioAttribution.js";
 import { tuckerDemoHoldings } from "../src/portfolioDemoData.js";
 import { buildPortfolioHealth } from "../src/portfolioHealth.js";
 import { buildAffectedExposureSummary } from "../src/portfolioView.js";
@@ -51,6 +52,7 @@ const marketDataProviderStatuses = buildMarketDataProviderStatuses({});
 const marketDataCache = createMarketDataCache();
 const marketDataTtls = marketDataCacheTtlConfig({ MARKET_DATA_QUOTE_TTL_MINUTES: "5" });
 const holdingsWithMarketData = applyMarketDataToHoldings(analysis.holdings, marketDataSnapshot);
+const portfolioAttribution = buildPortfolioAttribution(holdingsWithMarketData, { totalValue: analysis.overview.totalValue });
 const politicianTrades = demoPoliticianTrades();
 const eventCalendar = buildPortfolioEvents({
   calendarEvents: defaultCalendarEvents("2026-05-23T12:00:00-04:00"),
@@ -478,6 +480,7 @@ assert(existsSync("src/tickerResearch.js"), "ticker research lens module should 
 assert(existsSync("src/quantLensContext.js"), "Quant Lens peer/history context module should exist");
 assert(existsSync("src/alertsEngine.js"), "local alerts engine should exist");
 assert(existsSync("src/dailyCommandBrief.js"), "Daily Command Brief module should exist");
+assert(existsSync("src/portfolioAttribution.js"), "portfolio attribution module should exist");
 assert(existsSync("src/decisionJournal.js"), "Decision Journal module should exist");
 assert(existsSync("src/marketDataProvider.js"), "mock-first market data provider module should exist");
 assert(existsSync("src/marketEventProviders.js"), "market event/news provider module should exist");
@@ -1070,6 +1073,10 @@ assert(indexHtml.includes("Fidelity portfolio import"), "Data Sources should foc
 assert(!indexHtml.includes("Start Fidelity connector") && !indexHtml.includes("Sync holdings"), "no-op Fidelity connector controls should not remain visible before a backend exists");
 assert(indexHtml.includes("clearPortfolioBtn"), "Settings should expose a local clear portfolio control");
 assert(portfolioViewJs.includes("Signal / not owned"), "ticker pages should distinguish signal-only tickers from watchlist-only tickers");
+assert(portfolioViewJs.includes("renderPortfolioAttribution"), "Holdings screen should render contribution-to-return attribution");
+assert(indexHtml.includes('id="portfolioAttributionPanel"'), "Holdings screen should include a portfolio attribution panel");
+assert(portfolioAttribution.periods.daily.availableCount >= 1, "portfolio attribution should produce daily contribution rows");
+assert(portfolioAttribution.rows.every((row) => row.ticker && row.daily), "portfolio attribution rows should stay ticker keyed with period details");
 assert(portfolioViewJs.includes("STALE_PERSISTED_REPAIRED"), "portfolio UI should label repaired local holdings instead of treating them as sample data");
 assert(appJs.includes("realPortfolioImport"), "app.js should distinguish real imports from sample/demo data");
 assert(appJs.includes("import { normalizeSeekingAlphaWorkbook }"), "app.js should include Seeking Alpha workbook import path");
