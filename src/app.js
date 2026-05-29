@@ -1380,6 +1380,7 @@ function renderImportDebugPanel(result, options = {}) {
     .map(([field, column]) => `<span><b>${escapeHtml(field)}</b> ${escapeHtml(column || "not mapped")}</span>`)
     .join("");
   const canApply = options.preview && canApplyPortfolioImport(result);
+  const changeSummary = options.applied ? report.changeSummary : null;
   const holdingRowsNeedingReview = countHoldingRowsNeedingReview(report);
   const successCta = isPortfolioImport(result) && !canApply
     ? `
@@ -1467,6 +1468,7 @@ function renderImportDebugPanel(result, options = {}) {
       <div><b>Skipped non-holding rows</b><span>${escapeHtml(skippedRows.length)}</span></div>
       <div><b>Total market value</b><span>${formatCurrency(report.totalMarketValue)}</span></div>
     </div>
+    ${changeSummary ? renderImportChangeSummary(changeSummary) : ""}
     ${troubleshooting}
     ${canApply ? renderImportPreview(result) : successCta}
     <details>
@@ -1484,6 +1486,58 @@ function renderImportDebugPanel(result, options = {}) {
       ${unsupported ? `<p><b>Unsupported/unmapped columns</b></p><ul>${unsupported}</ul>` : ""}
     </details>
     ${pendingCsvImport ? renderManualMappingControls(report) : ""}
+  `;
+}
+
+function renderImportChangeSummary(summary = {}) {
+  const metric = (label, value, detail = "") => `
+    <div>
+      <b>${escapeHtml(value)}</b>
+      <span>${escapeHtml(label)}${detail ? ` · ${escapeHtml(detail)}` : ""}</span>
+    </div>
+  `;
+  return `
+    <section class="import-change-summary" aria-label="What changed since last import">
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">What changed since last import</p>
+          <h3>${escapeHtml(summary.hasPreviousPortfolio ? "Portfolio delta" : "First imported portfolio")}</h3>
+          <p>${escapeHtml(summary.summaryText || "Import applied. Review the changed positions below.")}</p>
+        </div>
+      </div>
+      <div class="import-change-metrics">
+        ${metric("Imported rows", summary.rowsImported || 0)}
+        ${metric("Skipped rows", summary.rowsSkipped || 0, "non-holding rows")}
+        ${metric("Flagged rows", summary.rowsFlagged || 0, "need review")}
+        ${metric("Duplicate rows", summary.duplicateRowsMerged || 0, "merged")}
+        ${metric("Portfolio value change", formatCurrency(summary.valueChange || 0), `${formatCurrency(summary.previousTotalValue || 0)} → ${formatCurrency(summary.nextTotalValue || 0)}`)}
+      </div>
+      <div class="import-change-grid">
+        ${renderImportChangeList("New positions", summary.newPositions, "No new tickers.")}
+        ${renderImportChangeList("Removed or zero positions", summary.removedPositions, "No positions disappeared.")}
+        ${renderImportChangeList("Increased positions", summary.increasedPositions, "No increased positions.")}
+        ${renderImportChangeList("Decreased positions", summary.decreasedPositions, "No decreased positions.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderImportChangeList(title, rows = [], emptyText = "No changes.") {
+  const visible = rows.slice(0, 5);
+  const items = visible.map((row) => `
+    <li>
+      <span><b>${escapeHtml(row.ticker || "UNKNOWN")}</b>${row.name ? ` ${escapeHtml(row.name)}` : ""}</span>
+      <span>${formatCurrency(row.valueChange || 0)} · ${formatNumber(row.sharesChange || 0)} shares</span>
+    </li>
+  `).join("");
+  const more = rows.length > visible.length
+    ? `<li><span>${escapeHtml(rows.length - visible.length)} more position${rows.length - visible.length === 1 ? "" : "s"}</span><span>Open Holdings for details</span></li>`
+    : "";
+  return `
+    <article>
+      <h4>${escapeHtml(title)}</h4>
+      <ul>${items || `<li><span>${escapeHtml(emptyText)}</span><span></span></li>`}${more}</ul>
+    </article>
   `;
 }
 
@@ -1639,7 +1693,9 @@ async function applyPendingPortfolioImport() {
     provider: pendingCsvImport.provider,
     fileName: pendingCsvImport.fileName
   });
-  const applied = applyPortfolioImportPreview(preview);
+  const applied = applyPortfolioImportPreview(preview, {
+    previousHoldings: state.holdings
+  });
   if (!applied.changed) {
     showImportStatus(result, { persist: false });
     return;

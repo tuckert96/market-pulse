@@ -516,6 +516,63 @@
         gap: 6px;
       }
 
+      .import-change-summary {
+        display: grid;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.82);
+      }
+
+      .import-change-metrics,
+      .import-change-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .import-change-metrics {
+        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+      }
+
+      .import-change-metrics div,
+      .import-change-grid article {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        padding: 10px;
+      }
+
+      .import-change-grid {
+        grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+      }
+
+      .import-change-grid h4 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .import-change-grid ul {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .import-change-grid li {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .import-change-grid li span {
+        display: block;
+        min-width: 0;
+        overflow-wrap: normal;
+        word-break: normal;
+      }
+
       .manual-mapping {
         border-top: 1px solid var(--line);
         padding-top: 8px;

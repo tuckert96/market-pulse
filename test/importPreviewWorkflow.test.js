@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   applyPortfolioImportPreview,
+  buildPortfolioImportChangeSummary,
   buildPortfolioImportPreview,
   cancelPortfolioImportPreview,
   canApplyPortfolioImportResult
@@ -69,6 +70,7 @@ test("confirming a portfolio import preview returns the applied holdings and imp
   const currentHoldings = [{ ticker: "NVDA", marketValue: 2000 }];
   const preview = buildPortfolioImportPreview(importResult());
   const applied = applyPortfolioImportPreview(preview, {
+    previousHoldings: currentHoldings,
     importedAt: "2026-05-28T12:30:00.000Z"
   });
   const nextHoldings = applied.changed ? applied.holdings : currentHoldings;
@@ -82,7 +84,64 @@ test("confirming a portfolio import preview returns the applied holdings and imp
   assert.equal(applied.importReport.importedAt, "2026-05-28T12:30:00.000Z");
   assert.equal(applied.fidelityStatus.mode, "csv-imported");
   assert.equal(applied.fidelityStatus.holdings, 1);
+  assert.equal(applied.importReport.changeSummary.newPositions[0].ticker, "MU");
+  assert.equal(applied.importReport.changeSummary.removedPositions[0].ticker, "NVDA");
+  assert.equal(applied.fidelityStatus.changeSummary.valueChange, -1000);
   assert.match(applied.fidelityStatus.message, /Fidelity import applied/);
+});
+
+test("portfolio import change summary compares new import to the previous active portfolio", () => {
+  const previousHoldings = [
+    { ticker: "MU", name: "Micron", account: "Taxable", shares: 10, marketValue: 1000 },
+    { ticker: "AMD", name: "Advanced Micro Devices", account: "Roth IRA", shares: 5, marketValue: 900 },
+    { ticker: "SPAXX", name: "Fidelity Government Money Market", account: "Taxable", shares: 500, marketValue: 500 }
+  ];
+  const nextHoldings = [
+    { ticker: "MU", name: "Micron", account: "Taxable", shares: 12, marketValue: 1250 },
+    { ticker: "AMD", name: "Advanced Micro Devices", account: "Roth IRA", shares: 3, marketValue: 600 },
+    { ticker: "NVDA", name: "NVIDIA", account: "Taxable", shares: 4, marketValue: 2000 }
+  ];
+  const summary = buildPortfolioImportChangeSummary({
+    previousHoldings,
+    nextHoldings,
+    importReport: {
+      holdingsImported: 3,
+      duplicateRows: [{ ticker: "MU", account: "Taxable", rowNumbers: [2, 3] }],
+      rejectedRows: [
+        { rowNumber: 8, classification: "non-holding row", reasons: ["Fidelity footer"] },
+        { rowNumber: 9, classification: "holding row needs review", reasons: ["Invalid ticker"] }
+      ]
+    }
+  });
+
+  assert.equal(summary.hasPreviousPortfolio, true);
+  assert.equal(summary.rowsImported, 3);
+  assert.equal(summary.rowsSkipped, 1);
+  assert.equal(summary.rowsFlagged, 1);
+  assert.equal(summary.duplicateRowsMerged, 1);
+  assert.equal(summary.previousTotalValue, 2400);
+  assert.equal(summary.nextTotalValue, 3850);
+  assert.equal(summary.valueChange, 1450);
+  assert.deepEqual(summary.newPositions.map((row) => row.ticker), ["NVDA"]);
+  assert.deepEqual(summary.removedPositions.map((row) => row.ticker), ["SPAXX"]);
+  assert.deepEqual(summary.increasedPositions.map((row) => row.ticker), ["MU"]);
+  assert.deepEqual(summary.decreasedPositions.map((row) => row.ticker), ["AMD"]);
+  assert.match(summary.summaryText, /1 new, 1 removed, 1 increased, 1 decreased/);
+  assert.match(summary.summaryText, /1 duplicate row merged/);
+});
+
+test("first portfolio import gets a clear applied summary without stale prior holdings", () => {
+  const preview = buildPortfolioImportPreview(importResult());
+  const applied = applyPortfolioImportPreview(preview, {
+    previousHoldings: [],
+    importedAt: "2026-05-28T12:30:00.000Z"
+  });
+
+  assert.equal(applied.importReport.changeSummary.hasPreviousPortfolio, false);
+  assert.equal(applied.importReport.changeSummary.rowsImported, 1);
+  assert.equal(applied.importReport.changeSummary.newPositions[0].ticker, "MU");
+  assert.deepEqual(applied.importReport.changeSummary.removedPositions, []);
+  assert.match(applied.importReport.changeSummary.summaryText, /1 holding loaded/);
 });
 
 test("partial previews apply accepted holdings while preserving review diagnostics", () => {
