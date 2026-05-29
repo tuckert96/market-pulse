@@ -6,6 +6,7 @@ import {
   buildAffectedExposureSummary,
   buildAlphaSourceIssueRows,
   buildRankedAlphaHoldingRows,
+  buildSettingsProviderStatusRows,
   buildTickerDetailModel,
   dataSourceAvailabilityMode,
   dataSourceAvailabilityLabel,
@@ -259,6 +260,77 @@ test("data sources health screen renders standardized source labels and freshnes
   } finally {
     globalThis.document = previousDocument;
   }
+});
+
+test("settings provider status rows expose setup state without secret values", () => {
+  const rows = buildSettingsProviderStatusRows({
+    connectors: {
+      plaid: {
+        configured: true,
+        linked: false,
+        detail: "Plaid credentials are configured. Start Plaid Link.",
+        lastError: "Bearer do-not-render-provider-token-abcdefghijklmnopqrstuvwxyz"
+      }
+    },
+    marketDataConfig: {
+      selectedLabel: "Finnhub",
+      configured: true,
+      liveProviderCalls: true,
+      detail: "Finnhub key is present on the local backend."
+    },
+    redditProviderConfig: {
+      configured: true,
+      liveProviderCalls: false,
+      status: "configured-not-connected",
+      detail: "Reddit OAuth fields present; live sync disabled."
+    },
+    redditProviderStatuses: { redditApi: { configured: true, liveProviderCalls: false, status: "configured-not-connected" } },
+    xProviderConfig: {
+      configured: false,
+      liveProviderCalls: false,
+      status: "not configured",
+      detail: "Sample/local X rows remain active."
+    },
+    xProviderStatuses: { xApi: { configured: false } },
+    politicianTradeProviderConfig: {
+      configured: true,
+      liveProviderCalls: true,
+      detail: "Public disclosure provider configured."
+    },
+    politicianTradeProviderStatuses: { senateStockWatcher: { configured: true, liveProviderCalls: true, status: "connected" } },
+    aiProviders: {
+      openai: {
+        configured: true,
+        liveProviderCalls: false,
+        detail: "OpenAI key present, explanations disabled.",
+        lastError: "api_key=do-not-render-openai-key"
+      }
+    }
+  }, {
+    marketDataStatus: {
+      status: "connected",
+      dataFreshness: "live",
+      providerLabel: "Finnhub",
+      lastSuccessfulRefresh: "2026-05-29T12:00:00.000Z"
+    },
+    fidelityStatus: { connected: true, mode: "csv-imported", lastSync: "2026-05-29T11:00:00.000Z" },
+    latestImportReport: { importedAt: "2026-05-29T11:00:00.000Z" },
+    redditImportReport: { importedAt: "2026-05-29T10:00:00.000Z", mentionsImported: 2 },
+    xUpdateImportReport: { status: "not configured" },
+    politicianTradeImportReport: { fetchedAt: "2026-05-29T09:00:00.000Z", tradesImported: 1 },
+    seekingAlphaStatus: { connected: true, mode: "csv-import", lastSync: "2026-05-29T08:00:00.000Z" }
+  });
+  const text = JSON.stringify(rows);
+
+  assert.ok(rows.some((row) => row.title === "Finnhub" && row.statusMode === "live" && /Configured and active/.test(row.credentialState)));
+  assert.ok(rows.some((row) => row.title === "OpenAI explanations" && row.statusMode === "not-configured" && /Key present/.test(row.credentialState)));
+  assert.ok(rows.some((row) => row.title === "Fidelity / Plaid" && /Credentials present/.test(row.credentialState)));
+  assert.ok(rows.some((row) => row.title === "Reddit API" && row.statusMode === "imported"));
+  assert.ok(rows.some((row) => row.title === "Seeking Alpha ratings" && row.statusMode === "imported"));
+  assert.equal(text.includes("do-not-render-provider-token"), false);
+  assert.equal(text.includes("do-not-render-openai-key"), false);
+  assert.match(text, /Last success:/);
+  assert.match(text, /Setup notes|docs\/market-data-provider-config\.md/);
 });
 
 test("portfolio import status distinguishes clean, skipped, partial, and failed imports", () => {

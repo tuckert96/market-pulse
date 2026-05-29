@@ -1261,6 +1261,9 @@ assert(portfolioViewJs.includes("renderDataSourceHealth"), "Data Sources route s
 assert(portfolioViewJs.includes("buildDataSourceHealthSummary") && portfolioViewJs.includes("provider-backed") && portfolioViewJs.includes("Last success:") && portfolioViewJs.includes("Fallback:"), "Data Sources health should summarize provider-backed/local status, freshness, and fallback reasons");
 assert(indexHtml.includes(".source-health-summary"), "Data Sources health summary should have dedicated responsive styling");
 assert(portfolioViewJs.includes("renderSettingsConfiguration"), "Settings route should render local configuration placeholders");
+assert(portfolioViewJs.includes("buildSettingsProviderStatusRows") && portfolioViewJs.includes("Provider configuration status"), "Settings should expose provider configuration status without showing secrets");
+assert(portfolioViewJs.includes("data-provider-settings-row") && portfolioViewJs.includes("Last error:"), "Settings provider cards should show credential state, last success, and last error metadata");
+assert(appJs.includes("aiProviders: config.aiProviders || {}") && appJs.includes("config.aiProviders?.openai?.liveProviderCalls"), "OpenAI provider readiness should pass from local backend config into Settings");
 assert(portfolioViewJs.includes("Manual/imported holdings"), "Data Sources should show manual/imported holdings readiness");
 assert(portfolioViewJs.includes("Reddit"), "Data Sources should include future Reddit source status");
 assert(portfolioViewJs.includes("Reddit diagnostics"), "Data Sources should expose Reddit diagnostics without provider internals");
