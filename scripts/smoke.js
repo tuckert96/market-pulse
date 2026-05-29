@@ -442,6 +442,7 @@ const csvImportPreview = buildPortfolioImportPreview(csvResult, {
 });
 const canceledCsvImportPreview = cancelPortfolioImportPreview(csvImportPreview);
 const appliedCsvImportPreview = applyPortfolioImportPreview(csvImportPreview, {
+  previousHoldings: [{ ticker: "OLD", account: "Taxable", shares: 1, marketValue: 250 }],
   importedAt: "2026-05-28T12:05:00.000Z"
 });
 const plaidRows = normalizePlaidHoldings({
@@ -1078,6 +1079,9 @@ assert(cancelImportFunction.includes("cancelPortfolioImportPreview") && !cancelI
 assert(csvImportPreview.canApply && csvImportPreview.acceptedRows === csvResult.records.length, "portfolio import preview should stage all accepted CSV rows");
 assert(canceledCsvImportPreview.changed === false && canceledCsvImportPreview.clearPendingPreview === true, "portfolio import preview cancel should clear pending state without applying holdings");
 assert(appliedCsvImportPreview.changed && appliedCsvImportPreview.holdings.length === csvResult.records.length && appliedCsvImportPreview.fidelityStatus.mode === "csv-imported", "portfolio import preview confirm should produce applied holdings and CSV-imported status");
+assert(appJs.includes("What changed since last import") && appJs.includes("renderImportChangeSummary"), "confirmed imports should render a portfolio change summary");
+assert(appliedCsvImportPreview.importReport.changeSummary.removedPositions.some((row) => row.ticker === "OLD"), "portfolio import confirm should compare against the previous active portfolio");
+assert(appliedCsvImportPreview.importReport.changeSummary.rowsSkipped >= 0 && appliedCsvImportPreview.importReport.changeSummary.rowsFlagged >= 0, "portfolio import change summary should include skipped and flagged row counts");
 assert(marketDataSelectionJs.includes("!holding.cash && holding.assetClass !== \"Cash\"") && marketDataSelectionJs.includes("holding.marketDataEligible !== false"), "market data requests should skip cash-like and local-identifier holdings before calling live quote providers");
 assert(portfolioViewJs.includes("Market data diagnostics"), "Data Sources should expose safe market-data provider diagnostics");
 assert(portfolioViewJs.includes("coverageSummary") && portfolioViewJs.includes("52-week high/low") && portfolioViewJs.includes("Average volume") && portfolioViewJs.includes("ticker-provider-coverage"), "Finnhub diagnostics should expose per-ticker field coverage in Data Sources and ticker pages");
