@@ -809,6 +809,7 @@ function render() {
     redditMentions: state.redditMentions,
     providerReadiness: state.providerReadiness,
     marketDataStatus: marketDataSnapshot.status,
+    targetPlan,
     thresholds: alertThresholds,
     watchlist: watchlistTickers
   });
@@ -3015,6 +3016,7 @@ function syncAlertThresholdInputs() {
   setInputValue("alertPoliticianTradeScore", thresholdPercentInput(thresholds.politicianTradeScore));
   setInputValue("alertRedditAcceleration", thresholdPercentInput(thresholds.redditMentionAcceleration));
   setInputValue("alertStaleHours", thresholds.staleHours);
+  setInputValue("alertMinTargetDrift", thresholdPercentInput(thresholds.minActionDrift));
 }
 
 function saveAlertThresholdsFromUi() {
@@ -3026,7 +3028,7 @@ function saveAlertThresholdsFromUi() {
     politicianTradeScore: $("alertPoliticianTradeScore")?.value,
     redditMentionAcceleration: $("alertRedditAcceleration")?.value,
     staleHours: $("alertStaleHours")?.value,
-    minActionDrift: state.alertThresholds.minActionDrift,
+    minActionDrift: $("alertMinTargetDrift")?.value,
     largeMovePercent: state.alertThresholds.largeMovePercent
   });
   saveAlertThresholds();

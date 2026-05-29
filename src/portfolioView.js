@@ -5888,6 +5888,7 @@ function renderSettingsConfiguration(thresholds = {}) {
   const position = Number(thresholds.maxPositionWeight ?? 0.12);
   const sector = Number(thresholds.maxSectorWeight ?? 0.32);
   const leverage = Number(thresholds.maxLeveragedWeight ?? 0.14);
+  const targetDrift = Number(thresholds.minActionDrift ?? 0.015);
   const tickerScore = Number(thresholds.tickerSignalScore ?? 70);
   const redditAcceleration = Number(thresholds.redditMentionAcceleration ?? 0.6);
   const settings = [
@@ -5898,7 +5899,7 @@ function renderSettingsConfiguration(thresholds = {}) {
     },
     {
       title: "Risk thresholds",
-      detail: `Review above ${formatPct(position)} position weight, ${formatPct(sector)} sector/theme weight, or ${formatPct(leverage)} leveraged ETF exposure.`,
+      detail: `Review above ${formatPct(position)} position weight, ${formatPct(sector)} sector/theme weight, ${formatPct(leverage)} leveraged ETF exposure, or ${formatPct(targetDrift)} target drift.`,
       value: "Configurable"
     },
     {

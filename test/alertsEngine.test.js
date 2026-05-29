@@ -88,6 +88,64 @@ test("local alert thresholds suppress rules until values cross the configured bo
   assert.equal(overThreshold.some((alert) => alert.type === "sector-concentration"), true);
 });
 
+test("target allocation drift alerts cover overweight and underweight rows", () => {
+  const analysis = analyzePortfolio([
+    { ticker: "MU", name: "Micron", account: "Taxable", marketValue: 1000, assetClass: "Equity", sector: "Semiconductors", sourceAsOf: asOf },
+    { ticker: "NVDA", name: "Nvidia", account: "Roth", marketValue: 1000, assetClass: "Equity", sector: "Semiconductors", sourceAsOf: asOf }
+  ], { skipPortfolioThresholdAlerts: true });
+  const alerts = buildLocalAlerts({
+    analysis,
+    targetPlan: {
+      rows: [
+        { scope: "ticker", key: "MU", status: "overweight", currentWeight: 0.5, targetWeight: 0.3, driftWeight: 0.2, driftValue: 400, suggestedAction: "review trim" },
+        { scope: "assetClass", key: "Cash", status: "underweight", currentWeight: 0.05, targetWeight: 0.15, driftWeight: -0.1, driftValue: -200, suggestedAction: "review add" },
+        { scope: "ticker", key: "NVDA", status: "within range", currentWeight: 0.5, targetWeight: 0.5, driftWeight: 0, driftValue: 0, suggestedAction: "hold" }
+      ]
+    },
+    thresholds: normalizeAlertThresholds({ minActionDrift: 0.05, maxPositionWeight: 1, maxSectorWeight: 1 }),
+    marketDataStatus: { status: "connected" },
+    asOf
+  });
+  const driftAlerts = alerts.filter((alert) => alert.type === "target-allocation-drift");
+
+  assert.equal(driftAlerts.length, 2);
+  assert.equal(driftAlerts.some((alert) => alert.ticker === "MU"), true);
+  assert.equal(driftAlerts.some((alert) => alert.metadata.scope === "assetClass" && !alert.ticker), true);
+  assert.ok(driftAlerts.every((alert) => alert.metadata.threshold === 0.05));
+  assert.ok(driftAlerts.every((alert) => /Review the target plan/i.test(alert.detail)));
+  assert.ok(driftAlerts.every((alert) => !/\b(buy now|sell now|trim now|add now|place order|guaranteed)\b/i.test(alert.detail)));
+});
+
+test("target drift threshold is configurable and balanced rows stay quiet", () => {
+  const analysis = analyzePortfolio([
+    { ticker: "MU", name: "Micron", account: "Taxable", marketValue: 1000, assetClass: "Equity", sector: "Semiconductors", sourceAsOf: asOf }
+  ], { skipPortfolioThresholdAlerts: true });
+  const targetPlan = {
+    rows: [
+      { scope: "ticker", key: "MU", status: "overweight", currentWeight: 0.13, targetWeight: 0.1, driftWeight: 0.03, driftValue: 300, suggestedAction: "review trim" },
+      { scope: "strategySleeve", key: "Core index", status: "within range", currentWeight: 0.2, targetWeight: 0.2, driftWeight: 0, driftValue: 0, suggestedAction: "hold" }
+    ]
+  };
+  const strictAlerts = buildLocalAlerts({
+    analysis,
+    targetPlan,
+    thresholds: normalizeAlertThresholds({ minActionDrift: 0.05, maxPositionWeight: 1, maxSectorWeight: 1 }),
+    marketDataStatus: { status: "connected" },
+    asOf
+  });
+  const sensitiveAlerts = buildLocalAlerts({
+    analysis,
+    targetPlan,
+    thresholds: normalizeAlertThresholds({ minActionDrift: 0.02, maxPositionWeight: 1, maxSectorWeight: 1 }),
+    marketDataStatus: { status: "connected" },
+    asOf
+  });
+
+  assert.equal(strictAlerts.some((alert) => alert.type === "target-allocation-drift"), false);
+  assert.equal(sensitiveAlerts.some((alert) => alert.type === "target-allocation-drift"), true);
+  assert.equal(sensitiveAlerts.some((alert) => alert.metadata.scope === "strategySleeve"), false);
+});
+
 test("ticker signal alerts stay tied to active owned holdings", () => {
   const analysis = analyzePortfolio([
     { ticker: "XYZ", name: "Imported Holding", account: "Taxable", marketValue: 10000, assetClass: "Equity", sector: "Industrials", sourceAsOf: asOf }
