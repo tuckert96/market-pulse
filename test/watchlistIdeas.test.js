@@ -5,9 +5,11 @@ import {
   filterWatchlistIdeaRows,
   normalizeWatchlistIdea,
   promoteTickerSignalToIdea,
+  removeWatchlistIdea,
   summarizeWatchlistIdeas,
   upsertWatchlistIdea
 } from "../src/watchlistIdeas.js";
+import { analyzePortfolio } from "../src/portfolioAnalytics.js";
 
 test("watchlist ideas normalize the pipeline fields and legacy reason fields", () => {
   const idea = normalizeWatchlistIdea({
@@ -58,6 +60,31 @@ test("ticker signal promotion creates or updates a saved idea", () => {
   assert.equal(updated[0].thesis, "Rejected after valuation review.");
 });
 
+test("manual watchlist add and remove round trip keeps one normalized ticker row", () => {
+  const added = upsertWatchlistIdea([], {
+    ticker: " pltr ",
+    status: "watching",
+    thesis: "Manual research idea.",
+    sourceOfIdea: "Manual watchlist",
+    dateAdded: "2026-05-24"
+  });
+  const deduped = upsertWatchlistIdea(added, {
+    ticker: "PLTR",
+    status: "candidate",
+    thesis: "Moved to candidate after review.",
+    sourceOfIdea: "Manual watchlist",
+    dateAdded: "2026-05-24"
+  });
+
+  assert.equal(deduped.length, 1);
+  assert.equal(deduped[0].ticker, "PLTR");
+  assert.equal(deduped[0].status, "candidate");
+  assert.equal(deduped[0].thesis, "Moved to candidate after review.");
+
+  const removed = removeWatchlistIdea(deduped, " pltr ");
+  assert.deepEqual(removed, []);
+});
+
 test("watchlist rows link owned holdings, thesis rows, and signal suggestions", () => {
   const rows = buildWatchlistIdeaRows({
     watchlistIdeas: [
@@ -88,6 +115,41 @@ test("watchlist rows link owned holdings, thesis rows, and signal suggestions", 
   assert.equal(crdo.status, "watching");
   assert.equal(avgo.saved, true);
   assert.equal(avgo.owned, false);
+});
+
+test("watchlist-only tickers can show quote and signal data without becoming holdings", () => {
+  const rows = buildWatchlistIdeaRows({
+    watchlistIdeas: [
+      { ticker: "PLTR", status: "watching", thesis: "Manual watchlist idea.", sourceOfIdea: "Manual", dateAdded: "2026-05-24" }
+    ],
+    holdings: [
+      { ticker: "MU", name: "Micron", sector: "Semiconductors", marketValue: 100000, portfolioWeight: 1 }
+    ],
+    tickerSignals: [
+      { ticker: "PLTR", combinedScore: 67, actionCategory: "Monitor", topHeadline: "PLTR watchlist signal" }
+    ],
+    marketDataSnapshot: {
+      quotesByTicker: {
+        PLTR: {
+          ticker: "PLTR",
+          price: 24.5,
+          dailyChangePercent: 0.031,
+          sourceLabel: "Finnhub cached"
+        }
+      }
+    },
+    asOf: "2026-05-24T09:00:00-04:00"
+  });
+  const pltr = rows.find((row) => row.ticker === "PLTR");
+  const analysis = analyzePortfolio([{ ticker: "MU", marketValue: 100000, shares: 1000, price: 100 }]);
+
+  assert.equal(pltr.owned, false);
+  assert.equal(pltr.quotePrice, 24.5);
+  assert.equal(pltr.dailyChangePercent, 0.031);
+  assert.equal(pltr.quoteSourceLabel, "Finnhub cached");
+  assert.equal(pltr.signalScore, 67);
+  assert.equal(analysis.overview.totalValue, 100000);
+  assert.equal(analysis.holdings.some((holding) => holding.ticker === "PLTR"), false);
 });
 
 test("saved owned ideas do not stay owned after the active portfolio changes", () => {

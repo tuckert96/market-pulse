@@ -4300,6 +4300,17 @@
         border-top: 1px solid var(--line);
       }
 
+      .watchlist-quick-add {
+        display: grid;
+        grid-template-columns: minmax(150px, 0.8fr) minmax(140px, 0.7fr) auto;
+        gap: 10px;
+        align-items: end;
+        padding: 14px;
+        border: 1px solid rgba(226, 232, 240, 0.9);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.74);
+      }
+
       .watchlist-card-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5883,6 +5894,7 @@
         .overview-secondary-grid,
         .screen-guidance,
         .watchlist-card-grid,
+        .watchlist-quick-add,
         .journal-card-head,
         .watchlist-detail-grid,
         .command-pair,
@@ -6896,6 +6908,22 @@
                 </div>
               </div>
               <div class="body-pad" id="watchlistSummaryPanel"></div>
+              <div class="body-pad">
+                <div class="watchlist-quick-add" aria-label="Quick add watchlist ticker">
+                  <label class="control" for="watchlistQuickTicker">Ticker
+                    <input id="watchlistQuickTicker" type="text" placeholder="ASML" autocapitalize="characters" />
+                  </label>
+                  <label class="control" for="watchlistQuickStatus">Starting status
+                    <select id="watchlistQuickStatus">
+                      <option value="watching">Watching</option>
+                      <option value="researching">Researching</option>
+                      <option value="candidate">Candidate</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                  </label>
+                  <button class="primary" id="quickAddWatchlistBtn" type="button">Add to watchlist</button>
+                </div>
+              </div>
               <div class="body-pad watchlist-toolbar">
                 <div class="toolbar-grid">
                   <label class="control" for="watchlistQuery">Search ideas
