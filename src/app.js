@@ -94,7 +94,12 @@ import { summarizeSleeves } from "./rebalanceEngine.js";
 import { APP_ROUTES as routes, ROUTE_ALIASES as routeAliases, routeFromHashValue } from "./router.js";
 import { normalizeSeekingAlphaWorkbook } from "./seekingAlphaWorkbook.js";
 import { buildSignalReviewRows, filterSignalReviewRows } from "./signalReview.js";
-import { sanitizeImportedState, sanitizeStateForBackup } from "./stateSanitizer.js";
+import {
+  buildDashboardStateBackupPayload,
+  buildDashboardStateRestorePreview,
+  parseDashboardStateBackupJson,
+  validateDashboardStateBackupPayload
+} from "./stateBackup.js";
 import {
   buildTargetAllocationPlan,
   defaultTargetAllocations,
@@ -269,6 +274,7 @@ let lastHoldingSortStatusText = "";
 let latestTickerSignals = [];
 let marketDataLiveModeTimer = null;
 let marketDataLiveModeInFlight = false;
+let pendingStateRestore = null;
 
 function loadHoldings() {
   try {
@@ -1862,9 +1868,14 @@ function renderSeekingAlphaInsights(insights) {
 }
 
 function exportDashboardState() {
-  const payload = {
-    schemaVersion: 1,
-    exportedAt: new Date().toISOString(),
+  const payload = buildDashboardStateBackupPayload(dashboardStateBackupSlice());
+  showStateStatus("State JSON exported. Treat it as sensitive because it contains holdings.", "success");
+  renderStateRestorePreview(null);
+  downloadJson(payload, `tucker-dashboard-state-${today()}.json`);
+}
+
+function dashboardStateBackupSlice() {
+  return {
     holdings: state.holdings,
     fidelityStatus: state.fidelityStatus,
     seekingAlphaStatus: state.seekingAlphaStatus,
@@ -1889,14 +1900,9 @@ function exportDashboardState() {
     eventCalendarImportReport: state.eventCalendarImportReport,
     quantScoreHistory: state.quantScoreHistory,
     latestImportReport: state.latestImportReport,
-    safety: {
-      includesPasswords: false,
-      includesApiKeys: false,
-      note: "Local dashboard backup. Review before sharing because holdings are sensitive financial data."
-    }
+    accountScope: state.accountScope,
+    marketDataLiveMode: state.marketDataLiveMode
   };
-  downloadJson(sanitizeStateForBackup(payload), `tucker-dashboard-state-${today()}.json`);
-  showStateStatus("State JSON exported. Treat it as sensitive because it contains holdings.", "success");
 }
 
 function exportTargetAllocations() {
@@ -1930,18 +1936,91 @@ function importStateFile(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try {
-      const payload = JSON.parse(String(reader.result || "{}"));
-      applyImportedState(payload);
-      showStateStatus("State JSON imported and saved locally.", "success");
-      renderFidelityStatus();
-      renderSeekingAlphaStatus();
-      render();
-    } catch (error) {
-      showStateStatus(`State import failed: ${safeErrorMessage(error)}`, "error");
+    const parsed = parseDashboardStateBackupJson(String(reader.result || ""));
+    if (!parsed.ok) {
+      pendingStateRestore = null;
+      renderStateRestorePreview(null);
+      showStateStatus(`State import failed: ${parsed.errors.join(" ")}`, "error");
+      return;
     }
+    pendingStateRestore = buildDashboardStateRestorePreview(parsed.payload, dashboardStateBackupSlice());
+    renderStateRestorePreview(pendingStateRestore);
+    showStateStatus("Backup preview ready. Review the changes, then apply restore if it looks right.", "pending");
+  };
+  reader.onerror = () => {
+    pendingStateRestore = null;
+    renderStateRestorePreview(null);
+    showStateStatus("State import failed: file could not be read.", "error");
   };
   reader.readAsText(file);
+}
+
+function applyPendingStateRestore() {
+  if (!pendingStateRestore?.ok) {
+    showStateStatus("No valid restore preview is ready.", "error");
+    return;
+  }
+  try {
+    applyImportedState(pendingStateRestore.payload);
+    pendingStateRestore = null;
+    renderStateRestorePreview(null);
+    showStateStatus("State JSON restored and saved locally. Provider statuses are disconnected until revalidated.", "success");
+    renderFidelityStatus();
+    renderSeekingAlphaStatus();
+    renderMarketDataLiveModeControls();
+    render();
+  } catch (error) {
+    showStateStatus(`State restore failed: ${safeErrorMessage(error)}`, "error");
+  }
+}
+
+function cancelPendingStateRestore() {
+  pendingStateRestore = null;
+  renderStateRestorePreview(null);
+  showStateStatus("State restore canceled. Current dashboard state was not changed.", "pending");
+}
+
+function renderStateRestorePreview(preview) {
+  const target = $("stateRestorePreview");
+  if (!target) return;
+  if (!preview) {
+    target.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  target.hidden = false;
+  if (!preview.ok) {
+    target.innerHTML = `
+      <div class="import-health error">
+        <strong>Backup cannot be restored</strong>
+        <ul>${(preview.errors || []).map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>
+      </div>
+    `;
+    return;
+  }
+  const changedRows = (preview.changes || []).filter((row) => row.changes);
+  const unchangedCount = Math.max(0, (preview.changes || []).length - changedRows.length);
+  target.innerHTML = `
+    <div class="import-health pending">
+      <strong>Restore preview</strong>
+      <span>Backup schema v${escapeHtml(preview.schemaVersion)}${preview.exportedAt ? ` · exported ${escapeHtml(backupDateLabel(preview.exportedAt))}` : ""}</span>
+      <small>${escapeHtml(changedRows.length)} area${changedRows.length === 1 ? "" : "s"} will change; ${escapeHtml(unchangedCount)} area${unchangedCount === 1 ? "" : "s"} look unchanged.</small>
+    </div>
+    <div class="backup-preview-list">
+      ${(preview.changes || []).map((row) => `
+        <div class="${row.changes ? "changed" : "unchanged"}">
+          <b>${escapeHtml(row.label)}</b>
+          <span>${escapeHtml(row.current)} current to ${escapeHtml(row.restored)} restored</span>
+          <small>${escapeHtml(row.detail)}</small>
+        </div>
+      `).join("")}
+    </div>
+    ${(preview.warnings || []).length ? `<ul class="quality-warnings">${preview.warnings.slice(0, 6).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : ""}
+    <div class="connector-actions">
+      <button id="applyStateRestoreBtn" type="button" class="primary" data-state-restore-action="apply">Apply restore</button>
+      <button id="cancelStateRestoreBtn" type="button" data-state-restore-action="cancel">Cancel</button>
+    </div>
+  `;
 }
 
 function clearPortfolioData() {
@@ -1973,14 +2052,13 @@ function clearPortfolioData() {
 }
 
 function applyImportedState(payload) {
-  if (!payload || typeof payload !== "object") throw new Error("File does not contain a dashboard state object.");
-  payload = sanitizeImportedState(payload);
-  if (payload.schemaVersion !== undefined && Number(payload.schemaVersion) !== 1) {
-    throw new Error("State file schema version is not supported.");
-  }
-  if (!Array.isArray(payload.holdings)) throw new Error("State file is missing a holdings array.");
+  const validation = validateDashboardStateBackupPayload(payload);
+  if (!validation.ok) throw new Error(validation.errors.join(" "));
+  payload = validation.payload;
   state.holdings = normalizeHoldings(payload.holdings);
-  state.accountScope = ACCOUNT_SCOPE_ALL;
+  state.accountScope = typeof payload.accountScope === "string" && payload.accountScope.trim()
+    ? payload.accountScope
+    : ACCOUNT_SCOPE_ALL;
   state.fidelityStatus = restoredConnectorStatus(payload.fidelityStatus, loadFidelityStatus(), "Fidelity");
   state.seekingAlphaStatus = restoredConnectorStatus(payload.seekingAlphaStatus, loadSeekingAlphaStatus(), "Seeking Alpha");
   state.marketEvents = Array.isArray(payload.marketEvents) ? payload.marketEvents : demoMarketIntelligenceEvents();
@@ -2008,6 +2086,7 @@ function applyImportedState(payload) {
   state.eventCalendar = Array.isArray(payload.eventCalendar) ? normalizeCalendarEvents(payload.eventCalendar) : loadEventCalendar();
   state.eventCalendarImportReport = safeObject(payload.eventCalendarImportReport, null);
   state.quantScoreHistory = normalizeQuantScoreHistory(payload.quantScoreHistory || []);
+  state.marketDataLiveMode = normalizeMarketDataLiveMode(payload.marketDataLiveMode || state.marketDataLiveMode || {});
   state.marketDataSnapshot = null;
   latestTickerSignals = [];
   pendingCsvImport = null;
@@ -2036,6 +2115,7 @@ function applyImportedState(payload) {
   saveEventCalendarImportReport();
   saveQuantScoreHistory();
   saveAccountScope();
+  saveMarketDataLiveMode();
 }
 
 function restoredConnectorStatus(importedStatus, fallback, label) {
@@ -3624,7 +3704,15 @@ function wireEvents() {
   });
   $("demoSeekingAlphaBtn").addEventListener("click", demoSyncSeekingAlpha);
   $("exportStateBtn").addEventListener("click", exportDashboardState);
-  $("stateFile").addEventListener("change", (event) => importStateFile(event.target.files[0]));
+  $("stateFile").addEventListener("change", (event) => {
+    importStateFile(event.target.files[0]);
+    event.target.value = "";
+  });
+  $("stateRestorePreview")?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-state-restore-action]")?.dataset.stateRestoreAction;
+    if (action === "apply") applyPendingStateRestore();
+    if (action === "cancel") cancelPendingStateRestore();
+  });
   $("clearPortfolioBtn")?.addEventListener("click", clearPortfolioData);
   $("saveTargetsBtn").addEventListener("click", saveTargetsFromUi);
   $("resetTargetsBtn").addEventListener("click", resetTargetTemplate);
@@ -4122,6 +4210,12 @@ function setInputValue(id, value) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function backupDateLabel(value = "") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "unknown date";
+  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 function safeObject(value, fallback) {
