@@ -603,6 +603,58 @@ test("torture brokerage CSV reports bad rows while normalizing accepted holdings
   assert.ok(result.importReport.unsupportedColumns.includes("Unmapped Note"));
 });
 
+test("bad Fidelity activity CSV fails with actionable diagnostics and expected columns", () => {
+  const result = adapters.buildImportResult({
+    fidelityFileName: "bad-fidelity-activity.csv",
+    fidelityCsv: readFileSync("data/bad-fidelity-activity.csv", "utf8")
+  });
+  const report = result.importReport;
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.records.length, 0);
+  assert.equal(report.health.status, "Failed");
+  assert.match(report.health.message, /activity\/transaction export/i);
+  assert.match(report.health.message, /Symbol/);
+  assert.equal(report.rowsParsed, 3);
+  assert.equal(report.rejectedRows.length, 3);
+  assert.equal(report.rejectedRows[0].rowNumber, 2);
+  assert.match(report.rejectedRows[0].reasons.join(" "), /unsupported transaction\/activity export/);
+  assert.ok(report.expectedColumns.some((column) => column.field === "ticker" && column.examples.includes("Symbol")));
+  assert.ok(report.expectedColumns.some((column) => column.field === "marketValue" && column.examples.includes("Current Value")));
+  assert.ok(report.mappingWarnings.some((warning) => /activity\/transaction export/i.test(warning)));
+  assert.ok(report.recoveryActions.some((action) => /Positions\/Holdings/i.test(action)));
+});
+
+test("empty Fidelity CSV still explains expected holdings columns", () => {
+  const result = adapters.buildImportResult({
+    fidelityFileName: "empty-fidelity.csv",
+    fidelityCsv: ""
+  });
+  const report = result.importReport;
+
+  assert.equal(result.records.length, 0);
+  assert.equal(report.health.status, "Failed");
+  assert.match(report.health.message, /no CSV rows were parsed/i);
+  assert.match(report.health.message, /Symbol/);
+  assert.equal(report.fileName, "empty-fidelity.csv");
+  assert.ok(report.expectedColumns.some((column) => column.field === "ticker" && column.examples.includes("Symbol")));
+  assert.ok(report.expectedColumns.some((column) => column.field === "marketValue" && column.examples.includes("Current Value")));
+  assert.ok(report.missingColumnHints.some((hint) => /Ticker\/symbol column not mapped/i.test(hint)));
+  assert.ok(report.recoveryActions.some((action) => /Map columns/i.test(action)));
+});
+
+test("Fidelity footer rows do not inflate missing required field diagnostics", () => {
+  const result = adapters.buildImportResult({
+    fidelityCsv: `Account Name,Symbol,Description,Quantity,Last Price,Current Value,Cost Basis
+Taxable,MU,Micron Technology,10,$100.00,"$1,000.00",$750.00
+Footer,,Prices delayed,,,,`
+  });
+
+  assert.equal(result.importReport.health.status, "Imported with skipped non-holding rows");
+  assert.equal(result.importReport.rejectedRows[0].classification, "non-holding row");
+  assert.deepEqual(result.importReport.missingRequiredFields, []);
+});
+
 test("Fidelity exports infer blank last price and convert average cost basis totals", () => {
   const result = adapters.buildImportResult({
     fidelityFileName: "fidelity-average-cost.csv",

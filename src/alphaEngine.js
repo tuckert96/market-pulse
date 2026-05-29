@@ -203,7 +203,7 @@ export function demoAlphaEvents() {
         "analyst EPS revisions",
         "Samsung/SK Hynix updates"
       ],
-      staleAfter: "2026-05-28T13:30:00-04:00",
+      staleAfter: "2026-06-04T13:30:00-04:00",
       factualClaim: "Samsung employee strike expands at memory operations.",
       interpretation: "Potential second-order positive for MU through memory supply/pricing.",
       businessMechanism: "Samsung is a major memory competitor. A production disruption could tighten DRAM/NAND/HBM supply. Tighter memory supply could support memory pricing. Stronger memory pricing may benefit Micron revenue and margins.",
