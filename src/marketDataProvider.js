@@ -28,6 +28,17 @@ export const MARKET_DATA_REQUEST_BUDGET_DEFAULTS = Object.freeze({
   enrichmentTickerLimit: 8
 });
 
+const MARKET_DATA_COVERAGE_FIELDS = Object.freeze([
+  { key: "quote", label: "Quote", missingLabel: "quote/current price", resource: "quote" },
+  { key: "week52Range", label: "52-week high/low", missingLabel: "52-week high/low", resource: "metric" },
+  { key: "volume", label: "Volume", missingLabel: "volume", resource: "quote" },
+  { key: "averageVolume", label: "Average volume", missingLabel: "average volume", resource: "metric" },
+  { key: "marketCap", label: "Market cap", missingLabel: "market cap", resource: "profile" },
+  { key: "companyProfile", label: "Company profile", missingLabel: "company profile", resource: "profile" },
+  { key: "sectorIndustry", label: "Sector/industry", missingLabel: "sector/industry", resource: "profile" },
+  { key: "historicalCandles", label: "Historical candles", missingLabel: "historical candles", resource: "history" }
+]);
+
 export const MARKET_DATA_PROVIDER_CONFIGS = Object.freeze({
   finnhub: {
     id: "finnhub",
@@ -1155,6 +1166,7 @@ export function normalizeFinnhubQuote(rawQuote = {}, rawProfile = {}, historical
     dayLow: rawQuote.l,
     marketCap,
     volume: rawQuote.v ?? latestHistorical?.volume ?? rawProfile.volume,
+    averageVolume: numberFrom(metric["10DayAverageTradingVolume"], metric["3MonthAverageTradingVolume"], metric.averageVolume, metric.avgVolume),
     sector: rawProfile.ggroup || rawProfile.gsector || rawProfile.finnhubIndustry,
     industry: rawProfile.finnhubIndustry || rawProfile.industry,
     fiftyTwoWeekHigh: numberFrom(metric["52WeekHigh"], metric.fiftyTwoWeekHigh, metric.week52High),
@@ -1786,7 +1798,7 @@ function status(statusValue, label, detail, snapshot) {
   };
 }
 
-function marketDataQuoteDiagnostics(snapshot = {}) {
+export function marketDataQuoteDiagnostics(snapshot = {}) {
   const quotesByTicker = snapshot.quotesByTicker || Object.fromEntries((snapshot.quotes || []).map((quote) => [normalizeTicker(quote.ticker), quote]));
   const requested = normalizeTickerList(snapshot.requestedTickers || []);
   const quoteTickers = normalizeTickerList((snapshot.quotes || []).map((quote) => quote.ticker));
@@ -1794,6 +1806,7 @@ function marketDataQuoteDiagnostics(snapshot = {}) {
   return tickers.map((ticker) => {
     const quote = quotesByTicker[ticker];
     if (!quote) {
+      const fieldCoverage = buildQuoteFieldCoverage(null, snapshot);
       return {
         ticker,
         status: MARKET_DATA_PROVIDER_STATUSES.PARTIAL,
@@ -1803,20 +1816,34 @@ function marketDataQuoteDiagnostics(snapshot = {}) {
         profile: "missing",
         metric: "missing",
         history: "missing",
-        missingFields: ["quote"],
+        fieldCoverage,
+        availableFields: [],
+        missingFields: fieldCoverage.filter((field) => field.status === "missing").map((field) => field.missingLabel),
+        deferredFields: [],
+        staleFields: [],
+        unavailableFields: fieldCoverage.map((field) => field.missingLabel),
+        coverageSummary: "0/8 fields available",
+        coverageStatus: "missing",
         fetchedAt: null,
-        lastError: "No normalized quote returned."
+        lastError: snapshot.error || "No normalized quote returned."
       };
     }
     const freshness = quote.dataFreshness || quote.cacheStatus || snapshot.dataFreshness || "unknown";
     const resources = quote.resourceFreshness || {};
     const historicalCount = Array.isArray(quote.historicalPrices) ? quote.historicalPrices.length : 0;
-    const missingFields = [];
-    if (!(numberFrom(quote.price) > 0)) missingFields.push("price");
-    if (!quote.sector || quote.sector === "Unknown") missingFields.push("sector");
-    if (!quote.industry || quote.industry === "Unknown") missingFields.push("industry");
-    if (!(numberFrom(quote.marketCap) > 0)) missingFields.push("market cap");
-    if (!historicalCount) missingFields.push("history");
+    const fieldCoverage = buildQuoteFieldCoverage(quote, snapshot);
+    const availableFields = fieldCoverage.filter((field) => field.available).map((field) => field.label);
+    const missingFields = fieldCoverage.filter((field) => field.status === "missing").map((field) => field.missingLabel);
+    const deferredFields = fieldCoverage
+      .filter((field) => ["deferred", "skipped", "disabled"].includes(field.status))
+      .map((field) => field.missingLabel);
+    const staleFields = fieldCoverage.filter((field) => field.status === "stale").map((field) => field.label);
+    const unavailableFields = [...new Set([...missingFields, ...deferredFields])];
+    const coverageStatus = staleFields.length
+      ? "stale"
+      : unavailableFields.length
+        ? "partial"
+        : "complete";
     return {
       ticker,
       status: snapshot.status?.status || snapshot.status || freshness,
@@ -1826,11 +1853,75 @@ function marketDataQuoteDiagnostics(snapshot = {}) {
       profile: resources.profile || "unknown",
       metric: resources.metric || "unknown",
       history: resources.history || (historicalCount ? freshness : "missing"),
+      fieldCoverage,
+      availableFields,
       missingFields,
+      deferredFields,
+      staleFields,
+      unavailableFields,
+      coverageSummary: `${availableFields.length}/${MARKET_DATA_COVERAGE_FIELDS.length} fields available`,
+      coverageStatus,
       fetchedAt: quote.fetchedAt || snapshot.fetchedAt || null,
       lastError: quote.lastError?.message || quote.lastError || ""
     };
   });
+}
+
+function buildQuoteFieldCoverage(quote = null, snapshot = {}) {
+  const resources = quote?.resourceFreshness || {};
+  const freshness = quote?.dataFreshness || quote?.cacheStatus || snapshot.dataFreshness || "unknown";
+  const hasCompanyProfile = Boolean(
+    quote?.name &&
+    normalizeTicker(quote.name) !== normalizeTicker(quote.ticker) &&
+    String(quote.name || "").trim().length > 1
+  );
+  const hasSectorIndustry = Boolean(
+    (quote?.sector && quote.sector !== "Unknown") ||
+    (quote?.industry && quote.industry !== "Unknown")
+  );
+  const checks = {
+    quote: numberFrom(quote?.price) > 0,
+    week52Range: numberFrom(quote?.fiftyTwoWeekHigh) > 0 && numberFrom(quote?.fiftyTwoWeekLow) > 0,
+    volume: numberFrom(quote?.volume) > 0,
+    averageVolume: numberFrom(quote?.averageVolume) > 0,
+    marketCap: numberFrom(quote?.marketCap) > 0,
+    companyProfile: hasCompanyProfile,
+    sectorIndustry: hasSectorIndustry,
+    historicalCandles: Array.isArray(quote?.historicalPrices) && quote.historicalPrices.length > 0
+  };
+  return MARKET_DATA_COVERAGE_FIELDS.map((field) => {
+    const resourceStatus = resources[field.resource] || fieldResourceFallback(field.resource, quote, freshness);
+    const status = fieldCoverageStatus(Boolean(checks[field.key]), resourceStatus, freshness);
+    return {
+      key: field.key,
+      label: field.label,
+      missingLabel: field.missingLabel,
+      resource: field.resource,
+      available: Boolean(checks[field.key]),
+      status,
+      resourceStatus
+    };
+  });
+}
+
+function fieldResourceFallback(resource, quote = {}, freshness = "unknown") {
+  if (!quote) return "missing";
+  if (resource === "quote") return quote.cacheStatus || freshness;
+  if (resource === "history") return Array.isArray(quote.historicalPrices) && quote.historicalPrices.length ? quote.cacheStatus || freshness : "missing";
+  return "unknown";
+}
+
+function fieldCoverageStatus(available, resourceStatus = "unknown", freshness = "unknown") {
+  const resource = String(resourceStatus || "").toLowerCase();
+  if (available) {
+    if (resource === "stale" || freshness === "stale") return "stale";
+    if (resource === "cached" || freshness === "cached") return "cached";
+    if (resource === "mock" || freshness === "mock") return "mock";
+    if (["live", "connected"].includes(resource) || freshness === "live") return "live";
+    return "available";
+  }
+  if (["deferred", "skipped", "disabled"].includes(resource)) return resource;
+  return "missing";
 }
 
 function providerCredentialStatus(env, spec) {

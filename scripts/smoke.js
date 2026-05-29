@@ -1079,6 +1079,7 @@ assert(canceledCsvImportPreview.changed === false && canceledCsvImportPreview.cl
 assert(appliedCsvImportPreview.changed && appliedCsvImportPreview.holdings.length === csvResult.records.length && appliedCsvImportPreview.fidelityStatus.mode === "csv-imported", "portfolio import preview confirm should produce applied holdings and CSV-imported status");
 assert(marketDataSelectionJs.includes("!holding.cash && holding.assetClass !== \"Cash\"") && marketDataSelectionJs.includes("holding.marketDataEligible !== false"), "market data requests should skip cash-like and local-identifier holdings before calling live quote providers");
 assert(portfolioViewJs.includes("Market data diagnostics"), "Data Sources should expose safe market-data provider diagnostics");
+assert(portfolioViewJs.includes("coverageSummary") && portfolioViewJs.includes("52-week high/low") && portfolioViewJs.includes("Average volume") && portfolioViewJs.includes("ticker-provider-coverage"), "Finnhub diagnostics should expose per-ticker field coverage in Data Sources and ticker pages");
 assert(indexHtml.includes('accept=".csv,.json,text/csv,application/json"'), "portfolio import should accept CSV and holdings JSON");
 assert(csvResult.validation.ok, "sample CSV import path should validate");
 assert(csvResult.records.some((record) => record.ticker === "NVDA"), "sample CSV import should include NVDA");
