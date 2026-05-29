@@ -2784,6 +2784,7 @@ function whatIfActionLabel(action = "") {
 
 function renderRiskDeepDive(risk = {}, breakdowns = {}, overview = {}, holdings = [], uiState = "SAMPLE_MODE", marketDataStatus = {}) {
   const decision = risk.decisionDashboard || {};
+  renderRiskConcentrationSummary(decision.concentrationInterpretation, decision.topPositionWeights || risk.topHoldings || [], decision.leveragedEtfExposure, uiState);
   renderRiskTopPositions(decision.topPositionWeights || risk.topHoldings || [], uiState, marketDataStatus);
   const marketNote = marketDataStatus.status
     ? ` Market movement source: ${marketDataDisplayLabel(marketDataStatus)}. ${marketDataDisplayDetail(marketDataStatus)}`
@@ -2794,6 +2795,35 @@ function renderRiskDeepDive(risk = {}, breakdowns = {}, overview = {}, holdings 
   renderRiskThemeExposurePanel(decision.themeExposure || [], uiState);
   renderRiskAssetMixPanel(decision.assetMix || {}, decision.cashExposure, uiState);
   renderRiskCorrelationPanel(decision.correlationPlaceholder, uiState);
+}
+
+function renderRiskConcentrationSummary(interpretation = {}, topPositions = [], leverageSummary = {}, uiState = "SAMPLE_MODE") {
+  const target = byId("riskConcentrationSummaryPanel");
+  if (!target) return;
+  if (!isImportedState(uiState)) {
+    target.innerHTML = '<div class="empty"><strong>No real concentration summary yet.</strong><span>Import holdings to calculate top-position, top-5, top-10, sector, and leverage concentration.</span></div>';
+    return;
+  }
+  const top = topPositions[0] || {};
+  const drivers = Array.isArray(interpretation.drivers) ? interpretation.drivers : [];
+  target.innerHTML = `
+    <article class="risk-summary-card">
+      <div>
+        <div>
+          <h3>${escapeHtml(interpretation.headline || "Concentration needs review")}</h3>
+          <p>${escapeHtml(interpretation.summary || "Deterministic local read from current position weights and source-labeled exposure data.")}</p>
+        </div>
+        ${renderRiskStatusBadge(interpretation.status || "normal")}
+      </div>
+      <div class="risk-summary-drivers">
+        <div><span>Largest holding</span><b>${escapeHtml(top.name || "None")} · ${formatPct(top.weight || 0)}</b></div>
+        <div><span>Position threshold</span><b>${escapeHtml(top.thresholdLabel || "Below 5%")}</b></div>
+        <div><span>Leveraged notional</span><b>${formatPct(leverageSummary?.notionalWeight || 0)}</b></div>
+        <div><span>Next inspection</span><b>${escapeHtml(interpretation.nextStep || "Open the largest risk row before changing exposure.")}</b></div>
+      </div>
+      ${drivers.length ? `<ul>${drivers.slice(0, 5).map((driver) => `<li>${escapeHtml(driver)}</li>`).join("")}</ul>` : ""}
+    </article>
+  `;
 }
 
 function renderRiskTopPositions(topHoldings = [], uiState = "SAMPLE_MODE", marketDataStatus = {}) {
@@ -2811,13 +2841,14 @@ function renderRiskTopPositions(topHoldings = [], uiState = "SAMPLE_MODE", marke
       const weight = row.weight ?? row.portfolioWeight;
       const details = row.explanation || `${ticker} is ${formatPct(weight)} of portfolio value.`;
       const sourceLabel = marketDataStatus.status ? ` · ${marketDataDisplayLabel(marketDataStatus)}` : "";
+      const thresholdText = row.thresholdFlags?.length ? ` · ${row.thresholdFlags.map((flag) => flag.label).join(", ")}` : "";
       return `
         <article class="risk-row ${escapeHtml(row.status || "normal")}">
           <div class="risk-row-main ranked">
             <span class="risk-rank">${index + 1}</span>
             <div>
               <b>${ticker ? renderTickerLink(ticker) : escapeHtml(row.name)}</b>
-              <span>${escapeHtml(label)}${escapeHtml(sourceLabel)}</span>
+              <span>${escapeHtml(label)}${escapeHtml(sourceLabel)}${escapeHtml(thresholdText)}</span>
             </div>
           </div>
           <div class="risk-row-value">
@@ -2922,7 +2953,7 @@ function renderRiskAssetMixPanel(assetMix = {}, cashExposure = {}, uiState = "SA
     if (cashTarget) cashTarget.innerHTML = "";
     return;
   }
-  const assetRows = [assetMix.individualStock, assetMix.etf].filter(Boolean);
+  const assetRows = [assetMix.individualStock, assetMix.normalEtf || assetMix.etf, assetMix.leveragedEtf].filter(Boolean);
   if (assetTarget) {
     assetTarget.innerHTML = assetRows.length
       ? assetRows.map((row) => renderRiskDecisionRow(row, "Inspect holdings")).join("")
