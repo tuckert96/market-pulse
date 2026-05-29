@@ -7,6 +7,7 @@ import { countHoldingRowsNeedingReview, isRealPortfolioUiState } from "./portfol
 import { summarizeRedditMentions } from "./redditSignals.js";
 import { buildTechnicalAnalysisSnapshot } from "./technicalAnalysis.js";
 import { buildThesisRiskSummary } from "./thesisTracker.js";
+import { compareThesisSnapshotToProfile, thesisSnapshotsForTicker } from "./thesisSnapshots.js";
 import { buildTickerResearchLens } from "./tickerResearch.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
 
@@ -45,7 +46,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderTargetAllocations(options.targetPlan, options.targetAllocations, options.uiState);
   renderRebalancePlan(options.targetPlan || options.rebalancePlan, options.uiState);
   renderSleeves(options.sleeves || [], options.uiState);
-  renderThesisTracker(options.thesisRows || [], options.thesisSummary);
+  renderThesisTracker(options.thesisRows || [], options.thesisSummary, options.thesisSnapshots || []);
   renderWatchlistIdeas(options.watchlistIdeaRows || [], options.watchlistIdeaSummary || {}, options.watchlistFilters || {});
   renderDecisionJournal(options.journalRows || [], options.journalSummary || {}, options.journalFilters || {});
   renderCalendarEvents(options.calendarEvents || [], options.calendarSummary || {}, options.calendarFilters || {}, options.eventCalendarImportReport);
@@ -2546,20 +2547,20 @@ function renderSleeves(sleeves, uiState = "SAMPLE_MODE") {
   `).join("");
 }
 
-function renderThesisTracker(rows, summary) {
+function renderThesisTracker(rows, summary, snapshots = []) {
   const target = byId("thesisPanel");
-  if (!target) return;
-  target.innerHTML = `
-    <div class="risk-grid">
-      <div class="risk-stat"><span>Needs attention</span><b>${summary?.needsAttention ?? 0}</b></div>
-      <div class="risk-stat"><span>Missing</span><b>${summary?.missing ?? 0}</b></div>
-      <div class="risk-stat"><span>Stale</span><b>${summary?.stale ?? 0}</b></div>
-      <div class="risk-stat"><span>Alpha review</span><b>${summary?.alphaReview ?? 0}</b></div>
-      <div class="risk-stat"><span>Above target risk</span><b>${summary?.aboveTargetWithWeakOrStale ?? 0}</b></div>
-      <div class="risk-stat"><span>Missing guardrails</span><b>${summary?.leveragedGuardrailMissing ?? 0}</b></div>
-    </div>
-    <div class="thesis-list">
-      ${rows.slice(0, 10).map((row) => `
+  if (target) {
+    target.innerHTML = `
+      <div class="risk-grid">
+        <div class="risk-stat"><span>Needs attention</span><b>${summary?.needsAttention ?? 0}</b></div>
+        <div class="risk-stat"><span>Missing</span><b>${summary?.missing ?? 0}</b></div>
+        <div class="risk-stat"><span>Stale</span><b>${summary?.stale ?? 0}</b></div>
+        <div class="risk-stat"><span>Alpha review</span><b>${summary?.alphaReview ?? 0}</b></div>
+        <div class="risk-stat"><span>Above target risk</span><b>${summary?.aboveTargetWithWeakOrStale ?? 0}</b></div>
+        <div class="risk-stat"><span>Missing guardrails</span><b>${summary?.leveragedGuardrailMissing ?? 0}</b></div>
+      </div>
+      <div class="thesis-list">
+        ${rows.slice(0, 10).map((row) => `
         <article class="thesis-card ${escapeHtml(thesisStatusClass(row.thesisStatus))}">
           <div class="thesis-card-head">
             <div>
@@ -2580,8 +2581,57 @@ function renderThesisTracker(rows, summary) {
           ${row.reviewReasons.length ? `<ul class="why-list">${row.reviewReasons.slice(0, 4).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
           ${row.alphaImpact.summary ? `<p class="section-note"><b>Alpha signal:</b> ${escapeHtml(row.alphaImpact.summary)}</p>` : ""}
         </article>
-      `).join("") || '<div class="empty"><strong>No thesis rows yet.</strong><span>Import holdings to build a thesis review list.</span></div>'}
+        `).join("") || '<div class="empty"><strong>No thesis rows yet.</strong><span>Import holdings to build a thesis review list.</span></div>'}
+      </div>
+    `;
+  }
+  renderThesisSnapshotHistory(rows, snapshots);
+}
+
+function renderThesisSnapshotHistory(rows = [], snapshots = []) {
+  const target = byId("thesisSnapshotPanel");
+  if (!target) return;
+  const normalized = [...(snapshots || [])]
+    .sort((a, b) => String(b.capturedAt || "").localeCompare(String(a.capturedAt || "")));
+  if (!normalized.length) {
+    target.innerHTML = `
+      <div class="empty">
+        <strong>No thesis snapshots yet.</strong>
+        <span>Save a snapshot after editing a thesis to preserve what Tucker believed at that point in time.</span>
+      </div>
+    `;
+    return;
+  }
+  const currentByTicker = new Map((rows || []).map((row) => [normalizeTickerSymbol(row.ticker), row]));
+  target.innerHTML = `
+    <div class="provider-status-note">
+      <b>Thesis history</b>
+      <span>${normalized.length} saved snapshot${normalized.length === 1 ? "" : "s"} across ${new Set(normalized.map((snapshot) => snapshot.ticker)).size} ticker${new Set(normalized.map((snapshot) => snapshot.ticker)).size === 1 ? "" : "s"}. User-written and generated summaries are labeled separately.</span>
     </div>
+    <div class="thesis-list">
+      ${normalized.slice(0, 8).map((snapshot) => renderThesisSnapshotCard(snapshot, currentByTicker.get(normalizeTickerSymbol(snapshot.ticker)))).join("")}
+    </div>
+  `;
+}
+
+function renderThesisSnapshotCard(snapshot = {}, currentRow = null) {
+  const comparison = currentRow ? compareThesisSnapshotToProfile(snapshot, currentRow) : null;
+  const sourceLabel = snapshot.sourceType === "generated" ? "Generated" : "User-written";
+  return `
+    <article class="thesis-card">
+      <div class="thesis-card-head">
+        <div class="badge-row">
+          <span class="status-badge">${escapeHtml(sourceLabel)}</span>
+          <span class="status-badge">${escapeHtml(snapshot.profile?.thesisStatus || "Unrated")}</span>
+          <span class="status-badge">${escapeHtml(snapshot.profile?.confidenceLevel || "Unrated")}</span>
+        </div>
+        <b>${renderTickerLink(snapshot.ticker)}</b>
+        <small>${escapeHtml(shortDateTime(snapshot.capturedAt))} · ${escapeHtml(snapshot.sourceLabel || sourceLabel)}</small>
+      </div>
+      <p>${escapeHtml(snapshot.profile?.whyOwned || snapshot.riskSummary?.summary || "Snapshot saved without a thesis note.")}</p>
+      ${comparison ? `<p class="section-note"><b>Current comparison:</b> ${escapeHtml(comparison.summary)}</p>` : '<p class="section-note">Current comparison unavailable because this ticker is not in the active thesis rows.</p>'}
+      ${comparison?.changes?.length ? `<ul class="why-list">${comparison.changes.slice(0, 3).map((change) => `<li>${escapeHtml(change.summary)}</li>`).join("")}</ul>` : ""}
+    </article>
   `;
 }
 
@@ -3299,6 +3349,7 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     (options.marketDataSnapshot?.quotes || []).find((row) => normalizeTickerSymbol(row.ticker) === ticker) ||
     null;
   const thesisRow = (options.thesisRows || []).find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
+  const thesisSnapshots = thesisSnapshotsForTicker(options.thesisSnapshots || [], ticker).slice(0, 6);
   const tickerSignal = (options.tickerSignals || []).find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const watchlistIdea = (options.allWatchlistIdeaRows || options.watchlistIdeaRows || [])
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
@@ -3370,6 +3421,7 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     quote,
     historicalPrices,
     thesisRow,
+    thesisSnapshots,
     tickerSignal,
     watchlistIdea,
     journalEntries,
@@ -4290,8 +4342,46 @@ function renderTickerThesisRisk(model) {
             <p class="section-note">${escapeHtml(summary.caveat || "Local deterministic summary; no AI text was generated.")}</p>
           </details>
         ` : '<div class="empty"><strong>No thesis profile yet.</strong><span>Open Thesis to document why Tucker owns or tracks this ticker, invalidation criteria, and review triggers.</span><a class="button-link" href="#thesis">Open Thesis</a></div>'}
+        ${renderTickerThesisSnapshotHistory(model)}
       </div>
     </section>
+  `;
+}
+
+function renderTickerThesisSnapshotHistory(model = {}) {
+  const snapshots = model.thesisSnapshots || [];
+  if (!snapshots.length) {
+    return `
+      <div class="empty">
+        <strong>No saved thesis history yet.</strong>
+        <span>Open Thesis and save a snapshot to track what Tucker believed over time.</span>
+      </div>
+    `;
+  }
+  return `
+    <details class="signal-details" open>
+      <summary>Thesis history</summary>
+      <div class="thesis-list">
+        ${snapshots.map((snapshot, index) => {
+          const comparison = compareThesisSnapshotToProfile(snapshot, model.thesisRow || snapshot.profile || {});
+          return `
+            <article class="thesis-card">
+              <div class="thesis-card-head">
+                <div class="badge-row">
+                  <span class="status-badge">${escapeHtml(snapshot.sourceType === "generated" ? "Generated" : "User-written")}</span>
+                  <span class="status-badge">${index === 0 ? "Latest" : "Prior"}</span>
+                </div>
+                <b>${escapeHtml(shortDateTime(snapshot.capturedAt))}</b>
+                <small>${escapeHtml(snapshot.profile?.thesisStatus || "Unrated")} · ${escapeHtml(snapshot.profile?.confidenceLevel || "Unrated")}</small>
+              </div>
+              <p>${escapeHtml(snapshot.profile?.whyOwned || snapshot.riskSummary?.summary || "Snapshot saved without a thesis note.")}</p>
+              <p class="section-note"><b>Compared with current:</b> ${escapeHtml(comparison.summary)}</p>
+              ${comparison.changes.length ? `<ul class="why-list">${comparison.changes.slice(0, 3).map((change) => `<li>${escapeHtml(change.summary)}</li>`).join("")}</ul>` : ""}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </details>
   `;
 }
 

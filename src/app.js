@@ -101,7 +101,8 @@ import {
   targetId,
   targetRecordFromFormRow
 } from "./targetAllocations.js";
-import { buildThesisAlerts, buildThesisRows, normalizeThesisProfile, thesisSummary } from "./thesisTracker.js";
+import { buildThesisAlerts, buildThesisRiskSummary, buildThesisRows, normalizeThesisProfile, thesisSummary } from "./thesisTracker.js";
+import { normalizeThesisSnapshot, normalizeThesisSnapshots, upsertThesisSnapshot } from "./thesisSnapshots.js";
 import { buildCombinedTickerSignals, DEFAULT_TICKER_SIGNAL_WATCHLIST } from "./tickerSignals.js";
 import { normalizeWhatIfScenario, simulateWhatIf } from "./whatIfSimulator.js";
 import {
@@ -126,6 +127,7 @@ const seekingAlphaStatusKey = "growthDashboardSeekingAlphaStatus";
 const marketEventsKey = "growthDashboardMarketEvents";
 const alphaEventsKey = "growthDashboardAlphaEvents";
 const thesisProfilesKey = "growthDashboardThesisProfiles";
+const thesisSnapshotsKey = "growthDashboardThesisSnapshots";
 const targetAllocationsKey = "growthDashboardTargetAllocations";
 const alertStateKey = "growthDashboardAlertState";
 const alertThresholdsKey = "growthDashboardAlertThresholds";
@@ -224,6 +226,7 @@ const state = {
   marketEvents: loadMarketEvents(),
   alphaEvents: loadAlphaEvents(),
   thesisProfiles: loadThesisProfiles(),
+  thesisSnapshots: loadThesisSnapshots(),
   targetAllocations: loadTargetAllocations(),
   alertState: loadAlertState(),
   alertThresholds: loadAlertThresholds(),
@@ -496,6 +499,19 @@ function loadThesisProfiles() {
 
 function saveThesisProfiles() {
   safeSetLocalStorage(thesisProfilesKey, JSON.stringify(state.thesisProfiles));
+}
+
+function loadThesisSnapshots() {
+  try {
+    return normalizeThesisSnapshots(JSON.parse(localStorage.getItem(thesisSnapshotsKey)) || []);
+  } catch {
+    return [];
+  }
+}
+
+function saveThesisSnapshots() {
+  state.thesisSnapshots = normalizeThesisSnapshots(state.thesisSnapshots);
+  safeSetLocalStorage(thesisSnapshotsKey, JSON.stringify(state.thesisSnapshots));
 }
 
 function loadTargetAllocations() {
@@ -921,6 +937,7 @@ function render() {
     targetAllocations: state.targetAllocations,
     sleeves,
     thesisRows,
+    thesisSnapshots: state.thesisSnapshots,
     thesisSummary: thesisSummary(thesisRows),
     uiState,
     portfolioStatus,
@@ -1851,6 +1868,7 @@ function exportDashboardState() {
     alertState: state.alertState,
     alertThresholds: state.alertThresholds,
     thesisProfiles: state.thesisProfiles,
+    thesisSnapshots: state.thesisSnapshots,
     targetAllocations: state.targetAllocations,
     politicianTrades: persistPoliticianTradeCacheRecords(state.politicianTrades, persistedReportFreshness(state.politicianTradeImportReport, "politician")),
     politicianTradeImportReport: persistedSourceReportForStorage(state.politicianTradeImportReport, "politician"),
@@ -1963,6 +1981,7 @@ function applyImportedState(payload) {
   state.marketEvents = Array.isArray(payload.marketEvents) ? payload.marketEvents : demoMarketIntelligenceEvents();
   state.alphaEvents = Array.isArray(payload.alphaEvents) ? payload.alphaEvents : demoAlphaEvents();
   state.thesisProfiles = safeObject(payload.thesisProfiles, demoThesisProfiles());
+  state.thesisSnapshots = Array.isArray(payload.thesisSnapshots) ? normalizeThesisSnapshots(payload.thesisSnapshots) : loadThesisSnapshots();
   state.targetAllocations = normalizeTargetAllocations(Array.isArray(payload.targetAllocations) ? payload.targetAllocations : defaultTargetAllocations());
   state.alertState = normalizeAlertState(payload.alertState || emptyAlertState());
   state.alertThresholds = normalizeAlertThresholds(payload.alertThresholds || DEFAULT_ALERT_THRESHOLDS);
@@ -1993,6 +2012,7 @@ function applyImportedState(payload) {
   saveMarketEvents();
   saveAlphaEvents();
   saveThesisProfiles();
+  saveThesisSnapshots();
   saveTargetAllocations();
   saveAlertState();
   saveAlertThresholds();
@@ -2163,9 +2183,11 @@ function syncThesisEditorOptions(holdings) {
   const target = $("thesisTicker");
   if (!target) return;
   const previous = target.value;
-  const tickers = holdings
+  const holdingTickers = holdings
     .filter((holding) => holding.ticker && holding.assetClass !== "Cash")
     .map((holding) => holding.ticker);
+  const snapshotTickers = (state.thesisSnapshots || []).map((snapshot) => snapshot.ticker).filter(Boolean);
+  const tickers = [...new Set([...holdingTickers, ...snapshotTickers])].sort((a, b) => a.localeCompare(b));
   target.innerHTML = [...new Set(tickers)]
     .sort((a, b) => a.localeCompare(b))
     .map((ticker) => `<option value="${escapeHtml(ticker)}">${escapeHtml(ticker)}</option>`)
@@ -2607,11 +2629,9 @@ function fillThesisEditor(ticker, holdings = []) {
   $("thesisLastReviewedDate").value = profile.lastReviewedDate || "";
 }
 
-function saveThesisFromEditor(reviewedToday = false) {
-  const ticker = $("thesisTicker").value;
-  if (!ticker) return;
+function thesisProfileFromEditor(ticker, reviewedToday = false) {
   const targetAllocation = Math.max(0, Number($("thesisTargetAllocation").value) || 0) / 100;
-  state.thesisProfiles[ticker] = {
+  return {
     ...(state.thesisProfiles[ticker] || {}),
     ticker,
     whyOwned: $("thesisWhyOwned").value.trim(),
@@ -2632,10 +2652,54 @@ function saveThesisFromEditor(reviewedToday = false) {
     notes: $("thesisNotes").value.trim(),
     lastReviewedDate: reviewedToday ? today() : $("thesisLastReviewedDate").value
   };
+}
+
+function saveThesisFromEditor(reviewedToday = false, options = {}) {
+  const ticker = $("thesisTicker").value;
+  if (!ticker) return;
+  state.thesisProfiles[ticker] = thesisProfileFromEditor(ticker, reviewedToday);
   saveThesisProfiles();
-  syncTickerTargetFromThesis(ticker, targetAllocation);
+  syncTickerTargetFromThesis(ticker, state.thesisProfiles[ticker].targetAllocation);
   $("thesisEditorStatus").textContent = `${ticker} thesis saved locally.`;
+  if (options.renderAfter !== false) render();
+}
+
+function saveThesisSnapshotFromEditor() {
+  const ticker = normalizeTicker($("thesisTicker")?.value || "");
+  if (!ticker) {
+    $("thesisEditorStatus").textContent = "Choose a ticker before saving a thesis snapshot.";
+    return;
+  }
+  saveThesisFromEditor(false, { renderAfter: false });
+  const snapshot = currentThesisSnapshot(ticker, {
+    sourceType: $("thesisSnapshotSourceType")?.value || "user-written",
+    createdFrom: "thesis-editor",
+    capturedAt: new Date().toISOString()
+  });
+  state.thesisSnapshots = upsertThesisSnapshot(state.thesisSnapshots, snapshot);
+  saveThesisSnapshots();
+  $("thesisEditorStatus").textContent = `${ticker} thesis snapshot saved locally. History does not place or imply a trade.`;
   render();
+}
+
+function currentThesisSnapshot(ticker, options = {}) {
+  const holdings = analyzePortfolio(applyThesisProfiles(state.holdings)).holdings;
+  const targetPlan = buildTargetAllocationPlan(holdings, state.targetAllocations, { mode: $("rebalanceMode")?.value });
+  const totalValue = holdings.reduce((sum, holding) => sum + (Number(holding.marketValue) || 0), 0);
+  const thesisRows = buildThesisRows(holdings, state.thesisProfiles, { targetPlan, totalValue, asOf: options.capturedAt });
+  const row = thesisRows.find((item) => normalizeTicker(item.ticker) === ticker);
+  const profile = normalizeThesisProfile(state.thesisProfiles[ticker] || {}, holdings.find((holding) => normalizeTicker(holding.ticker) === ticker) || { ticker });
+  const riskSummary = buildThesisRiskSummary(row || { ...profile, ticker }, { holding: holdings.find((holding) => normalizeTicker(holding.ticker) === ticker) || { ticker } });
+  const sourceType = options.sourceType === "generated" ? "generated" : "user-written";
+  return normalizeThesisSnapshot({
+    ticker,
+    capturedAt: options.capturedAt,
+    sourceType,
+    sourceLabel: sourceType === "generated" ? "Generated thesis/risk summary" : "User-written thesis",
+    createdFrom: options.createdFrom || "thesis-editor",
+    profile,
+    riskSummary
+  });
 }
 
 function syncTickerTargetFromThesis(ticker, targetAllocation) {
@@ -3606,6 +3670,7 @@ function wireEvents() {
   });
   $("saveThesisBtn").addEventListener("click", () => saveThesisFromEditor(false));
   $("markReviewedBtn").addEventListener("click", () => saveThesisFromEditor(true));
+  $("saveThesisSnapshotBtn")?.addEventListener("click", saveThesisSnapshotFromEditor);
   $("sampleBtn").addEventListener("click", () => {
     if (confirmSampleOverwrite()) loadSampleData();
   });
@@ -3644,6 +3709,7 @@ function loadSampleData() {
   state.marketEvents = demoMarketIntelligenceEvents();
   state.alphaEvents = demoAlphaEvents();
   state.thesisProfiles = demoThesisProfiles();
+  state.thesisSnapshots = [];
   state.targetAllocations = defaultTargetAllocations();
   state.alertState = emptyAlertState();
   state.alertThresholds = normalizeAlertThresholds(DEFAULT_ALERT_THRESHOLDS);
@@ -3670,6 +3736,7 @@ function loadSampleData() {
   saveMarketEvents();
   saveAlphaEvents();
   saveThesisProfiles();
+  saveThesisSnapshots();
   saveTargetAllocations();
   saveAlertState();
   saveAlertThresholds();

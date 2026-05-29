@@ -25,6 +25,7 @@ import { normalizeSeekingAlphaRecord } from "../src/seekingAlphaConnector.js";
 import { buildTargetAllocationPlan, defaultTargetAllocations, normalizeTargetAllocations } from "../src/targetAllocations.js";
 import { buildTechnicalAnalysisSnapshot } from "../src/technicalAnalysis.js";
 import { buildThesisAlerts, buildThesisRows, thesisSummary } from "../src/thesisTracker.js";
+import { compareThesisSnapshotToProfile, normalizeThesisSnapshot } from "../src/thesisSnapshots.js";
 import { buildTickerResearchLens } from "../src/tickerResearch.js";
 import { buildCombinedTickerSignals } from "../src/tickerSignals.js";
 import { buildStockPredictionModel } from "../src/stockPredictionModel.js";
@@ -259,6 +260,13 @@ const whatIfResult = simulateWhatIf({
 const thesisRows = buildThesisRows(analysis.holdings, demoThesisProfiles(), { targetPlan, alphaSignals: signals, asOf: "2026-05-23", totalValue: analysis.overview.totalValue });
 const thesisAlerts = buildThesisAlerts(thesisRows);
 const thesisStats = thesisSummary(thesisRows);
+const thesisSnapshot = normalizeThesisSnapshot({
+  ticker: "MU",
+  capturedAt: "2026-05-23T12:00:00-04:00",
+  sourceType: "user-written",
+  profile: demoThesisProfiles().MU
+});
+const thesisSnapshotComparison = compareThesisSnapshotToProfile(thesisSnapshot, { ...demoThesisProfiles().MU, confidenceLevel: "Low" });
 const muMovementExplainer = buildTickerMovementExplainer({
   ticker: "MU",
   owned: true,
@@ -1070,6 +1078,12 @@ assert(appJs.includes("saveAlertThresholdsFromUi"), "app.js should save configur
 assert(appJs.includes("growthDashboardTargetAllocations"), "app.js should persist target allocations");
 assert(appJs.includes("targetAllocations: state.targetAllocations"), "state export should include target allocations");
 assert(appJs.includes("buildThesisAlerts"), "app.js should wire thesis alerts into the attention system");
+assert(appJs.includes("growthDashboardThesisSnapshots"), "app.js should persist thesis snapshots locally");
+assert(appJs.includes("thesisSnapshots: state.thesisSnapshots"), "state export should include thesis snapshots");
+assert(indexHtml.includes('id="saveThesisSnapshotBtn"') && indexHtml.includes('id="thesisSnapshotPanel"'), "Thesis route should include snapshot save and history UI");
+assert(portfolioViewJs.includes("renderTickerThesisSnapshotHistory"), "Ticker pages should render thesis snapshot history");
+assert(thesisSnapshot.ticker === "MU" && thesisSnapshot.sourceType === "user-written", "thesis snapshots should normalize source labels");
+assert(thesisSnapshotComparison.changed, "thesis snapshot comparison should detect current-vs-prior changes");
 assert(appJs.includes("syncTickerTargetFromThesis"), "thesis target edits should sync into target allocations");
 assert(appJs.includes("applyManualImportMapping"), "app.js should include manual CSV mapping fallback");
 assert(appJs.includes("Preview before applying"), "app.js should render a pre-apply import preview");
