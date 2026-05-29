@@ -2219,6 +2219,114 @@
         text-align: right;
       }
 
+      .account-allocation-panel {
+        display: grid;
+        gap: 10px;
+      }
+
+      .account-allocation-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(11rem, 0.8fr) minmax(12rem, 1fr);
+        gap: 12px;
+        align-items: start;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .account-allocation-main,
+      .account-allocation-mix,
+      .account-allocation-top {
+        min-width: 0;
+      }
+
+      .account-allocation-main h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+
+      .account-allocation-main p,
+      .account-allocation-mix span,
+      .account-allocation-top span,
+      .account-allocation-meta {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .account-allocation-meta,
+      .account-allocation-top ul {
+        display: grid;
+        gap: 6px;
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .account-allocation-bar {
+        overflow: hidden;
+        height: 7px;
+        border-radius: 999px;
+        background: #eef2f7;
+      }
+
+      .account-allocation-bar i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #2f80ed, #2fbf71);
+      }
+
+      .account-mix-bars {
+        display: grid;
+        gap: 7px;
+      }
+
+      .account-mix-bars div {
+        display: grid;
+        gap: 3px;
+      }
+
+      .account-mix-bars i {
+        display: block;
+        height: 6px;
+        border-radius: 999px;
+        background: #d7e2f2;
+      }
+
+      .tax-bucket-pill {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 800;
+        color: #344054;
+        background: #eef3f8;
+      }
+
+      .tax-bucket-roth {
+        color: #0f5b45;
+        background: #e6f5ed;
+      }
+
+      .tax-bucket-traditional {
+        color: #19506f;
+        background: #e8f2fb;
+      }
+
+      .tax-bucket-taxable {
+        color: #67440d;
+        background: #fbf1dc;
+      }
+
+      .tax-bucket-hsa {
+        color: #54348a;
+        background: #f0eafa;
+      }
+
       .breakdown-bar {
         grid-column: 1 / -1;
         height: 7px;
@@ -5812,6 +5920,7 @@
         .provider-status-card,
         .alert-item,
         .risk-row,
+        .account-allocation-row,
         .what-if-row,
         .mini-list > div,
         .stress-row {
@@ -6282,6 +6391,7 @@
             <div class="grid-two">
               <div class="panel">
                 <div class="panel-head"><div><h2>Accounts</h2><p>Where the money sits.</p></div></div>
+                <div class="body-pad account-allocation-panel" id="accountAllocationPanel" aria-live="polite"></div>
                 <div class="body-pad breakdown-list" id="accountBreakdown"></div>
               </div>
               <div class="panel">

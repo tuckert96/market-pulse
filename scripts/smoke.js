@@ -695,6 +695,7 @@ assert(indexHtml.includes('id="syncPlaidFidelityBtn"'), "Imports should include 
 assert(indexHtml.includes('id="unlinkPlaidFidelityBtn"'), "Imports should include a Plaid disconnect action");
 assert(indexHtml.includes('id="fidelityPlaidStatus"'), "Imports should show Plaid Link readiness and error status next to the button");
 assert(indexHtml.includes('id="accountScopePanel"'), "Sidebar should include a clickable account scope panel");
+assert(indexHtml.includes('id="accountAllocationPanel"'), "Holdings should include a dedicated account allocation panel");
 assert(appJs.includes("startPlaidFidelityLink"), "app.js should wire Plaid Link startup");
 assert(appJs.includes("exchangeFidelityPublicToken"), "app.js should exchange Plaid public token through the local backend");
 assert(appJs.includes("syncPlaidFidelityHoldings"), "app.js should sync Plaid holdings into active portfolio state");
@@ -703,6 +704,8 @@ assert(appJs.includes("buildAccountScopeModel") && appJs.includes("filterHolding
 assert(appJs.includes("handleAccountScopeClick"), "app.js should wire sidebar account scope buttons");
 assert(accountScopeJs.includes("selectedSummary") && accountScopeJs.includes("portfolioWeight") && accountScopeJs.includes("cashWeight"), "Account scope model should expose selected value, portfolio weight, and cash weight");
 assert(accountScopeJs.includes("dailyChangePercent") && accountScopeJs.includes("missingCostBasisCount") && accountScopeJs.includes("staleHoldingCount"), "Account scope model should expose daily move and data-quality signals");
+assert(accountScopeJs.includes("inferTaxBucket") && accountScopeJs.includes("assetMix") && accountScopeJs.includes("topPositions"), "Account scope model should expose tax bucket, asset mix, and top positions");
+assert(appJs.includes("data-tax-bucket") && portfolioViewJs.includes("tax-bucket-pill") && indexHtml.includes(".tax-bucket-roth") && indexHtml.includes(".tax-bucket-taxable") && indexHtml.includes(".tax-bucket-hsa"), "Account allocation UI should distinguish Roth, taxable, and HSA buckets");
 assert(accountScopeJs.includes("leveragedExposure") && appJs.includes("accountScopeWarning"), "Account scope selector should surface leverage and warning context");
 assert(appJs.includes("Portfolio scope") && appJs.includes("formatSignedPercent"), "Account scope UI should use clear scope copy and signed daily move formatting");
 assert(portfolioViewJs.includes("accountDetail") && portfolioViewJs.includes("formatCompact(accountSummary.value)"), "Data mode indicator should include selected account value and holding count");
