@@ -1,5 +1,5 @@
 import { signalActionCategory } from "./alphaEngine.js";
-import { DATA_MODES, dataModeBadgeClass, dataModeLabel, marketDataMode, portfolioDataMode, sourceDataMode } from "./dataModes.js";
+import { DATA_MODES, dataModeBadgeClass, dataModeLabel, marketDataMode, normalizeDataMode, portfolioDataMode, sourceDataMode } from "./dataModes.js";
 import { eventSourceLabel, eventTypeLabel, summarizeCalendarEvents } from "./eventCalendar.js";
 import { buildTickerMovementExplainer } from "./movementExplainer.js";
 import { normalizeTicker } from "./portfolioSchema.js";
@@ -5306,7 +5306,7 @@ function renderProviderReadiness(readiness = {}) {
   `;
 }
 
-function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = []) {
+export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = []) {
   const target = byId("dataSourceHealthPanel");
   if (!target) return;
   const providerStatuses = Object.values(readiness.providerStatuses || {});
@@ -5359,7 +5359,13 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       demoReady: importAvailability.demoReady,
       availabilityLabel: importAvailability.label,
       guidance: importAvailability.guidance,
-      className: importAvailability.className
+      className: importAvailability.className,
+      providerBacked: false,
+      sourceType: "Local portfolio state",
+      lastSuccessfulAt: report?.importedAt || portfolioStatus?.loadedAt || fidelityStatus?.lastSync,
+      fallbackReason: portfolioStatus?.samplePortfolio
+        ? "Sample portfolio is active until a CSV/JSON import or provider sync is applied."
+        : !portfolioStatus?.realPortfolio ? "No active imported portfolio is loaded yet." : ""
     },
     {
       label: "Market data",
@@ -5371,7 +5377,13 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: marketAvailability.label,
       guidance: marketAvailability.guidance,
       metadata: marketDataMeta,
-      diagnostics: marketDataDiagnosticsHtml(marketDataStatus, marketDataConfig)
+      diagnostics: marketDataDiagnosticsHtml(marketDataStatus, marketDataConfig),
+      providerBacked: Boolean(marketDataStatus.liveProviderCalls || marketDataConfig.liveProviderCalls),
+      sourceType: "Provider-backed quotes",
+      lastSuccessfulAt: marketDataStatus.lastSuccessfulRefresh || marketDataStatus.fetchedAt || marketDataStatus.asOf,
+      fallbackReason: marketAvailability.demoReady
+        ? "Sample quote context is active until Finnhub or another provider is configured."
+        : marketAvailability.configuredPending ? marketAvailability.guidance : ""
     },
     {
       label: "Reddit / social mentions",
@@ -5395,7 +5407,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: redditAvailabilityLabel,
       guidance: redditSource.limitedOrError ? "Reddit provider needs review. Keep this as low-trust social context until refresh succeeds." : redditSource.stale ? "Using stale Reddit context only; avoid treating it as today's signal." : redditSource.live ? redditSource.footer : redditReport?.mentionsImported ? "Local JSON import is usable as low-trust social context." : "No Reddit API calls are active.",
       className: redditSource.className,
-      diagnostics: redditDiagnosticsHtml(redditReport, redditConfig, redditSource, redditLiveStatus, redditMentions.length)
+      diagnostics: redditDiagnosticsHtml(redditReport, redditConfig, redditSource, redditLiveStatus, redditMentions.length),
+      providerBacked: redditSource.providerBacked,
+      sourceType: redditSource.providerBacked ? "Provider-backed social feed" : redditReport?.mentionsImported ? "Local social import" : "Sample social rows",
+      lastSuccessfulAt: redditReport?.lastSuccessfulRefresh || redditReport?.fetchedAt || redditReport?.importedAt,
+      fallbackReason: redditSource.mode === DATA_MODES.SAMPLE ? "Sample Reddit rows are active; no live API call is connected." : redditSource.stale || redditSource.limitedOrError ? redditSource.detail : ""
     },
     {
       label: "X / Twitter",
@@ -5417,7 +5433,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: xAvailabilityLabel,
       guidance: xSource.limitedOrError ? "X provider needs review. Keep this as low-trust social context until refresh succeeds." : xSource.stale ? "Using stale X context only; avoid treating it as today's signal." : xSource.live ? xSource.footer : xReport?.updatesImported ? "Loaded X/social rows are usable as low-trust social context." : "No X API calls are active.",
       className: xSource.className,
-      diagnostics: xSocialDiagnosticsHtml(xReport, xConfig, xSource, xLiveStatus, xUpdates.length)
+      diagnostics: xSocialDiagnosticsHtml(xReport, xConfig, xSource, xLiveStatus, xUpdates.length),
+      providerBacked: xSource.providerBacked,
+      sourceType: xSource.providerBacked ? "Provider-backed social feed" : xReport?.updatesImported ? "Local social import" : "Sample social rows",
+      lastSuccessfulAt: xReport?.lastSuccessfulRefresh || xReport?.fetchedAt || xReport?.importedAt,
+      fallbackReason: xSource.className === "missing" ? "Sample X/social rows are active; no live API call is connected." : xSource.stale || xSource.limitedOrError ? xSource.detail : ""
     },
     {
       label: "Federal disclosures",
@@ -5439,7 +5459,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: dataModeLabel(politicianSource.mode),
       guidance: politicianSource.guidance || politicianConfig.sourceRecommendation || "Federal disclosure provider: Not configured.",
       className: politicianSource.className,
-      diagnostics: federalDisclosureDiagnosticsHtml(politicianReport, politicianConfig, politicianTrades, politicianProviderSynced, politicianStale, politicianError)
+      diagnostics: federalDisclosureDiagnosticsHtml(politicianReport, politicianConfig, politicianTrades, politicianProviderSynced, politicianStale, politicianError),
+      providerBacked: politicianSource.providerBacked,
+      sourceType: politicianSource.providerBacked ? "Provider-backed disclosure feed" : politicianReport?.tradesImported ? "Local disclosure import" : "Sample disclosure rows",
+      lastSuccessfulAt: politicianReport?.lastSuccessfulRefresh || politicianReport?.fetchedAt || politicianReport?.importedAt,
+      fallbackReason: politicianSource.mode === DATA_MODES.SAMPLE ? "Sample federal disclosure rows are active; public sync is not configured." : politicianStale || politicianError ? politicianSource.detail : ""
     },
     {
       label: "Seeking Alpha",
@@ -5449,7 +5473,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       demoReady: /demo/i.test(String(seekingAlphaStatus.mode || "")),
       availabilityLabel: seekingAlphaStatus.connected ? dataModeLabel(DATA_MODES.IMPORTED) : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
       guidance: seekingAlphaStatus.connected ? "Authorized export/import data is available locally." : "Use authorized exports or a licensed API later; no scraping or password collection.",
-      className: seekingAlphaStatus.connected && /csv|xlsx|import/i.test(String(seekingAlphaStatus.mode || "")) ? "imported-local" : undefined
+      className: seekingAlphaStatus.connected && /csv|xlsx|import/i.test(String(seekingAlphaStatus.mode || "")) ? "imported-local" : undefined,
+      providerBacked: false,
+      sourceType: "Manual premium-rating import",
+      lastSuccessfulAt: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt,
+      fallbackReason: seekingAlphaStatus.connected ? "" : "No authorized Seeking Alpha import is loaded."
     },
     {
       label: "Fidelity",
@@ -5470,25 +5498,42 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       configured: Boolean(fidelityStatus.connected || fidelityImported || plaidLinked),
       configuredPending: Boolean(plaidConfigured && !plaidLinked && !fidelityImported),
       demoReady: /demo/i.test(String(fidelityStatus.mode || "")),
-      availabilityLabel: fidelityImported ? dataModeLabel(DATA_MODES.IMPORTED) : plaidLinked ? dataModeLabel(DATA_MODES.LIVE) : plaidCachedSync ? dataModeLabel(DATA_MODES.CACHED) : /demo/i.test(String(fidelityStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : plaidConfigured ? "Configured" : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
+      availabilityLabel: fidelityImported ? dataModeLabel(DATA_MODES.IMPORTED) : plaidLinked ? dataModeLabel(DATA_MODES.LIVE) : plaidCachedSync ? dataModeLabel(DATA_MODES.CACHED) : /demo/i.test(String(fidelityStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
       guidance: fidelityImported ? "CSV import is active; no direct Fidelity credentials are stored." : plaidLinked ? "Plaid investment holdings are available through the local backend. Access tokens never enter browser code." : plaidCachedSync ? "Reconnect or sync Plaid before relying on brokerage-linked freshness." : plaidConfigured ? "Open Plaid Link from Imports to authorize Fidelity. The dashboard does not collect Fidelity usernames or passwords." : "Use CSV import, or add Plaid credentials to .env for tokenized account linking.",
-      className: fidelityImported ? "imported-local" : plaidLinked ? "configured" : plaidCachedSync ? "configured-pending" : undefined
+      className: fidelityImported ? "imported-local" : plaidLinked ? "configured" : plaidCachedSync ? "configured-pending" : undefined,
+      providerBacked: Boolean(plaidLinked || plaidCachedSync),
+      sourceType: fidelityImported ? "Local brokerage import" : "Tokenized brokerage connector",
+      lastSuccessfulAt: fidelityStatus.lastSync || report?.importedAt || plaidReadiness.lastSync,
+      fallbackReason: fidelityImported ? "" : plaidConfigured && !plaidLinked ? "Plaid keys are present, but no linked Fidelity item is active yet." : "Use CSV import or tokenized Plaid linking before treating holdings as connected."
     },
     {
       label: "OpenAI explanations",
-      status: readiness.aiProviders?.openai?.configured ? "Configured" : "Not configured",
+      status: readiness.aiProviders?.openai?.configured ? "OpenAI key detected" : "Not configured",
       detail: readiness.aiProviders?.openai?.detail || "Optional AI-assisted explanations are off. Local deterministic summaries remain available.",
-      configured: Boolean(readiness.aiProviders?.openai?.configured),
-      configuredPending: false,
+      configured: Boolean(readiness.aiProviders?.openai?.liveProviderCalls),
+      configuredPending: Boolean(readiness.aiProviders?.openai?.configured && !readiness.aiProviders?.openai?.liveProviderCalls),
       demoReady: !readiness.aiProviders?.openai?.configured,
-      availabilityLabel: readiness.aiProviders?.openai?.configured ? "Configured" : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
+      availabilityLabel: readiness.aiProviders?.openai?.liveProviderCalls ? dataModeLabel(DATA_MODES.LIVE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
       guidance: readiness.aiProviders?.openai?.configured
         ? "API calls stay server-side through the local backend. Explanations must remain grounded in dashboard data."
         : "Add OPENAI_API_KEY to local .env only if Tucker wants AI-assisted explanations. Never commit the key.",
-      className: readiness.aiProviders?.openai?.configured ? "configured" : "missing"
+      className: readiness.aiProviders?.openai?.liveProviderCalls ? "configured" : readiness.aiProviders?.openai?.configured ? "configured-pending" : "missing",
+      providerBacked: Boolean(readiness.aiProviders?.openai?.liveProviderCalls),
+      sourceType: "AI explanation provider",
+      lastSuccessfulAt: readiness.aiProviders?.openai?.lastSuccessfulRefresh || readiness.aiProviders?.openai?.lastSync,
+      fallbackReason: readiness.aiProviders?.openai?.liveProviderCalls ? "" : "Deterministic local explanation fallback is used when OpenAI is not enabled."
     }
   ];
-  target.innerHTML = rows.map((row) => `
+  const summary = buildDataSourceHealthSummary(rows);
+  target.innerHTML = `
+    <div class="source-health-summary" aria-label="Data source health summary">
+      <div><b>${escapeHtml(summary.usableCount)}</b><span>usable now</span></div>
+      <div><b>${escapeHtml(summary.reviewCount)}</b><span>needs review</span></div>
+      <div><b>${escapeHtml(summary.providerBackedCount)}</b><span>provider-backed</span></div>
+      <div><b>${escapeHtml(summary.localOnlyCount)}</b><span>local/sample</span></div>
+      <p>Provider-backed sources are separated from local imports, sample rows, and deterministic calculations so source labels stay honest.</p>
+    </div>
+    ${rows.map((row) => `
     <div class="provider-status-card ${escapeHtml(row.className || (row.configured ? "configured" : row.configuredPending ? "configured-pending" : "missing"))}">
       <div>
         <b>${escapeHtml(row.label)}</b>
@@ -5496,13 +5541,14 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       </div>
       <div>
         <strong>${escapeHtml(row.status)}</strong>
-        <span>${escapeHtml(dataSourceAvailabilityLabel(row))}</span>
+        <span class="status-badge ${escapeHtml(dataModeBadgeClass(dataSourceAvailabilityMode(row)))}">${escapeHtml(dataSourceAvailabilityLabel(row))}</span>
       </div>
+      <p class="source-meta">${escapeHtml(dataSourceHealthMetadata(row))}</p>
       ${row.metadata ? `<p class="source-meta">${escapeHtml(row.metadata)}</p>` : ""}
       <p>${escapeHtml(row.guidance || dataSourceAvailabilityGuidance(row))}</p>
       ${row.diagnostics || ""}
     </div>
-  `).join("");
+  `).join("")}`;
 }
 
 export function portfolioImportDiagnosticsLine(report = {}) {
@@ -6163,12 +6209,48 @@ export function marketDataSourceAvailability(status = {}, config = {}) {
   };
 }
 
+export function dataSourceAvailabilityMode(row = {}) {
+  if (row.availabilityMode) return normalizeDataMode(row.availabilityMode);
+  if (row.availabilityLabel) return normalizeDataMode(row.availabilityLabel);
+  if (row.providerBacked && row.configuredPending) return DATA_MODES.STALE;
+  if (row.configured) return sourceDataMode({ connected: true, ...row });
+  if (row.configuredPending) return DATA_MODES.NOT_CONFIGURED;
+  if (row.demoReady) return DATA_MODES.SAMPLE;
+  return DATA_MODES.NOT_CONFIGURED;
+}
+
 export function dataSourceAvailabilityLabel(row = {}) {
-  if (row.availabilityLabel) return row.availabilityLabel;
-  if (row.configured) return dataModeLabel(sourceDataMode({ connected: true, ...row }));
-  if (row.configuredPending) return "Needs review";
-  if (row.demoReady) return dataModeLabel(DATA_MODES.SAMPLE);
-  return dataModeLabel(DATA_MODES.NOT_CONFIGURED);
+  return dataModeLabel(dataSourceAvailabilityMode(row));
+}
+
+export function buildDataSourceHealthSummary(rows = []) {
+  const counts = rows.reduce((memo, row) => {
+    const mode = dataSourceAvailabilityMode(row);
+    memo[mode] = (memo[mode] || 0) + 1;
+    return memo;
+  }, {});
+  const reviewModes = new Set([DATA_MODES.STALE, DATA_MODES.ERROR, DATA_MODES.PARTIAL, DATA_MODES.RATE_LIMITED]);
+  const usableModes = new Set([DATA_MODES.LIVE, DATA_MODES.CACHED, DATA_MODES.IMPORTED]);
+  const reviewCount = rows.filter((row) => row.configuredPending || reviewModes.has(dataSourceAvailabilityMode(row))).length;
+  const usableCount = rows.filter((row) => usableModes.has(dataSourceAvailabilityMode(row))).length;
+  const providerBackedCount = rows.filter((row) => row.providerBacked).length;
+  return {
+    sourceCount: rows.length,
+    usableCount,
+    reviewCount,
+    providerBackedCount,
+    localOnlyCount: Math.max(0, rows.length - providerBackedCount),
+    counts
+  };
+}
+
+function dataSourceHealthMetadata(row = {}) {
+  const parts = [
+    `Type: ${row.sourceType || (row.providerBacked ? "Provider-backed" : "Local/sample")}`,
+    `Last success: ${row.lastSuccessfulAt ? shortDateTime(row.lastSuccessfulAt) : "Not yet"}`
+  ];
+  if (row.fallbackReason) parts.push(`Fallback: ${row.fallbackReason}`);
+  return parts.join(" · ");
 }
 
 function dataSourceAvailabilityGuidance(row = {}) {

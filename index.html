@@ -3915,6 +3915,45 @@
         grid-column: 1 / -1;
       }
 
+      .provider-status-card .status-badge {
+        display: inline-flex;
+        width: fit-content;
+      }
+
+      .source-health-summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        border: 1px solid rgba(0, 122, 255, 0.14);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(247, 250, 255, 0.9);
+      }
+
+      .source-health-summary div {
+        min-width: 0;
+      }
+
+      .source-health-summary b {
+        display: block;
+        color: var(--text);
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      .source-health-summary span,
+      .source-health-summary p {
+        display: block;
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .source-health-summary p {
+        grid-column: 1 / -1;
+      }
+
       .provider-status-card.configured {
         border-color: #b7dfbf;
         background: var(--good-bg);
@@ -5549,6 +5588,7 @@
 
         .import-debug-grid,
         .manual-mapping-grid,
+        .source-health-summary,
         .provider-status-card,
         .alert-item,
         .risk-row,

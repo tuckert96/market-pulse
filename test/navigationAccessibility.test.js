@@ -133,7 +133,9 @@ test("sample, imported, live, cached, stale, error, and not-configured provider 
   assert.match(portfolioViewJs, /configured: \[DATA_MODES\.LIVE, DATA_MODES\.CACHED, DATA_MODES\.IMPORTED\]\.includes\(redditSource\.mode\)/);
   assert.match(portfolioViewJs, /politicianProviderSynced/);
   assert.match(portfolioViewJs, /configured: \[DATA_MODES\.LIVE, DATA_MODES\.CACHED, DATA_MODES\.IMPORTED\]\.includes\(politicianSource\.mode\)/);
-  assert.match(portfolioViewJs, /if \(row\.demoReady\) return dataModeLabel\(DATA_MODES\.SAMPLE\)/);
+  assert.match(portfolioViewJs, /export function dataSourceAvailabilityMode/);
+  assert.match(portfolioViewJs, /if \(row\.demoReady\) return DATA_MODES\.SAMPLE/);
+  assert.match(portfolioViewJs, /return dataModeLabel\(dataSourceAvailabilityMode\(row\)\)/);
 });
 
 test("demo and research-only imports cannot masquerade as real holdings", () => {
