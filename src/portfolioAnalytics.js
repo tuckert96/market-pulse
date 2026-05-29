@@ -1,4 +1,4 @@
-import { decimalPercent, normalizeHoldings, numericFromGrade } from "./portfolioSchema.js";
+import { decimalPercent, inferLeveragedEtfMultiple, normalizeHoldings, numericFromGrade } from "./portfolioSchema.js";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -12,6 +12,22 @@ export const RISK_STATUS_THRESHOLDS = Object.freeze({
   cash: { elevated: 0.25, high: 0.5, extreme: 0.7 },
   individualStock: { elevated: 0.35, high: 0.55, extreme: 0.75 },
   etf: { elevated: 0.55, high: 0.75, extreme: 0.9 }
+});
+
+export const POSITION_CONCENTRATION_THRESHOLDS = Object.freeze([
+  { threshold: 0.05, label: "Above 5%", status: "elevated", interpretation: "large enough to monitor" },
+  { threshold: 0.1, label: "Above 10%", status: "high", interpretation: "large enough to affect portfolio results" },
+  { threshold: 0.2, label: "Above 20%", status: "extreme", interpretation: "dominant position risk" },
+  { threshold: 0.3, label: "Above 30%", status: "extreme", interpretation: "single-position outcome risk" }
+]);
+
+export const LEVERAGED_ETF_UNDERLYING_DRAWDOWNS = Object.freeze([-0.1, -0.2, -0.3, -0.5]);
+
+export const HOLDING_RISK_SCORE_WEIGHTS = Object.freeze({
+  ratingRisk: 0.25,
+  concentrationRisk: 0.3,
+  leverageRisk: 0.25,
+  volatilityRisk: 0.2
 });
 
 export function analyzePortfolio(rawHoldings = [], options = {}) {
@@ -43,11 +59,8 @@ export function enrichHolding(holding, totalValue = 0) {
   const drift = weight - targetWeight;
   const gainLoss = holding.costBasis > 0 ? holding.marketValue - holding.costBasis : 0;
   const gainLossPercent = holding.costBasis > 0 ? gainLoss / holding.costBasis : 0;
-  const ratingRisk = ratingRiskScore(holding);
-  const concentrationRisk = Math.min(100, weight * 420);
-  const leverageRisk = holding.isLeveragedEtf ? Math.min(100, weight * holding.leveragedMultiple * 350) : 0;
-  const volatilityRisk = Math.min(100, (holding.beta || 1) * 22);
-  const riskScore = Math.round(Math.min(100, ratingRisk * 0.25 + concentrationRisk * 0.3 + leverageRisk * 0.25 + volatilityRisk * 0.2));
+  const riskScoreBreakdown = buildHoldingRiskScoreBreakdown(holding, totalValue);
+  const riskScore = riskScoreBreakdown.finalScore;
 
   return {
     ...holding,
@@ -58,7 +71,80 @@ export function enrichHolding(holding, totalValue = 0) {
     unrealizedGain: holding.unrealizedGain || gainLoss,
     unrealizedGainPercent: holding.unrealizedGainPercent || gainLossPercent,
     riskScore,
-    ratingRisk
+    ratingRisk: riskScoreBreakdown.inputs.ratingRisk,
+    riskScoreBreakdown
+  };
+}
+
+export function buildHoldingRiskScoreBreakdown(holding = {}, totalValue = 0) {
+  const weight = totalValue > 0 ? Number(holding.marketValue || 0) / totalValue : Number(holding.portfolioWeight || 0);
+  const ratingRisk = ratingRiskScore(holding);
+  const concentrationRisk = Math.min(100, weight * 420);
+  const leverageMultiple = Math.abs(leverageMultipleFor(holding));
+  const leverageRisk = holding.isLeveragedEtf ? Math.min(100, weight * leverageMultiple * 350) : 0;
+  const betaInput = Number.isFinite(Number(holding.beta)) ? Number(holding.beta) : 1;
+  const volatilityRisk = Math.min(100, betaInput * 22);
+  const components = [
+    {
+      key: "ratingRisk",
+      label: "Rating / factor risk",
+      score: roundScore(ratingRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.ratingRisk,
+      points: roundScore(ratingRisk * HOLDING_RISK_SCORE_WEIGHTS.ratingRisk),
+      detail: ratingRiskDetail(holding)
+    },
+    {
+      key: "concentrationRisk",
+      label: "Position concentration",
+      score: roundScore(concentrationRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.concentrationRisk,
+      points: roundScore(concentrationRisk * HOLDING_RISK_SCORE_WEIGHTS.concentrationRisk),
+      detail: `${formatPct(weight)} portfolio weight is converted to a 0-100 concentration input.`
+    },
+    {
+      key: "leverageRisk",
+      label: "Leveraged ETF exposure",
+      score: roundScore(leverageRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.leverageRisk,
+      points: roundScore(leverageRisk * HOLDING_RISK_SCORE_WEIGHTS.leverageRisk),
+      detail: holding.isLeveragedEtf
+        ? `${holding.ticker || "This holding"} uses about ${leverageMultiple}x daily reset leverage.`
+        : "No leveraged ETF penalty applied."
+    },
+    {
+      key: "volatilityRisk",
+      label: "Volatility / beta",
+      score: roundScore(volatilityRisk),
+      weight: HOLDING_RISK_SCORE_WEIGHTS.volatilityRisk,
+      points: roundScore(volatilityRisk * HOLDING_RISK_SCORE_WEIGHTS.volatilityRisk),
+      detail: Number.isFinite(Number(holding.beta))
+        ? `Beta input ${roundScore(betaInput)} is converted to a volatility risk input.`
+        : "Beta is missing; the local model falls back to 1.0."
+    }
+  ];
+  const rawScore = components.reduce((total, component) => total + component.points, 0);
+  const finalScore = Math.round(Math.min(100, Math.max(0, rawScore)));
+  const missingData = [];
+  if (!totalValue && !holding.portfolioWeight) missingData.push("Portfolio total is unavailable, so concentration risk is treated as zero.");
+  if (!holding.quant && holding.assetClass === "Equity") missingData.push("Quant/rating input is missing; the local model applies a small equity-data penalty.");
+  if (!Number.isFinite(Number(holding.beta))) missingData.push("Beta is missing; volatility risk uses a neutral 1.0 fallback.");
+
+  return {
+    type: "holding-risk",
+    finalScore,
+    rawScore: roundScore(rawScore),
+    formula: "rating risk 25% + concentration 30% + leveraged exposure 25% + volatility/beta 20%",
+    generatedBy: "Calculated local risk score. Not an AI explanation.",
+    inputs: {
+      ratingRisk: roundScore(ratingRisk),
+      concentrationRisk: roundScore(concentrationRisk),
+      leverageRisk: roundScore(leverageRisk),
+      volatilityRisk: roundScore(volatilityRisk),
+      portfolioWeight: roundRatio(weight),
+      leverageMultiple
+    },
+    components,
+    missingData
   };
 }
 
@@ -82,7 +168,7 @@ export function buildAttentionAlerts(holdings, totalValue, breakdowns, options =
       alerts.push(alert("underweight", "medium", `${label} is below target`, `${formatPct(holding.portfolioWeight)} current vs ${formatPct(holding.targetWeight)} target.`, holding));
     }
     if (!options.skipPortfolioThresholdAlerts && holding.isLeveragedEtf && holding.portfolioWeight > 0.04) {
-      alerts.push(alert("leverage", "high", `${label} adds leveraged exposure`, `Notional exposure is about ${formatCurrency(holding.marketValue * holding.leveragedMultiple)}.`, holding));
+      alerts.push(alert("leverage", "high", `${label} adds leveraged exposure`, `Notional exposure is about ${formatCurrency(holding.marketValue * Math.abs(leverageMultipleFor(holding)))}.`, holding));
     }
     if (!options.skipPortfolioThresholdAlerts && !holding.isLeveragedEtf && holding.assetClass === "Equity" && holding.portfolioWeight > thresholds.maxPositionWeight) {
       alerts.push(alert("single-stock", "high", `${label} is a large single-stock position`, `${formatPct(holding.portfolioWeight)} of portfolio.`, holding));
@@ -152,7 +238,7 @@ function buildOverview(holdings, totalValue) {
     unrealizedGainPercent: totalCostBasis ? unrealizedGain / totalCostBasis : 0,
     cashBalance: cash,
     leveragedEtfExposure: sum(leveraged, "marketValue"),
-    leveragedNotionalExposure: leveraged.reduce((total, holding) => total + holding.marketValue * Math.abs(holding.leveragedMultiple), 0),
+    leveragedNotionalExposure: leveraged.reduce((total, holding) => total + holding.marketValue * Math.abs(leverageMultipleFor(holding)), 0),
     singleStockExposure: sum(singleStocks, "marketValue"),
     semiconductorAiExposure: sum(semiAi, "marketValue"),
     megaCapTechExposure: sum(megaCapTech, "marketValue")
@@ -175,7 +261,8 @@ function buildRiskAnalytics(holdings, totalValue, breakdowns) {
   const top5Weight = totalValue ? sum(concentrationHoldings.slice(0, 5), "marketValue") / totalValue : 0;
   const top10Weight = totalValue ? sum(concentrationHoldings.slice(0, 10), "marketValue") / totalValue : 0;
   const topSectorWeight = (breakdowns.sector || []).find((row) => row.name !== "Cash")?.weight || 0;
-  const concentrationScore = Math.round(Math.min(100, top5Weight * 60 + top10Weight * 25 + topSectorWeight * 45));
+  const concentrationScoreBreakdown = buildConcentrationScoreBreakdown({ top5Weight, top10Weight, topSectorWeight });
+  const concentrationScore = concentrationScoreBreakdown.finalScore;
   const betaEstimate = totalValue
     ? holdings.reduce((total, holding) => total + (holding.beta || 1) * holding.marketValue, 0) / totalValue
     : 0;
@@ -187,6 +274,7 @@ function buildRiskAnalytics(holdings, totalValue, breakdowns) {
 
   return {
     concentrationScore,
+    concentrationScoreBreakdown,
     top5Weight,
     top10Weight,
     betaEstimate,
@@ -200,36 +288,77 @@ function buildRiskAnalytics(holdings, totalValue, breakdowns) {
   };
 }
 
+export function buildConcentrationScoreBreakdown({
+  top5Weight = 0,
+  top10Weight = 0,
+  topSectorWeight = 0
+} = {}) {
+  const components = [
+    {
+      key: "top5Weight",
+      label: "Top 5 holdings",
+      score: roundRatio(top5Weight),
+      weight: 0.6,
+      points: roundScore(top5Weight * 60),
+      detail: `${formatPct(top5Weight)} in the top 5 holdings.`
+    },
+    {
+      key: "top10Weight",
+      label: "Top 10 holdings",
+      score: roundRatio(top10Weight),
+      weight: 0.25,
+      points: roundScore(top10Weight * 25),
+      detail: `${formatPct(top10Weight)} in the top 10 holdings.`
+    },
+    {
+      key: "topSectorWeight",
+      label: "Largest non-cash sector",
+      score: roundRatio(topSectorWeight),
+      weight: 0.45,
+      points: roundScore(topSectorWeight * 45),
+      detail: `${formatPct(topSectorWeight)} in the largest non-cash sector.`
+    }
+  ];
+  const rawScore = components.reduce((total, component) => total + component.points, 0);
+  return {
+    type: "portfolio-concentration",
+    finalScore: Math.round(Math.min(100, Math.max(0, rawScore))),
+    rawScore: roundScore(rawScore),
+    formula: "top 5 weight x 60 + top 10 weight x 25 + largest non-cash sector weight x 45",
+    generatedBy: "Calculated local concentration score. Not an AI explanation.",
+    components,
+    missingData: top5Weight || top10Weight || topSectorWeight ? [] : ["Portfolio concentration needs imported holdings."]
+  };
+}
+
 export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakdowns = {}) {
   const normalizedTotal = Number(totalValue) || sum(holdings, "marketValue") || 0;
   const stockRows = holdings.filter((holding) => holding.assetClass === "Equity");
-  const etfRows = holdings.filter((holding) => holding.assetClass === "ETF");
+  const normalEtfRows = holdings.filter((holding) => holding.assetClass === "ETF" && !holding.isLeveragedEtf);
   const cashRows = holdings.filter((holding) => holding.assetClass === "Cash");
   const leveragedRows = holdings.filter((holding) => holding.isLeveragedEtf);
   const leveragedDirectValue = sum(leveragedRows, "marketValue");
-  const leveragedNotionalValue = leveragedRows.reduce((total, holding) => total + holding.marketValue * Math.abs(Number(holding.leveragedMultiple) || 1), 0);
+  const leveragedNotionalValue = leveragedRows.reduce((total, holding) => total + holding.marketValue * Math.abs(leverageMultipleFor(holding)), 0);
   const cashValue = sum(cashRows, "marketValue");
   const stockValue = sum(stockRows, "marketValue");
-  const etfValue = sum(etfRows, "marketValue");
+  const normalEtfValue = sum(normalEtfRows, "marketValue");
   const themeRows = buildThemeExposureRows(holdings, normalizedTotal);
   const correlationRisk = buildCorrelationRisk(holdings, themeRows, normalizedTotal);
+  const topPositionWeights = buildTopPositionWeightRows(holdings, normalizedTotal);
+  const securityTypeExposure = buildSecurityTypeExposureRows(holdings, normalizedTotal);
+  const top5Weight = divide(sum(topPositionWeights.slice(0, 5), "value"), normalizedTotal);
+  const top10Weight = divide(sum(topPositionWeights.slice(0, 10), "value"), normalizedTotal);
 
   return {
-    topPositionWeights: [...holdings]
-      .filter((holding) => !isCashLikeHolding(holding))
-      .sort((a, b) => b.marketValue - a.marketValue)
-      .slice(0, 10)
-      .map((holding) => riskRow({
-        id: `position:${holding.ticker}`,
-        name: holding.ticker,
-        label: holding.name,
-        value: holding.marketValue,
-        weight: normalizedTotal ? holding.marketValue / normalizedTotal : 0,
-        statusType: "position",
-        explanation: `${holding.ticker} is ${formatPct(normalizedTotal ? holding.marketValue / normalizedTotal : 0)} of portfolio value. Large single positions can dominate outcome variance.`,
-        tickers: [holding.ticker],
-        href: holding.ticker ? `#/ticker/${holding.ticker}` : "#holdings"
-      })),
+    concentrationInterpretation: buildConcentrationInterpretation({
+      topPositionRows: topPositionWeights,
+      top5Weight,
+      top10Weight,
+      leveragedDirectWeight: divide(leveragedDirectValue, normalizedTotal),
+      leveragedNotionalWeight: divide(leveragedNotionalValue, normalizedTotal),
+      sectorRows: breakdowns.sector || groupBreakdown(holdings, "sector", normalizedTotal)
+    }),
+    topPositionWeights,
     sectorConcentration: (breakdowns.sector || groupBreakdown(holdings, "sector", normalizedTotal))
       .filter((row) => row.name !== "Cash")
       .slice(0, 10)
@@ -253,6 +382,7 @@ export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakd
         explanation: `${row.name} holds ${formatPct(row.weight)} of current portfolio value. Account concentration matters for liquidity, tax treatment, and rebalancing flexibility.`,
         href: "#holdings"
       })),
+    securityTypeExposure,
     themeExposure: themeRows,
     leveragedEtfExposure: {
       directValue: leveragedDirectValue,
@@ -266,16 +396,19 @@ export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakd
       explanation: leveragedRows.length
         ? `Leveraged ETFs are ${formatPct(divide(leveragedDirectValue, normalizedTotal))} direct weight and about ${formatPct(divide(leveragedNotionalValue, normalizedTotal))} estimated notional exposure.`
         : "No UPRO, SOXL, TQQQ-style leveraged ETFs are detected in current holdings.",
+      dailyResetExplanation: "Daily-reset leveraged ETFs target their stated multiple for one trading day. Multi-day returns can diverge from simple index leverage because compounding and volatility drag depend on the path of daily moves.",
+      volatilityDragExplanation: "Volatility drag is highest when the underlying index swings up and down without a sustained trend; the fund can lose value even if the index finishes near where it started.",
+      scenarios: buildLeveragedEtfDrawdownScenarios(leveragedRows, normalizedTotal),
       rows: leveragedRows
-        .sort((a, b) => b.marketValue * Math.abs(b.leveragedMultiple || 1) - a.marketValue * Math.abs(a.leveragedMultiple || 1))
+        .sort((a, b) => b.marketValue * Math.abs(leverageMultipleFor(b)) - a.marketValue * Math.abs(leverageMultipleFor(a)))
         .map((holding) => riskRow({
           id: `leveraged:${holding.ticker}`,
           name: holding.ticker,
-          label: `${holding.leveragedMultiple || 1}x ${holding.name}`,
-          value: holding.marketValue * Math.abs(holding.leveragedMultiple || 1),
-          weight: divide(holding.marketValue * Math.abs(holding.leveragedMultiple || 1), normalizedTotal),
+          label: `${leverageMultipleFor(holding)}x ${holding.name}`,
+          value: holding.marketValue * Math.abs(leverageMultipleFor(holding)),
+          weight: divide(holding.marketValue * Math.abs(leverageMultipleFor(holding)), normalizedTotal),
           statusType: "leveragedNotional",
-          explanation: `${holding.ticker} is ${formatPct(divide(holding.marketValue, normalizedTotal))} direct weight and ${formatPct(divide(holding.marketValue * Math.abs(holding.leveragedMultiple || 1), normalizedTotal))} estimated notional exposure.`,
+          explanation: `${holding.ticker} is ${formatPct(divide(holding.marketValue, normalizedTotal))} direct weight and ${formatPct(divide(holding.marketValue * Math.abs(leverageMultipleFor(holding)), normalizedTotal))} estimated notional exposure.`,
           tickers: [holding.ticker],
           href: `#/ticker/${holding.ticker}`
         }))
@@ -290,13 +423,31 @@ export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakd
         explanation: `Individual stocks are ${formatPct(divide(stockValue, normalizedTotal))} of portfolio value. This measures single-company exposure before ETF overlap.`,
         href: "#holdings"
       }),
+      normalEtf: riskRow({
+        id: "asset-mix:normal-etf",
+        name: "Normal ETFs and funds",
+        value: normalEtfValue,
+        weight: divide(normalEtfValue, normalizedTotal),
+        statusType: "etf",
+        explanation: `Normal ETFs and funds are ${formatPct(divide(normalEtfValue, normalizedTotal))} of portfolio value, separate from leveraged ETFs. ETF concentration can still hide overlap inside themes.`,
+        href: "#holdings"
+      }),
+      leveragedEtf: riskRow({
+        id: "asset-mix:leveraged-etf",
+        name: "Leveraged ETFs",
+        value: leveragedDirectValue,
+        weight: divide(leveragedDirectValue, normalizedTotal),
+        statusType: "leveragedDirect",
+        explanation: `Leveraged ETFs are ${formatPct(divide(leveragedDirectValue, normalizedTotal))} direct weight and are tracked separately because daily reset leverage changes drawdown behavior.`,
+        href: "#holdings"
+      }),
       etf: riskRow({
         id: "asset-mix:etf",
-        name: "ETFs and funds",
-        value: etfValue,
-        weight: divide(etfValue, normalizedTotal),
+        name: "Normal ETFs and funds",
+        value: normalEtfValue,
+        weight: divide(normalEtfValue, normalizedTotal),
         statusType: "etf",
-        explanation: `ETFs and funds are ${formatPct(divide(etfValue, normalizedTotal))} of portfolio value. ETF concentration can still hide overlap inside themes.`,
+        explanation: `Normal ETFs and funds are ${formatPct(divide(normalEtfValue, normalizedTotal))} of portfolio value, separate from leveraged ETFs.`,
         href: "#holdings"
       })
     },
@@ -311,6 +462,180 @@ export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakd
     }),
     correlationRisk,
     correlationPlaceholder: correlationRisk
+  };
+}
+
+export function buildLeveragedEtfDrawdownScenarios(holdings = [], totalValue = 0, underlyingDrawdowns = LEVERAGED_ETF_UNDERLYING_DRAWDOWNS) {
+  const leveragedRows = holdings.filter((holding) => holding.isLeveragedEtf || Math.abs(leverageMultipleFor(holding)) > 1);
+  const directValue = sum(leveragedRows, "marketValue");
+  return underlyingDrawdowns.map((underlyingMove) => {
+    const scenarioValueChange = roundCurrency(leveragedRows.reduce((total, holding) => {
+      const multiple = leverageMultipleFor(holding);
+      const estimatedMove = clamp(underlyingMove * multiple, -1, 1);
+      return total + (Number(holding.marketValue) || 0) * estimatedMove;
+    }, 0));
+    const estimatedProductMove = roundRatio(divide(scenarioValueChange, directValue));
+    const tickers = leveragedRows.map((holding) => holding.ticker).filter(Boolean);
+    return {
+      underlyingMove,
+      underlyingMoveLabel: formatPct(underlyingMove),
+      estimatedProductMove,
+      estimatedPortfolioImpact: scenarioValueChange,
+      estimatedPortfolioImpactPct: roundRatio(divide(scenarioValueChange, totalValue)),
+      tickers: unique(tickers),
+      explanation: leveragedRows.length
+        ? `${tickers.join(", ")} would have an estimated same-day move of ${formatPct(estimatedProductMove)} across current leveraged ETF exposure before fees, tracking error, and path effects.`
+        : "No leveraged ETFs are available for this scenario."
+    };
+  });
+}
+
+function buildTopPositionWeightRows(holdings = [], totalValue = 0) {
+  return [...holdings]
+    .filter((holding) => !isCashLikeHolding(holding))
+    .sort((a, b) => b.marketValue - a.marketValue)
+    .slice(0, 10)
+    .map((holding) => {
+      const weight = divide(holding.marketValue, totalValue);
+      const thresholdFlags = concentrationThresholdFlags(weight);
+      const thresholdLabel = thresholdFlags[thresholdFlags.length - 1]?.label || "Below 5%";
+      const securityType = classifyHoldingExposureType(holding);
+      return riskRow({
+        id: `position:${holding.ticker}`,
+        name: holding.ticker,
+        label: holding.name,
+        value: holding.marketValue,
+        weight,
+        statusType: "position",
+        explanation: `${holding.ticker} is ${formatPct(weight)} of portfolio value (${thresholdLabel.toLowerCase()}). ${securityType.reviewNote}`,
+        tickers: [holding.ticker],
+        href: holding.ticker ? `#/ticker/${holding.ticker}` : "#holdings",
+        thresholdFlags,
+        thresholdLabel,
+        securityType: securityType.label
+      });
+    });
+}
+
+export function concentrationThresholdFlags(weight = 0, thresholds = POSITION_CONCENTRATION_THRESHOLDS) {
+  const numeric = Number(weight) || 0;
+  return thresholds
+    .filter((row) => numeric >= row.threshold)
+    .map((row) => ({
+      ...row,
+      thresholdPct: formatPct(row.threshold)
+    }));
+}
+
+function buildSecurityTypeExposureRows(holdings = [], totalValue = 0) {
+  const groups = new Map();
+  holdings.forEach((holding) => {
+    const type = classifyHoldingExposureType(holding);
+    const current = groups.get(type.key) || {
+      id: `security-type:${type.key}`,
+      name: type.label,
+      label: type.description,
+      value: 0,
+      tickers: [],
+      statusType: type.statusType,
+      explanationSeed: type.reviewNote
+    };
+    current.value += Number(holding.marketValue) || 0;
+    if (holding.ticker && !isCashLikeHolding(holding)) current.tickers.push(holding.ticker);
+    groups.set(type.key, current);
+  });
+
+  return Array.from(groups.values())
+    .map((row) => riskRow({
+      id: row.id,
+      name: row.name,
+      label: row.label,
+      value: row.value,
+      weight: divide(row.value, totalValue),
+      statusType: row.statusType,
+      explanation: `${row.name} are ${formatPct(divide(row.value, totalValue))} of portfolio value. ${row.explanationSeed}`,
+      tickers: unique(row.tickers),
+      href: "#holdings"
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function classifyHoldingExposureType(holding = {}) {
+  if (isCashLikeHolding(holding)) {
+    return {
+      key: "cash",
+      label: "Cash / money market",
+      description: "Deployable or defensive liquidity",
+      statusType: "cash",
+      reviewNote: "Cash is not equity drawdown risk, but high cash creates deployment and opportunity-cost decisions."
+    };
+  }
+  if (holding.isLeveragedEtf || Number(holding.leveragedMultiple || 0) > 1) {
+    return {
+      key: "leveraged-etf",
+      label: "Leveraged ETFs",
+      description: "Daily-reset amplified exposure",
+      statusType: "leveragedDirect",
+      reviewNote: "Leveraged ETF exposure should be reviewed separately from ordinary fund exposure because path dependency and daily reset effects can amplify losses."
+    };
+  }
+  if (holding.assetClass === "ETF" || /ETF|fund/i.test(`${holding.assetClass || ""} ${holding.name || ""}`)) {
+    return {
+      key: "normal-etf",
+      label: "Normal ETFs / funds",
+      description: "Diversified fund wrappers",
+      statusType: "etf",
+      reviewNote: "Normal ETFs can reduce single-company risk, but they can still overlap inside sectors or themes."
+    };
+  }
+  if (holding.assetClass === "Equity") {
+    return {
+      key: "single-stock",
+      label: "Single stocks",
+      description: "Company-specific equity exposure",
+      statusType: "individualStock",
+      reviewNote: "Single-stock concentration can dominate outcome variance and should stay tied to thesis conviction and target sizing."
+    };
+  }
+  return {
+    key: "other",
+    label: "Other holdings",
+    description: "Positions outside stock/fund/cash buckets",
+    statusType: "position",
+    reviewNote: "Review classification so concentration analysis can place this exposure in the right bucket."
+  };
+}
+
+function buildConcentrationInterpretation({ topPositionRows = [], top5Weight = 0, top10Weight = 0, leveragedDirectWeight = 0, leveragedNotionalWeight = 0, sectorRows = [] } = {}) {
+  const topPosition = topPositionRows[0];
+  const topSector = (sectorRows || []).find((row) => row.name !== "Cash");
+  const topStatus = topPosition?.status || "normal";
+  const top5Status = riskStatusForWeight(top5Weight, { elevated: 0.35, high: 0.5, extreme: 0.65 });
+  const top10Status = riskStatusForWeight(top10Weight, { elevated: 0.55, high: 0.7, extreme: 0.85 });
+  const leverageStatus = riskStatusForWeight(leveragedNotionalWeight, RISK_STATUS_THRESHOLDS.leveragedNotional);
+  const sectorStatus = riskStatusForWeight(topSector?.weight || 0, RISK_STATUS_THRESHOLDS.sector);
+  const status = [topStatus, top5Status, top10Status, leverageStatus, sectorStatus].reduce((current, next) => worseStatus(current, next), "normal");
+  const headline = {
+    normal: "Concentration looks balanced",
+    elevated: "Concentration deserves monitoring",
+    high: "Concentration needs review",
+    extreme: "Concentration is a dominant risk"
+  }[status] || "Concentration needs review";
+  const drivers = [
+    topPosition ? `${topPosition.name} is the largest position at ${formatPct(topPosition.weight)} (${topPosition.thresholdLabel || "below 5%"}).` : "No top position is available yet.",
+    `Top 5 holdings are ${formatPct(top5Weight)} of portfolio value.`,
+    `Top 10 holdings are ${formatPct(top10Weight)} of portfolio value.`,
+    topSector ? `${topSector.name} is the largest sector at ${formatPct(topSector.weight)}.` : "No sector concentration row is available.",
+    leveragedDirectWeight > 0 ? `Leveraged ETFs are ${formatPct(leveragedDirectWeight)} direct and ${formatPct(leveragedNotionalWeight)} estimated notional exposure.` : "No leveraged ETF exposure is detected."
+  ];
+  return {
+    status,
+    headline,
+    summary: `${headline}. This is a deterministic local read from position weights, sector exposure, top-5/top-10 concentration, and leveraged notional exposure. It is not an OpenAI-generated recommendation.`,
+    drivers,
+    nextStep: status === "normal"
+      ? "Use Holdings or What-If only if you are considering a portfolio change."
+      : "Open the highest-weight ticker, compare against target allocation, then use What-If before changing exposure."
   };
 }
 
@@ -371,7 +696,7 @@ function isCashLikeHolding(holding = {}) {
     /cash|money market|sweep|held in money market/i.test(`${holding.ticker || ""} ${holding.name || ""}`);
 }
 
-function riskRow({ id, name, label = "", value = 0, weight = 0, statusType = "position", explanation = "", tickers = [], href = "#holdings" }) {
+function riskRow({ id, name, label = "", value = 0, weight = 0, statusType = "position", explanation = "", tickers = [], href = "#holdings", thresholdFlags = [], thresholdLabel = "", securityType = "" }) {
   const status = riskStatusForWeight(weight, RISK_STATUS_THRESHOLDS[statusType] || RISK_STATUS_THRESHOLDS.position);
   return {
     id,
@@ -383,7 +708,10 @@ function riskRow({ id, name, label = "", value = 0, weight = 0, statusType = "po
     statusLabel: titleCase(status),
     explanation,
     tickers: unique(tickers),
-    href
+    href,
+    thresholdFlags,
+    thresholdLabel,
+    securityType
   };
 }
 
@@ -626,6 +954,15 @@ function ratingRiskScore(holding) {
   return Math.min(100, risk);
 }
 
+function ratingRiskDetail(holding = {}) {
+  const notes = [];
+  if (holding.quant && holding.quant < 3) notes.push(`Quant rating ${holding.quant} adds risk.`);
+  if (numericFromGrade(holding.valuationGrade) && numericFromGrade(holding.valuationGrade) <= 2.5) notes.push(`Valuation grade ${holding.valuationGrade} adds risk.`);
+  if (numericFromGrade(holding.revisionsGrade) && numericFromGrade(holding.revisionsGrade) <= 3) notes.push(`EPS revisions grade ${holding.revisionsGrade} adds risk.`);
+  if (!holding.quant && holding.assetClass === "Equity") notes.push("Missing equity rating data adds a small risk penalty.");
+  return notes.length ? notes.join(" ") : "No weak rating, valuation, or revisions input is currently penalizing this holding.";
+}
+
 function daysUntil(dateText) {
   if (!dateText) return null;
   const date = new Date(`${dateText}T12:00:00`);
@@ -654,6 +991,27 @@ function sum(rows, field) {
 
 function divide(a, b) {
   return b ? a / b : 0;
+}
+
+function leverageMultipleFor(holding = {}) {
+  return Number(holding.leveragedMultiple) || inferLeveragedEtfMultiple(holding.ticker, holding) || 1;
+}
+
+function clamp(value, min, max) {
+  const numeric = Number(value) || 0;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function roundRatio(value) {
+  return Math.round((Number(value) || 0) * 1000000) / 1000000;
+}
+
+function roundScore(value) {
+  return Math.round((Number(value) || 0) * 10) / 10;
+}
+
+function roundCurrency(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
 }
 
 function unique(values = []) {

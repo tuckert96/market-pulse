@@ -516,6 +516,63 @@
         gap: 6px;
       }
 
+      .import-change-summary {
+        display: grid;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.82);
+      }
+
+      .import-change-metrics,
+      .import-change-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .import-change-metrics {
+        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+      }
+
+      .import-change-metrics div,
+      .import-change-grid article {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        padding: 10px;
+      }
+
+      .import-change-grid {
+        grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+      }
+
+      .import-change-grid h4 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .import-change-grid ul {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .import-change-grid li {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .import-change-grid li span {
+        display: block;
+        min-width: 0;
+        overflow-wrap: normal;
+        word-break: normal;
+      }
+
       .manual-mapping {
         border-top: 1px solid var(--line);
         padding-top: 8px;
@@ -845,7 +902,8 @@
       }
 
       .data-tag.badge-source-live,
-      .status-badge.badge-source-live {
+      .status-badge.badge-source-live,
+      .coverage-chip.badge-source-live {
         background: var(--good-bg);
         color: #17631f;
         border-color: #b7dfbf;
@@ -853,8 +911,10 @@
 
       .data-tag.badge-source-cached,
       .status-badge.badge-source-cached,
+      .coverage-chip.badge-source-cached,
       .data-tag.badge-source-imported,
-      .status-badge.badge-source-imported {
+      .status-badge.badge-source-imported,
+      .coverage-chip.badge-source-imported {
         background: rgba(0, 122, 255, 0.09);
         color: #075985;
         border-color: rgba(0, 122, 255, 0.2);
@@ -862,17 +922,21 @@
 
       .data-tag.badge-source-stale,
       .status-badge.badge-source-stale,
+      .coverage-chip.badge-source-stale,
       .data-tag.badge-source-partial,
       .status-badge.badge-source-partial,
+      .coverage-chip.badge-source-partial,
       .data-tag.badge-source-rate-limited,
-      .status-badge.badge-source-rate-limited {
+      .status-badge.badge-source-rate-limited,
+      .coverage-chip.badge-source-rate-limited {
         background: var(--warn-bg);
         color: #8a4b00;
         border-color: #f0d49c;
       }
 
       .data-tag.badge-source-error,
-      .status-badge.badge-source-error {
+      .status-badge.badge-source-error,
+      .coverage-chip.badge-source-error {
         background: var(--bad-bg);
         color: #9f261d;
         border-color: #f3b8b3;
@@ -880,8 +944,10 @@
 
       .data-tag.badge-source-not-configured,
       .status-badge.badge-source-not-configured,
+      .coverage-chip.badge-source-not-configured,
       .data-tag.badge-source-empty,
-      .status-badge.badge-source-empty {
+      .status-badge.badge-source-empty,
+      .coverage-chip.badge-source-empty {
         background: rgba(118, 118, 128, 0.1);
         color: var(--text-secondary);
         border-color: var(--line);
@@ -894,7 +960,7 @@
 
       .provider-coverage-table {
         width: 100%;
-        min-width: 760px;
+        min-width: 1180px;
         border-collapse: collapse;
         font-size: 12px;
       }
@@ -1260,6 +1326,53 @@
       .ticker-section-list {
         display: grid;
         gap: 12px;
+      }
+
+      .ticker-provider-coverage {
+        display: grid;
+        gap: 12px;
+        margin: 14px 0;
+        padding: 14px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .ticker-provider-coverage b {
+        display: block;
+        color: var(--text-primary);
+      }
+
+      .ticker-provider-coverage span,
+      .ticker-provider-coverage small {
+        color: var(--text-secondary);
+      }
+
+      .coverage-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .coverage-chip {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 118px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 10px;
+        background: rgba(118, 118, 128, 0.08);
+      }
+
+      .coverage-chip b {
+        font-size: 12px;
+        line-height: 1.2;
+      }
+
+      .coverage-chip small {
+        font-size: 11px;
+        line-height: 1.2;
       }
 
       .research-terminal-panel {
@@ -2106,6 +2219,114 @@
         text-align: right;
       }
 
+      .account-allocation-panel {
+        display: grid;
+        gap: 10px;
+      }
+
+      .account-allocation-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(11rem, 0.8fr) minmax(12rem, 1fr);
+        gap: 12px;
+        align-items: start;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .account-allocation-main,
+      .account-allocation-mix,
+      .account-allocation-top {
+        min-width: 0;
+      }
+
+      .account-allocation-main h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+
+      .account-allocation-main p,
+      .account-allocation-mix span,
+      .account-allocation-top span,
+      .account-allocation-meta {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .account-allocation-meta,
+      .account-allocation-top ul {
+        display: grid;
+        gap: 6px;
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .account-allocation-bar {
+        overflow: hidden;
+        height: 7px;
+        border-radius: 999px;
+        background: #eef2f7;
+      }
+
+      .account-allocation-bar i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #2f80ed, #2fbf71);
+      }
+
+      .account-mix-bars {
+        display: grid;
+        gap: 7px;
+      }
+
+      .account-mix-bars div {
+        display: grid;
+        gap: 3px;
+      }
+
+      .account-mix-bars i {
+        display: block;
+        height: 6px;
+        border-radius: 999px;
+        background: #d7e2f2;
+      }
+
+      .tax-bucket-pill {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 800;
+        color: #344054;
+        background: #eef3f8;
+      }
+
+      .tax-bucket-roth {
+        color: #0f5b45;
+        background: #e6f5ed;
+      }
+
+      .tax-bucket-traditional {
+        color: #19506f;
+        background: #e8f2fb;
+      }
+
+      .tax-bucket-taxable {
+        color: #67440d;
+        background: #fbf1dc;
+      }
+
+      .tax-bucket-hsa {
+        color: #54348a;
+        background: #f0eafa;
+      }
+
       .breakdown-bar {
         grid-column: 1 / -1;
         height: 7px;
@@ -2318,6 +2539,107 @@
       .risk-stat b {
         display: block;
         margin-top: 4px;
+        font-size: 18px;
+      }
+
+      .risk-summary-card {
+        display: grid;
+        gap: 14px;
+      }
+
+      .risk-summary-card > div:first-child {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .risk-summary-card h3 {
+        margin: 0;
+        font-size: 20px;
+      }
+
+      .risk-summary-card p {
+        margin: 0;
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+
+      .risk-summary-drivers {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 10px;
+      }
+
+      .risk-summary-drivers div {
+        min-width: 0;
+        border: 1px solid var(--border-subtle);
+        border-radius: 16px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .risk-summary-drivers span {
+        display: block;
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .risk-summary-drivers b {
+        display: block;
+        margin-top: 4px;
+        color: var(--text-primary);
+      }
+
+      .leveraged-education {
+        display: grid;
+        gap: 12px;
+        margin-top: 4px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 16px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .leveraged-education h3,
+      .leveraged-education p {
+        margin: 0;
+      }
+
+      .leveraged-education p {
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .leveraged-scenario-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+        gap: 10px;
+      }
+
+      .leveraged-scenario-grid div {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 11px;
+        background: rgba(118, 118, 128, 0.07);
+      }
+
+      .leveraged-scenario-grid span,
+      .leveraged-scenario-grid small {
+        display: block;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .leveraged-scenario-grid b {
+        display: block;
+        margin: 4px 0;
+        color: var(--danger);
         font-size: 18px;
       }
 
@@ -3322,6 +3644,47 @@
         margin-bottom: 10px;
       }
 
+      .score-explain-details {
+        width: 100%;
+        min-width: 0;
+        margin-top: 10px;
+      }
+
+      .score-explain-details summary {
+        justify-content: flex-start;
+      }
+
+      .risk-contributor-row .score-explain-details {
+        grid-column: 1 / -1;
+        margin-top: 6px;
+      }
+
+      .backup-preview-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .backup-preview-list > div {
+        display: grid;
+        grid-template-columns: minmax(9rem, 0.8fr) minmax(0, 1fr);
+        gap: 4px 12px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fbfcfe;
+      }
+
+      .backup-preview-list > div.changed {
+        border-color: rgba(245, 158, 11, 0.32);
+        background: #fffaf0;
+      }
+
+      .backup-preview-list small {
+        grid-column: 2;
+        color: var(--muted);
+      }
+
       .alpha-rank-details-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3969,6 +4332,23 @@
         margin-top: 14px;
       }
 
+      .settings-group {
+        display: grid;
+        gap: 12px;
+      }
+
+      .settings-group + .settings-group {
+        margin-top: 18px;
+      }
+
+      .provider-setup-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .provider-setup-grid .provider-status-note {
+        grid-column: 1 / -1;
+      }
+
       .provider-status-note,
       .provider-status-card {
         border: 1px solid var(--line);
@@ -3997,6 +4377,45 @@
         grid-column: 1 / -1;
       }
 
+      .provider-status-card .status-badge {
+        display: inline-flex;
+        width: fit-content;
+      }
+
+      .source-health-summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        border: 1px solid rgba(0, 122, 255, 0.14);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(247, 250, 255, 0.9);
+      }
+
+      .source-health-summary div {
+        min-width: 0;
+      }
+
+      .source-health-summary b {
+        display: block;
+        color: var(--text);
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      .source-health-summary span,
+      .source-health-summary p {
+        display: block;
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .source-health-summary p {
+        grid-column: 1 / -1;
+      }
+
       .provider-status-card.configured {
         border-color: #b7dfbf;
         background: var(--good-bg);
@@ -4019,6 +4438,17 @@
 
       .watchlist-toolbar {
         border-top: 1px solid var(--line);
+      }
+
+      .watchlist-quick-add {
+        display: grid;
+        grid-template-columns: minmax(150px, 0.8fr) minmax(140px, 0.7fr) auto;
+        gap: 10px;
+        align-items: end;
+        padding: 14px;
+        border: 1px solid rgba(226, 232, 240, 0.9);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.74);
       }
 
       .watchlist-card-grid {
@@ -4575,6 +5005,157 @@
       }
 
       .guidance-item small {
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .first-run-onboarding {
+        margin-bottom: 18px;
+      }
+
+      .first-run-onboarding[hidden] {
+        display: none;
+      }
+
+      .first-run-card {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.1fr);
+        gap: 16px;
+        padding: clamp(18px, 2vw, 24px);
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        border-radius: var(--radius-large);
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(241, 247, 255, 0.72)),
+          var(--surface-elevated);
+        box-shadow: var(--shadow-card);
+      }
+
+      .first-run-card.sample {
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.84)),
+          var(--surface-elevated);
+      }
+
+      .first-run-card.import-error {
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(255, 246, 237, 0.74)),
+          var(--surface-elevated);
+      }
+
+      .first-run-copy {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .first-run-badges,
+      .first-run-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .first-run-copy h3 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: clamp(24px, 3vw, 34px);
+        letter-spacing: 0;
+        line-height: 1.08;
+      }
+
+      .first-run-copy p,
+      .first-run-safety {
+        margin: 0;
+        color: var(--text-secondary);
+        line-height: 1.55;
+      }
+
+      .first-run-safety {
+        font-size: 12px;
+      }
+
+      .first-run-steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .first-run-step {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+        padding: 13px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        color: inherit;
+        text-decoration: none;
+        transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+      }
+
+      .first-run-step:hover,
+      .first-run-step:focus-visible {
+        transform: translateY(-1px);
+        border-color: rgba(0, 113, 227, 0.28);
+        background: #fff;
+        outline: none;
+      }
+
+      .first-run-step span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        background: rgba(0, 113, 227, 0.1);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .first-run-step b {
+        color: var(--text-primary);
+      }
+
+      .first-run-step small {
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+
+      .first-run-source-strip {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .first-run-source-strip > div {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid rgba(210, 219, 232, 0.72);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .first-run-source-strip b,
+      .first-run-source-strip small {
+        min-width: 0;
+        overflow-wrap: normal;
+        word-break: normal;
+      }
+
+      .first-run-source-strip b {
+        color: var(--text-primary);
+        font-size: 13px;
+      }
+
+      .first-run-source-strip small {
         color: var(--text-secondary);
         font-size: 12px;
         line-height: 1.4;
@@ -5316,6 +5897,17 @@
         margin-bottom: 4px;
       }
 
+      .holdings-empty-state {
+        text-align: left;
+      }
+
+      .holdings-empty-state .inline-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
       @media (max-width: 1080px) {
         .layout,
         .grid-two,
@@ -5324,7 +5916,9 @@
         .fidelity-import-grid,
         .fidelity-assistant-head,
         .research-quote-grid,
-        .ticker-detail-grid {
+        .ticker-detail-grid,
+        .first-run-card,
+        .first-run-source-strip {
           grid-template-columns: 1fr;
         }
 
@@ -5363,6 +5957,7 @@
         .sa-factor-strip.compact,
         .overview-digest-grid,
         .overview-digest-grid.command-brief-grid,
+        .first-run-steps,
         .watchlist-card-grid,
         .journal-card-head {
           grid-template-columns: repeat(2, 1fr);
@@ -5573,6 +6168,7 @@
         .what-if-summary-grid,
         .what-if-grid,
         .daily-brief-stats,
+        .leveraged-scenario-grid,
         .cash-plan div,
         .guardrail-list div,
         .risk-grid,
@@ -5601,8 +6197,11 @@
         .overview-digest-grid,
         .overview-digest-grid.command-brief-grid,
         .overview-secondary-grid,
+        .first-run-steps,
+        .first-run-source-strip,
         .screen-guidance,
         .watchlist-card-grid,
+        .watchlist-quick-add,
         .journal-card-head,
         .watchlist-detail-grid,
         .command-pair,
@@ -5624,6 +6223,11 @@
           flex-direction: column;
         }
 
+        .risk-summary-card > div:first-child {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
         .health-score-ring {
           width: 64px;
           height: 64px;
@@ -5631,9 +6235,12 @@
 
         .import-debug-grid,
         .manual-mapping-grid,
+        .source-health-summary,
+        .provider-setup-grid,
         .provider-status-card,
         .alert-item,
         .risk-row,
+        .account-allocation-row,
         .what-if-row,
         .mini-list > div,
         .stress-row {
@@ -5648,6 +6255,14 @@
             "value"
             "bar"
             "action";
+        }
+
+        .backup-preview-list > div {
+          grid-template-columns: 1fr;
+        }
+
+        .backup-preview-list small {
+          grid-column: 1;
         }
 
         .risk-row-main.ranked {
@@ -5777,6 +6392,7 @@
               <div class="guidance-item"><span>Why</span><b>Decision first</b><small>Only the highest-signal checks belong here.</small></div>
               <div class="guidance-item"><span>Next</span><b>Follow one link</b><small>Start with the highest-priority card, then drill down.</small></div>
             </div>
+            <div id="firstRunOnboardingPanel" class="first-run-onboarding" aria-label="First-run setup actions"></div>
             <div class="overview-digest-grid command-brief-grid overview-priority-grid" aria-label="Market Pulse command brief">
               <article class="digest-card portfolio-snapshot" data-route="#holdings" role="link" tabindex="0" aria-label="Open Holdings from portfolio value and daily move card">
                 <h3>Portfolio Value & Daily Move</h3>
@@ -6107,9 +6723,19 @@
               <div class="guidance-item"><span>Why</span><b>Know exposure</b><small>Sorting and filters show where concentration actually lives.</small></div>
               <div class="guidance-item"><span>Next</span><b>Click a ticker</b><small>Open ticker intelligence when a row needs context.</small></div>
             </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Performance Attribution</h2>
+                  <p>Which holdings contributed most to portfolio movement, with source and missing-history context.</p>
+                </div>
+              </div>
+              <div class="body-pad" id="portfolioAttributionPanel"></div>
+            </div>
             <div class="grid-two">
               <div class="panel">
                 <div class="panel-head"><div><h2>Accounts</h2><p>Where the money sits.</p></div></div>
+                <div class="body-pad account-allocation-panel" id="accountAllocationPanel" aria-live="polite"></div>
                 <div class="body-pad breakdown-list" id="accountBreakdown"></div>
               </div>
               <div class="panel">
@@ -6228,6 +6854,10 @@
               <div class="guidance-item"><span>What</span><b>Ranked risk memo</b><small>Largest positions, themes, accounts, leverage, cash, and overlap.</small></div>
               <div class="guidance-item"><span>Why</span><b>Dollar exposure first</b><small>Risk matters most when size and fragility point the same way.</small></div>
               <div class="guidance-item"><span>Next</span><b>Inspect or model</b><small>Open linked rows, then use What-If for concentration changes.</small></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><div><h2>Concentration Summary</h2><p>Plain-English read of top holdings, sector pressure, and leverage.</p></div></div>
+              <div class="body-pad" id="riskConcentrationSummaryPanel"></div>
             </div>
             <div class="grid-two">
               <div class="panel">
@@ -6461,7 +7091,7 @@
                 <div class="panel-head">
                   <div>
                     <h2>Rebalance Review</h2>
-                    <p>Current vs target with new-contribution, taxable-safe, retirement-only, and leverage-aware logic.</p>
+                    <p>Current vs target with new-contribution, sell-and-rebalance, taxable-safe, retirement-only, and leverage-aware logic.</p>
                   </div>
                 </div>
                 <div class="body-pad">
@@ -6469,9 +7099,9 @@
                     <span>Rebalance mode</span>
                     <select id="rebalanceMode">
                       <option value="new-contribution">New contribution only</option>
+                      <option value="sell-and-rebalance">Sell and rebalance model</option>
                       <option value="taxable-safe">Taxable-safe</option>
                       <option value="retirement-only">Retirement/HSA only</option>
-                      <option value="full">Full rebalance model</option>
                     </select>
                   </label>
                 </div>
@@ -6557,9 +7187,17 @@
                 <div class="editor-actions">
                   <button class="primary" id="saveThesisBtn" type="button">Save thesis</button>
                   <button id="markReviewedBtn" type="button">Mark reviewed today</button>
+                  <label class="control compact-control" for="thesisSnapshotSourceType"><span>Snapshot type</span>
+                    <select id="thesisSnapshotSourceType">
+                      <option value="user-written">User-written</option>
+                      <option value="generated">Generated summary</option>
+                    </select>
+                  </label>
+                  <button id="saveThesisSnapshotBtn" type="button">Save snapshot</button>
                   <p id="thesisEditorStatus" class="disclaimer" aria-live="polite">Thesis notes stay in localStorage on this machine.</p>
                 </div>
               </div>
+              <div class="body-pad" id="thesisSnapshotPanel"></div>
             </div>
           </section>
 
@@ -6672,6 +7310,22 @@
                 </div>
               </div>
               <div class="body-pad" id="watchlistSummaryPanel"></div>
+              <div class="body-pad">
+                <div class="watchlist-quick-add" aria-label="Quick add watchlist ticker">
+                  <label class="control" for="watchlistQuickTicker">Ticker
+                    <input id="watchlistQuickTicker" type="text" placeholder="ASML" autocapitalize="characters" />
+                  </label>
+                  <label class="control" for="watchlistQuickStatus">Starting status
+                    <select id="watchlistQuickStatus">
+                      <option value="watching">Watching</option>
+                      <option value="researching">Researching</option>
+                      <option value="candidate">Candidate</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                  </label>
+                  <button class="primary" id="quickAddWatchlistBtn" type="button">Add to watchlist</button>
+                </div>
+              </div>
               <div class="body-pad watchlist-toolbar">
                 <div class="toolbar-grid">
                   <label class="control" for="watchlistQuery">Search ideas
@@ -7129,6 +7783,10 @@
                       <input id="alertStaleHours" type="number" min="1" max="720" step="1" />
                       <small>Hours before imported/cached source data needs review.</small>
                     </label>
+                    <label class="control" for="alertMinTargetDrift">Target drift %
+                      <input id="alertMinTargetDrift" type="number" min="0" max="100" step="0.1" />
+                      <small>Minimum overweight/underweight drift before an in-app review alert appears.</small>
+                    </label>
                   </div>
                   <div class="connector-actions">
                     <button id="saveAlertThresholdsBtn" type="button">Save alert thresholds</button>
@@ -7148,6 +7806,7 @@
                     <button id="clearPortfolioBtn" type="button">Clear portfolio data</button>
                   </div>
                   <p id="stateStatus" class="connector-status" aria-live="polite">No state import or export yet.</p>
+                  <div id="stateRestorePreview" class="state-restore-preview" hidden></div>
                 </div>
               </div>
             </div>

@@ -97,7 +97,8 @@ The product should feel like a research cockpit: fast to scan, easy to filter, a
 1. User opens Data Sources And Safety.
 2. User exports local state as JSON.
 3. Dashboard writes holdings, market events, Alpha Engine events, thesis profiles, alert lifecycle state, and connector status into a local backup file.
-4. User can restore that JSON later without providing brokerage passwords or API keys.
+4. User imports a backup and reviews a restore preview before anything is committed.
+5. User can apply or cancel that restore without providing brokerage passwords or API keys.
 
 ## MVP Scope
 
@@ -203,7 +204,13 @@ The rebalancing layer reads canonical holdings and local thesis-profile override
 
 The thesis layer stores manual profiles in `localStorage`. Profiles include why Tucker owns the holding, bullish assumptions, risks, thesis-breaking conditions, review triggers, target allocation, confidence, catalyst, stop-review trigger, and last reviewed date. These fields support two product goals: better target allocation discipline and cleaner Alpha Engine classification when new events arrive.
 
-The local backup layer serializes dashboard state to JSON. It deliberately excludes passwords and API keys. Backup files still contain holdings and should be treated as sensitive financial records.
+The local backup layer serializes dashboard state to JSON. It deliberately excludes passwords and API keys, validates backups before restore, and shows a change preview before writing restored data to localStorage. Backup files still contain holdings and should be treated as sensitive financial records.
+
+Settings mirrors the Data Sources truth model for provider setup. It shows whether market data, OpenAI explanations, Plaid/Fidelity, Reddit, X/social, federal disclosures, and Seeking Alpha imports are Live, Imported, Cached, Stale, Error, or Not configured; it also shows key-presence state, last successful use, last visible error, and setup-document links without exposing secret values.
+
+When no active imported portfolio exists, Overview shows a first-run guide instead of an empty-looking dashboard. The guide routes Tucker to local Fidelity CSV/JSON/paste import, Sample mode, Data Sources, and Settings, and it keeps Portfolio, Market data, and Provider setup labels visible so Sample or Not configured states cannot be mistaken for real imported/live data.
+
+Navigation is hash-first for browser back/forward compatibility, but local slash-style paths such as `/holdings`, `/imports`, `/data-sources`, and `/ticker/MU` canonicalize to the same focused screens. The `#alpha-engine` alias resolves to the Alpha Engine route so dashboard cards, sidebar links, and documentation wording stay compatible.
 
 Canonical schemas are documented in `docs/schemas.md`. Safety rules are documented in `docs/safety-model.md`.
 

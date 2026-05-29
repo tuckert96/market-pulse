@@ -2,10 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzePortfolio } from "../src/portfolioAnalytics.js";
 import {
+  buildDataSourceHealthSummary,
   buildAffectedExposureSummary,
   buildAlphaSourceIssueRows,
+  buildFirstRunOnboardingModel,
   buildRankedAlphaHoldingRows,
+  buildSettingsProviderStatusRows,
   buildTickerDetailModel,
+  dataSourceAvailabilityMode,
   dataSourceAvailabilityLabel,
   filterHoldings,
   marketDataBadgeClass,
@@ -18,6 +22,8 @@ import {
   portfolioImportSourceStatus,
   providerStatusDisplay,
   renderAffectedExposureSummary,
+  renderLeveragedDrawdownScenarios,
+  renderDataSourceHealth,
   renderTickerLink,
   safeExternalHref,
   sortHoldingsForView,
@@ -75,6 +81,28 @@ test("affected exposure chips preserve value-sorted ticker order", () => {
   assert.ok(html.indexOf("MU") < html.indexOf("AMD"));
 });
 
+test("leveraged ETF drawdown scenario renderer stays compact and educational", () => {
+  const html = renderLeveragedDrawdownScenarios({
+    dailyResetExplanation: "Daily-reset leveraged ETFs target their stated multiple for one trading day.",
+    volatilityDragExplanation: "Volatility drag can make multi-day returns diverge from simple index leverage.",
+    scenarios: [
+      { underlyingMoveLabel: "-10%", estimatedProductMove: -0.3, estimatedPortfolioImpact: -4500, estimatedPortfolioImpactPct: -0.045 },
+      { underlyingMoveLabel: "-20%", estimatedProductMove: -0.6, estimatedPortfolioImpact: -9000, estimatedPortfolioImpactPct: -0.09 },
+      { underlyingMoveLabel: "-30%", estimatedProductMove: -0.9, estimatedPortfolioImpact: -13500, estimatedPortfolioImpactPct: -0.135 },
+      { underlyingMoveLabel: "-50%", estimatedProductMove: -1, estimatedPortfolioImpact: -15000, estimatedPortfolioImpactPct: -0.15 }
+    ]
+  });
+
+  assert.match(html, /riskLeveragedVolatilityDragModule/);
+  assert.match(html, /riskLeveragedDrawdownScenarios/);
+  assert.match(html, /Volatility Drag \+ Drawdown Scenarios/);
+  assert.match(html, /Daily-reset leveraged ETFs target their stated multiple for one trading day/);
+  assert.match(html, /Volatility drag can make multi-day returns diverge/);
+  assert.match(html, /Underlying -10%/);
+  assert.match(html, /Underlying -50%/);
+  assert.doesNotMatch(html, /buy|sell|execute/i);
+});
+
 test("external source links reject unsafe URL schemes", () => {
   assert.equal(safeExternalHref("https://example.test/source"), "https://example.test/source");
   assert.equal(safeExternalHref("http://example.test/source"), "http://example.test/source");
@@ -113,6 +141,244 @@ test("provider and data source status helpers avoid misleading live labels", () 
   assert.equal(marketDataSourceAvailability({ status: "error" }, {}).label, "Error");
   assert.equal(marketDataSourceAvailability({}, { configured: true }).label, "Not configured");
   assert.equal(dataSourceAvailabilityLabel({ configured: false, demoReady: true }), "Sample");
+});
+
+test("data source health summary separates usable provider data from local/sample fallbacks", () => {
+  const rows = [
+    { label: "Manual holdings", availabilityLabel: "Imported", providerBacked: false },
+    { label: "Finnhub", availabilityLabel: "Live", providerBacked: true },
+    { label: "Cached quotes", availabilityLabel: "Cached", providerBacked: true },
+    { label: "Sample Reddit", availabilityLabel: "Sample", providerBacked: false },
+    { label: "Stale disclosures", configuredPending: true, providerBacked: true },
+    { label: "OpenAI", availabilityLabel: "Not configured", providerBacked: false }
+  ];
+  const summary = buildDataSourceHealthSummary(rows);
+
+  assert.equal(dataSourceAvailabilityMode(rows[4]), "stale");
+  assert.equal(summary.sourceCount, 6);
+  assert.equal(summary.usableCount, 3);
+  assert.equal(summary.reviewCount, 1);
+  assert.equal(summary.providerBackedCount, 3);
+  assert.equal(summary.localOnlyCount, 3);
+});
+
+test("first-run onboarding model gives clear no-data and sample-mode next actions", () => {
+  const empty = buildFirstRunOnboardingModel({
+    portfolioStatus: {
+      uiState: "NO_DATA",
+      label: "No portfolio loaded",
+      detail: "Import a Fidelity CSV/JSON file or load sample data to populate portfolio screens.",
+      activePortfolio: false
+    },
+    marketDataStatus: { status: "not configured", label: "Finnhub not configured" },
+    providerReadiness: { providerStatuses: { finnhub: { id: "finnhub", configured: false } } },
+    uiState: "NO_DATA"
+  });
+
+  assert.equal(empty.visible, true);
+  assert.equal(empty.mode, "no-data");
+  assert.equal(empty.primaryAction.href, "#imports");
+  assert.equal(empty.sampleAction.label, "Try sample data");
+  assert.ok(empty.secondaryActions.some((action) => action.href === "#data-sources"));
+  assert.ok(empty.secondaryActions.some((action) => action.href === "#settings"));
+  assert.ok(empty.steps.some((step) => /Confirm preview/.test(step.title)));
+  assert.equal(empty.statusRows[0].value, "No portfolio loaded");
+
+  const sample = buildFirstRunOnboardingModel({
+    portfolioStatus: {
+      uiState: "SAMPLE_MODE",
+      label: "Sample portfolio loaded",
+      detail: "Sample holdings are active for workflow testing.",
+      activePortfolio: true,
+      samplePortfolio: true
+    },
+    marketDataStatus: { status: "mock/sample mode", label: "Sample market data" },
+    providerReadiness: { providerStatuses: { finnhub: { id: "finnhub", configured: true } } },
+    uiState: "SAMPLE_MODE"
+  });
+
+  assert.equal(sample.visible, true);
+  assert.equal(sample.mode, "sample");
+  assert.equal(sample.sampleAction, null);
+  assert.match(sample.summary, /not Tucker's real money/i);
+
+  const imported = buildFirstRunOnboardingModel({
+    portfolioStatus: { uiState: "IMPORTED_CLEAN", activePortfolio: true, realPortfolio: true },
+    uiState: "IMPORTED_CLEAN"
+  });
+  assert.equal(imported.visible, false);
+});
+
+test("data sources health screen renders standardized source labels and freshness metadata", () => {
+  const previousDocument = globalThis.document;
+  const elements = new Map([
+    ["dataSourceHealthPanel", { innerHTML: "", hidden: false }],
+    ["syncRedditMentionsBtn", { hidden: false }],
+    ["syncXUpdatesBtn", { hidden: false }],
+    ["syncPoliticianTradesBtn", { hidden: false }]
+  ]);
+  globalThis.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+
+  try {
+    renderDataSourceHealth(
+      {
+        connectors: { plaid: { configured: true, linked: false } },
+        marketDataConfig: { selectedLabel: "Finnhub", configured: true, liveProviderCalls: true, detail: "Finnhub key is present on the local backend." },
+        redditProviderConfig: { configured: false, liveProviderCalls: false, detail: "Reddit API not configured." },
+        redditProviderStatuses: { redditApi: { configured: false } },
+        xProviderConfig: { configured: true, liveProviderCalls: true, detail: "X API configured through the local backend." },
+        xProviderStatuses: { xApi: { configured: true, liveProviderCalls: true } },
+        politicianTradeProviderConfig: { configured: true, liveProviderCalls: true, detail: "Public disclosure provider configured." },
+        aiProviders: { openai: { configured: true, liveProviderCalls: false, detail: "OpenAI key present, explanations disabled." } }
+      },
+      { mode: "csv-imported", provider: "csv-import", lastSync: "2026-05-28T12:00:00.000Z" },
+      { connected: true, mode: "csv-import", lastSync: "2026-05-28T12:05:00.000Z" },
+      {
+        realPortfolioImport: true,
+        fileName: "positions.csv",
+        importedAt: "2026-05-28T12:00:00.000Z",
+        rowsParsed: 42,
+        holdingsImported: 40,
+        rejectedRows: [{ classification: "non-holding row" }]
+      },
+      {
+        status: "connected",
+        label: "Finnhub cached quotes",
+        dataFreshness: "cached",
+        providerLabel: "Finnhub",
+        fetchedAt: "2026-05-28T12:10:00.000Z",
+        lastSuccessfulRefresh: "2026-05-28T12:10:00.000Z",
+        quoteCount: 40,
+        cache: { status: "cached", quoteCount: 40, hitCount: 40 }
+      },
+      {
+        mode: "local-file",
+        fileName: "disclosures.csv",
+        tradesImported: 1,
+        rowsParsed: 1,
+        rejectedRows: [],
+        importedAt: "2026-05-28T12:12:00.000Z"
+      },
+      [{ ticker: "MU", sourceMode: "local-file" }],
+      {
+        mode: "local-json",
+        fileName: "reddit.json",
+        mentionsImported: 2,
+        rowsParsed: 2,
+        rejectedRows: [],
+        importedAt: "2026-05-28T12:15:00.000Z"
+      },
+      [{ ticker: "MU", sourceMode: "local-file" }],
+      { realPortfolio: true, uiState: "IMPORTED_CLEAN", holdingCount: 40, loadedAt: "2026-05-28T12:00:00.000Z" },
+      { combined: { accountCount: 4 } },
+      {
+        mode: "x-api",
+        updatesImported: 3,
+        dataFreshness: "stale",
+        fetchedAt: "2026-05-28T12:20:00.000Z",
+        detail: "X provider refresh failed; using stale cache."
+      },
+      [{ ticker: "NVDA", providerId: "x-api" }]
+    );
+
+    const html = elements.get("dataSourceHealthPanel").innerHTML;
+    assert.match(html, /Data source health summary/);
+    assert.match(html, /provider-backed/);
+    assert.match(html, /Manual\/imported holdings/);
+    assert.match(html, /positions\.csv/);
+    assert.match(html, /Imported/);
+    assert.match(html, /Market data/);
+    assert.match(html, /Finnhub/);
+    assert.match(html, /Cached/);
+    assert.match(html, /Type: Provider-backed quotes/);
+    assert.match(html, /Last success:/);
+    assert.match(html, /Reddit \/ social mentions/);
+    assert.match(html, /Imported/);
+    assert.match(html, /X \/ Twitter/);
+    assert.match(html, /Stale/);
+    assert.match(html, /Federal disclosures/);
+    assert.match(html, /disclosures\.csv/);
+    assert.match(html, /OpenAI key detected/);
+    assert.match(html, /Not configured/);
+    assert.match(html, /Deterministic local explanation fallback/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("settings provider status rows expose setup state without secret values", () => {
+  const rows = buildSettingsProviderStatusRows({
+    connectors: {
+      plaid: {
+        configured: true,
+        linked: false,
+        detail: "Plaid credentials are configured. Start Plaid Link.",
+        lastError: "Bearer do-not-render-provider-token-abcdefghijklmnopqrstuvwxyz"
+      }
+    },
+    marketDataConfig: {
+      selectedLabel: "Finnhub",
+      configured: true,
+      liveProviderCalls: true,
+      detail: "Finnhub key is present on the local backend."
+    },
+    redditProviderConfig: {
+      configured: true,
+      liveProviderCalls: false,
+      status: "configured-not-connected",
+      detail: "Reddit OAuth fields present; live sync disabled."
+    },
+    redditProviderStatuses: { redditApi: { configured: true, liveProviderCalls: false, status: "configured-not-connected" } },
+    xProviderConfig: {
+      configured: false,
+      liveProviderCalls: false,
+      status: "not configured",
+      detail: "Sample/local X rows remain active."
+    },
+    xProviderStatuses: { xApi: { configured: false } },
+    politicianTradeProviderConfig: {
+      configured: true,
+      liveProviderCalls: true,
+      detail: "Public disclosure provider configured."
+    },
+    politicianTradeProviderStatuses: { senateStockWatcher: { configured: true, liveProviderCalls: true, status: "connected" } },
+    aiProviders: {
+      openai: {
+        configured: true,
+        liveProviderCalls: false,
+        detail: "OpenAI key present, explanations disabled.",
+        lastError: "api_key=do-not-render-openai-key"
+      }
+    }
+  }, {
+    marketDataStatus: {
+      status: "connected",
+      dataFreshness: "live",
+      providerLabel: "Finnhub",
+      lastSuccessfulRefresh: "2026-05-29T12:00:00.000Z"
+    },
+    fidelityStatus: { connected: true, mode: "csv-imported", lastSync: "2026-05-29T11:00:00.000Z" },
+    latestImportReport: { importedAt: "2026-05-29T11:00:00.000Z" },
+    redditImportReport: { importedAt: "2026-05-29T10:00:00.000Z", mentionsImported: 2 },
+    xUpdateImportReport: { status: "not configured" },
+    politicianTradeImportReport: { fetchedAt: "2026-05-29T09:00:00.000Z", tradesImported: 1 },
+    seekingAlphaStatus: { connected: true, mode: "csv-import", lastSync: "2026-05-29T08:00:00.000Z" }
+  });
+  const text = JSON.stringify(rows);
+
+  assert.ok(rows.some((row) => row.title === "Finnhub" && row.statusMode === "live" && /Configured and active/.test(row.credentialState)));
+  assert.ok(rows.some((row) => row.title === "OpenAI explanations" && row.statusMode === "not-configured" && /Key present/.test(row.credentialState)));
+  assert.ok(rows.some((row) => row.title === "Fidelity / Plaid" && /Credentials present/.test(row.credentialState)));
+  assert.ok(rows.some((row) => row.title === "Reddit API" && row.statusMode === "imported"));
+  assert.ok(rows.some((row) => row.title === "Seeking Alpha ratings" && row.statusMode === "imported"));
+  assert.equal(text.includes("do-not-render-provider-token"), false);
+  assert.equal(text.includes("do-not-render-openai-key"), false);
+  assert.match(text, /Last success:/);
+  assert.match(text, /Setup notes|docs\/market-data-provider-config\.md/);
 });
 
 test("portfolio import status distinguishes clean, skipped, partial, and failed imports", () => {
@@ -283,6 +549,64 @@ test("market data diagnostics show request budget and deferred enrichment", () =
   assert.match(html, /Deferred/);
   assert.match(html, /Missing/);
   assert.match(html, /history/);
+});
+
+test("market data diagnostics render field-level ticker coverage", () => {
+  const html = marketDataDiagnosticsHtml({
+    requestedTickers: ["MU"],
+    quoteDiagnostics: [{
+      ticker: "MU",
+      status: "connected",
+      dataFreshness: "live",
+      cacheStatus: "live",
+      coverageSummary: "8/8 fields available",
+      fieldCoverage: [
+        { key: "quote", label: "Quote", missingLabel: "quote/current price", available: true, status: "live" },
+        { key: "week52Range", label: "52-week high/low", missingLabel: "52-week high/low", available: true, status: "live" },
+        { key: "volume", label: "Volume", missingLabel: "volume", available: true, status: "live" },
+        { key: "averageVolume", label: "Average volume", missingLabel: "average volume", available: true, status: "live" },
+        { key: "marketCap", label: "Market cap", missingLabel: "market cap", available: true, status: "live" },
+        { key: "companyProfile", label: "Company profile", missingLabel: "company profile", available: true, status: "live" },
+        { key: "sectorIndustry", label: "Sector/industry", missingLabel: "sector/industry", available: true, status: "live" },
+        { key: "historicalCandles", label: "Historical candles", missingLabel: "historical candles", available: true, status: "live" }
+      ],
+      missingFields: [],
+      unavailableFields: [],
+      staleFields: [],
+      fetchedAt: "2026-05-23T16:00:00.000Z"
+    }, {
+      ticker: "AMD",
+      status: "partial data",
+      dataFreshness: "live",
+      cacheStatus: "live",
+      coverageSummary: "4/8 fields available",
+      fieldCoverage: [
+        { key: "quote", label: "Quote", missingLabel: "quote/current price", available: true, status: "live" },
+        { key: "week52Range", label: "52-week high/low", missingLabel: "52-week high/low", available: false, status: "missing" },
+        { key: "volume", label: "Volume", missingLabel: "volume", available: true, status: "live" },
+        { key: "averageVolume", label: "Average volume", missingLabel: "average volume", available: false, status: "missing" },
+        { key: "marketCap", label: "Market cap", missingLabel: "market cap", available: false, status: "missing" },
+        { key: "companyProfile", label: "Company profile", missingLabel: "company profile", available: false, status: "deferred" },
+        { key: "sectorIndustry", label: "Sector/industry", missingLabel: "sector/industry", available: true, status: "cached" },
+        { key: "historicalCandles", label: "Historical candles", missingLabel: "historical candles", available: false, status: "stale" }
+      ],
+      missingFields: ["52-week high/low", "average volume", "market cap"],
+      deferredFields: ["company profile"],
+      unavailableFields: ["52-week high/low", "average volume", "market cap", "company profile"],
+      staleFields: ["Historical candles"],
+      fetchedAt: "2026-05-23T16:00:00.000Z"
+    }]
+  }, {
+    selectedLabel: "Finnhub",
+    configured: true
+  });
+
+  assert.match(html, /52-week/);
+  assert.match(html, /Avg volume/);
+  assert.match(html, /8\/8 fields available/);
+  assert.match(html, /4\/8 fields available/);
+  assert.match(html, /Missing: 52-week high\/low, average volume, market cap, company profile/);
+  assert.match(html, /Stale: Historical candles/);
 });
 
 test("market data quote labels distinguish live cached stale and missing quote states", () => {
@@ -504,7 +828,36 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   const options = {
     selectedTicker: "MU",
     marketDataSnapshot: {
-      status: { status: "mock/sample mode", label: "Sample market data" },
+      status: {
+        status: "mock/sample mode",
+        label: "Sample market data",
+        quoteDiagnostics: [
+          {
+            ticker: "MU",
+            coverageSummary: "6/8 fields available",
+            coverageStatus: "partial",
+            missingFields: ["average volume", "52-week high/low"],
+            staleFields: [],
+            fieldCoverage: [
+              { key: "quote", label: "Quote", available: true, status: "mock" },
+              { key: "volume", label: "Volume", available: true, status: "mock" },
+              { key: "averageVolume", label: "Average volume", available: false, status: "missing" }
+            ]
+          },
+          {
+            ticker: "PLTR",
+            coverageSummary: "2/8 fields available",
+            coverageStatus: "partial",
+            missingFields: ["market cap", "historical candles"],
+            staleFields: [],
+            fieldCoverage: [
+              { key: "quote", label: "Quote", available: true, status: "mock" },
+              { key: "historicalCandles", label: "Historical candles", available: true, status: "mock" },
+              { key: "marketCap", label: "Market cap", available: false, status: "missing" }
+            ]
+          }
+        ]
+      },
       quotesByTicker: {
         MU: {
           ticker: "MU",
@@ -573,6 +926,11 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(owned.ticker, "MU");
   assert.equal(owned.owned, true);
   assert.equal(owned.marketValue, 1200);
+  assert.equal(owned.shares, 10);
+  assert.equal(owned.providerCoverage.coverageSummary, "6/8 fields available");
+  assert.match(owned.providerAvailability.summary, /Sample.*6\/8 fields available/);
+  assert.ok(owned.contextLinks.some((link) => link.href === "#holdings" && /Holdings/.test(link.label)));
+  assert.ok(owned.contextLinks.some((link) => link.href === "#watchlist" && /Watchlist/.test(link.label)));
   assert.equal(owned.researchLens.ticker, "MU");
   assert.equal(owned.researchLens.buffettChecklist.securityKind, "operating-company");
   assert.ok(owned.researchLens.buffettChecklist.summary.includes("MU"));
@@ -605,6 +963,8 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(watchlist.savedWatchlistIdea, true);
   assert.equal(watchlist.externallyDiscovered, false);
   assert.equal(watchlist.marketValue, 0);
+  assert.ok(watchlist.contextLinks.some((link) => link.href === "#watchlist" && /Watchlist/.test(link.label)));
+  assert.match(watchlist.providerAvailability.summary, /2\/8 fields available/);
   assert.equal(watchlist.quote.price, 25);
   assert.equal(watchlist.historicalPrices.length, 2);
   assert.equal(watchlist.calendarEvents.length, 1);
@@ -615,6 +975,7 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(signalOnly.watchlistOnly, false);
   assert.equal(signalOnly.derivedSignalIdea, true);
   assert.equal(signalOnly.externallyDiscovered, true);
+  assert.ok(signalOnly.contextLinks.some((link) => link.href === "#market-intelligence"));
   assert.equal(signalOnly.dataQuality.rows.some((row) => row.label === "Position data" && row.status === "signal-discovered"), true);
   assert.equal(signalWithoutQuote.ticker, "NQTE");
   assert.equal(signalWithoutQuote.owned, false);

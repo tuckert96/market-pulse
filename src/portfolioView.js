@@ -1,5 +1,5 @@
 import { signalActionCategory } from "./alphaEngine.js";
-import { DATA_MODES, dataModeBadgeClass, dataModeLabel, marketDataMode, portfolioDataMode, sourceDataMode } from "./dataModes.js";
+import { DATA_MODES, dataModeBadgeClass, dataModeLabel, marketDataMode, normalizeDataMode, portfolioDataMode, sourceDataMode } from "./dataModes.js";
 import { eventSourceLabel, eventTypeLabel, summarizeCalendarEvents } from "./eventCalendar.js";
 import { filterRiskGuardrailRows, RISK_ACTION_LABELS, sortRiskGuardrailRows } from "./equityRiskGuardrails.js";
 import { buildTickerMovementExplainer } from "./movementExplainer.js";
@@ -8,6 +8,7 @@ import { countHoldingRowsNeedingReview, isRealPortfolioUiState } from "./portfol
 import { summarizeRedditMentions } from "./redditSignals.js";
 import { buildTechnicalAnalysisSnapshot } from "./technicalAnalysis.js";
 import { buildThesisRiskSummary } from "./thesisTracker.js";
+import { compareThesisSnapshotToProfile, thesisSnapshotsForTicker } from "./thesisSnapshots.js";
 import { buildTickerResearchLens } from "./tickerResearch.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
 
@@ -16,6 +17,7 @@ const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderDataModeIndicator(options.portfolioStatus, options.marketDataStatus, options.latestImportReport, options.accountScope);
+  renderFirstRunOnboarding(options.portfolioStatus, options.marketDataStatus, options.providerReadiness, options.uiState);
   renderMarketTape(analysis.holdings, options.tickerSignals || [], options.marketDataStatus, options.uiState);
   renderThirtySecondBrief(analysis, options);
   renderDailyCommandBrief(options.dailyBrief, options.uiState);
@@ -32,7 +34,9 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderOverviewMarketSnapshot(options.marketEvents || [], analysis.holdings, options.uiState, options.tickerSignals || [], options.marketDataStatus);
   renderOverviewMarketDriversSnapshot(options.marketDrivers);
   renderOverviewConnectionStatus(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.marketDataStatus);
+  renderPortfolioAttribution(options.portfolioAttribution, options.uiState);
   renderBreakdowns(analysis.breakdowns, options.uiState, analysis.holdings);
+  renderAccountAllocationPanel(options.accountScope, options.uiState);
   renderAttentionAlerts(analysis.alerts, options.alertLifecycle, options.uiState);
   renderDecisionBrief(options.decisionBrief, options.uiState);
   renderAlphaRecommendations(
@@ -46,7 +50,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderTargetAllocations(options.targetPlan, options.targetAllocations, options.uiState);
   renderRebalancePlan(options.targetPlan || options.rebalancePlan, options.uiState);
   renderSleeves(options.sleeves || [], options.uiState);
-  renderThesisTracker(options.thesisRows || [], options.thesisSummary);
+  renderThesisTracker(options.thesisRows || [], options.thesisSummary, options.thesisSnapshots || []);
   renderWatchlistIdeas(options.watchlistIdeaRows || [], options.watchlistIdeaSummary || {}, options.watchlistFilters || {});
   renderDecisionJournal(options.journalRows || [], options.journalSummary || {}, options.journalFilters || {});
   renderCalendarEvents(options.calendarEvents || [], options.calendarSummary || {}, options.calendarFilters || {}, options.eventCalendarImportReport);
@@ -84,7 +88,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderPoliticianTrades(options.politicianTrades || [], options.politicianTradeImportReport);
   renderMarketPoliticianTrades(options.politicianTrades || [], options.politicianTradeImportReport);
   renderProviderReadiness(options.providerReadiness);
-  renderSettingsConfiguration(options.alertThresholds);
+  renderSettingsConfiguration(options.alertThresholds, options);
 }
 
 export function filterHoldings(holdings, options = {}) {
@@ -152,6 +156,151 @@ export function safeExternalHref(url = "#") {
 function safeHashHref(href = "#overview") {
   const text = String(href || "").trim();
   return text.startsWith("#") ? text : "#overview";
+}
+
+export function buildFirstRunOnboardingModel({
+  portfolioStatus = {},
+  marketDataStatus = {},
+  providerReadiness = {},
+  uiState = "NO_DATA"
+} = {}) {
+  const imported = isImportedState(uiState);
+  const sample = uiState === "SAMPLE_MODE" || portfolioStatus?.samplePortfolio;
+  const failed = uiState === "IMPORT_FAILED";
+  const noData = uiState === "NO_DATA" || !portfolioStatus?.activePortfolio;
+  const marketMode = marketDataMode(marketDataStatus);
+  const providerStatuses = Object.values(providerReadiness?.providerStatuses || {});
+  const configuredProviders = providerStatuses.filter((status) => status.configured && status.id !== "demo").length;
+  const marketLabel = marketDataStatus?.label || dataModeLabel(marketMode);
+
+  if (imported && !failed) {
+    return {
+      visible: false,
+      mode: "imported",
+      title: "Portfolio is loaded",
+      summary: portfolioStatus?.detail || "The command brief is using imported holdings.",
+      primaryAction: { label: "Open daily brief", href: "#daily" },
+      secondaryActions: [],
+      steps: [],
+      statusRows: []
+    };
+  }
+
+  const mode = sample ? "sample" : failed ? "import-error" : "no-data";
+  const title = sample
+    ? "Sample portfolio is active"
+    : failed
+    ? "Import needs review"
+    : "Import your portfolio to begin";
+  const summary = sample
+    ? "This is a safe practice portfolio for learning the workflow. It is not Tucker's real money or Live market data."
+    : failed
+    ? portfolioStatus?.detail || "The last import did not apply holdings. Review diagnostics, adjust the file or mappings, then preview again."
+    : "Start with a local Fidelity CSV, pasted positions, or holdings JSON. Nothing changes until you review and apply the preview.";
+  const badge = sample ? "Sample" : failed ? "Error" : "No data loaded";
+  const badgeMode = sample ? DATA_MODES.SAMPLE : failed ? DATA_MODES.ERROR : DATA_MODES.NO_DATA;
+
+  return {
+    visible: true,
+    mode,
+    badge,
+    badgeMode,
+    title,
+    summary,
+    primaryAction: { label: failed ? "Review import diagnostics" : "Import Fidelity CSV", href: "#imports" },
+    sampleAction: sample ? null : { label: "Try sample data" },
+    secondaryActions: [
+      { label: "Check data sources", href: "#data-sources" },
+      { label: "Open Settings", href: "#settings" }
+    ],
+    steps: [
+      {
+        label: "1",
+        title: "Load holdings",
+        detail: "Upload, drop, or paste Fidelity positions locally. CSV and holdings JSON are supported.",
+        href: "#imports"
+      },
+      {
+        label: "2",
+        title: "Confirm preview",
+        detail: "Review accepted rows, skipped non-holding rows, rejected rows, accounts, and total market value.",
+        href: "#imports"
+      },
+      {
+        label: "3",
+        title: "Turn on context",
+        detail: "Use Data Sources and Settings to verify Finnhub, OpenAI, Plaid, Reddit, X, and imported ratings status.",
+        href: "#data-sources"
+      }
+    ],
+    statusRows: [
+      {
+        label: "Portfolio",
+        value: portfolioStatus?.label || (noData ? "No portfolio loaded" : "Sample portfolio loaded"),
+        mode: portfolioDataMode(portfolioStatus),
+        detail: portfolioStatus?.detail || "Import a local file or load sample data."
+      },
+      {
+        label: "Market data",
+        value: marketLabel,
+        mode: marketMode,
+        detail: marketDataDisplayDetail(marketDataStatus)
+      },
+      {
+        label: "Provider setup",
+        value: `${configuredProviders}/${providerStatuses.length || 0} configured`,
+        mode: configuredProviders ? DATA_MODES.NOT_CONFIGURED : DATA_MODES.NOT_CONFIGURED,
+        detail: configuredProviders ? "Keys are detected; open Data Sources to verify freshness." : "Optional providers can be configured later."
+      }
+    ]
+  };
+}
+
+function renderFirstRunOnboarding(portfolioStatus = {}, marketDataStatus = {}, providerReadiness = {}, uiState = "NO_DATA") {
+  const target = byId("firstRunOnboardingPanel");
+  if (!target) return;
+  const model = buildFirstRunOnboardingModel({ portfolioStatus, marketDataStatus, providerReadiness, uiState });
+  target.hidden = !model.visible;
+  if (!model.visible) {
+    target.innerHTML = "";
+    return;
+  }
+  target.innerHTML = `
+    <section class="first-run-card ${escapeHtml(model.mode)}" data-first-run-mode="${escapeHtml(model.mode)}">
+      <div class="first-run-copy">
+        <div class="first-run-badges">
+          <span class="status-badge ${escapeHtml(dataModeBadgeClass(model.badgeMode))}">${escapeHtml(model.badge)}</span>
+          <span class="status-badge safe">Local first</span>
+        </div>
+        <h3>${escapeHtml(model.title)}</h3>
+        <p>${escapeHtml(model.summary)}</p>
+        <div class="first-run-actions">
+          <a class="button-link primary" href="${escapeHtml(safeHashHref(model.primaryAction.href))}">${escapeHtml(model.primaryAction.label)}</a>
+          ${model.sampleAction ? `<button type="button" data-overview-action="sample">${escapeHtml(model.sampleAction.label)}</button>` : ""}
+          ${model.secondaryActions.map((action) => `<a class="button-link" href="${escapeHtml(safeHashHref(action.href))}">${escapeHtml(action.label)}</a>`).join("")}
+        </div>
+        <small class="first-run-safety">Your portfolio stays in this browser unless you export a backup. No brokerage password, API key, or cookie is shown here.</small>
+      </div>
+      <div class="first-run-steps" aria-label="First-run setup steps">
+        ${model.steps.map((step) => `
+          <a class="first-run-step" href="${escapeHtml(safeHashHref(step.href))}">
+            <span>${escapeHtml(step.label)}</span>
+            <b>${escapeHtml(step.title)}</b>
+            <small>${escapeHtml(step.detail)}</small>
+          </a>
+        `).join("")}
+      </div>
+      <div class="first-run-source-strip" aria-label="Current setup status">
+        ${model.statusRows.map((row) => `
+          <div>
+            <span class="data-mode-pill ${escapeHtml(dataModeBadgeClass(row.mode))}">${escapeHtml(row.label)}: ${escapeHtml(dataModeLabel(row.mode))}</span>
+            <b>${escapeHtml(row.value)}</b>
+            <small>${escapeHtml(row.detail)}</small>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function renderDataModeIndicator(portfolioStatus = {}, marketDataStatus = {}, report = null, accountScope = null) {
@@ -427,6 +576,10 @@ function renderPortfolioHealthPanel(health = {}, uiState = "SAMPLE_MODE") {
           <span>/100</span>
         </div>
       </div>
+      <details class="alpha-rank-details score-explain-details">
+        <summary aria-label="Explain Portfolio Health Score">Explain score</summary>
+        ${renderTransparentScoreBreakdown(health.scoreBreakdown, "Portfolio Health Score")}
+      </details>
       <div class="health-component-grid">
         ${components.map((component) => `
           <a class="health-component" href="${escapeHtml(safeHashHref(component.href || "#daily"))}">
@@ -617,6 +770,86 @@ function renderOverviewTopMovers(holdings = [], uiState = "SAMPLE_MODE", marketD
     : '<div class="empty"><strong>Market data not configured.</strong><span>Imported CSV values load positions, but Live daily movers are Not configured.</span></div>';
 }
 
+function renderPortfolioAttribution(attribution = {}, uiState = "SAMPLE_MODE") {
+  const target = byId("portfolioAttributionPanel");
+  if (!target) return;
+  if (!isImportedState(uiState)) {
+    target.innerHTML = `
+      <div class="empty">
+        <strong>No real attribution yet.</strong>
+        <span>Import a portfolio to see which holdings drove daily, 5-day, 20-day, and since-cost-basis movement.</span>
+      </div>
+    `;
+    return;
+  }
+  const rows = attribution.rows || [];
+  if (!rows.length) {
+    target.innerHTML = `
+      <div class="empty">
+        <strong>No attribution rows available.</strong>
+        <span>Holdings need market value data before the app can estimate contribution to return.</span>
+      </div>
+    `;
+    return;
+  }
+  const periods = attribution.periods || {};
+  const daily = periods.daily || {};
+  const weekly = periods.weekly || {};
+  const monthly = periods.monthly || {};
+  const total = periods.total || {};
+  target.innerHTML = `
+    <div class="provider-status-note">
+      <b>${escapeHtml(attribution.summary || "Attribution ready.")}</b>
+      <span>Contribution is estimated from active imported holdings, provider daily moves, historical closes when available, and imported cost basis. Missing history is shown instead of backfilled.</span>
+    </div>
+    <div class="ticker-mini-metrics">
+      ${renderAttributionMetric("Daily impact", daily)}
+      ${renderAttributionMetric("5-day impact", weekly)}
+      ${renderAttributionMetric("20-day impact", monthly)}
+      ${renderAttributionMetric("Since cost basis", total)}
+    </div>
+    <div class="grid-two">
+      ${renderAttributionPeriodList("Biggest daily contributors", daily, "daily")}
+      ${renderAttributionPeriodList("Biggest 20-day contributors", monthly, "monthly")}
+    </div>
+    ${Number(attribution.missingDataCount || 0) ? `<p class="section-note">${formatNumber(attribution.missingDataCount)} ticker${Number(attribution.missingDataCount) === 1 ? "" : "s"} have at least one missing attribution period because history, daily move, or cost basis is unavailable.</p>` : ""}
+  `;
+}
+
+function renderAttributionMetric(label, period = {}) {
+  const missing = Number(period.missingCount || 0);
+  return `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <b class="${Number(period.totalDollar || 0) >= 0 ? "positive" : "negative"}">${period.availableCount ? formatSignedCurrency(period.totalDollar) : "Not available"}</b>
+      <small>${period.availableCount ? `${formatSignedPct(period.totalContributionPct)} contribution` : "Waiting on source data"}${missing ? ` · ${formatNumber(missing)} missing` : ""}</small>
+    </div>
+  `;
+}
+
+function renderAttributionPeriodList(title, period = {}, periodKey = "daily") {
+  const rows = (period.sorted || []).slice(0, 5);
+  return `
+    <section class="mini-panel attribution-panel">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="mini-list ticker-section-list">
+        ${rows.length ? rows.map((row) => renderAttributionRow(row, periodKey)) : '<div class="empty"><strong>Not enough data yet.</strong><span>Refresh market data with historical prices or import daily move fields.</span></div>'}
+      </div>
+    </section>
+  `;
+}
+
+function renderAttributionRow(row = {}, periodKey = "daily") {
+  const period = row[periodKey] || {};
+  return `
+    <div>
+      <span>${renderTickerLink(row.ticker)} · ${escapeHtml(row.sourceLabel || "Local data")}</span>
+      <b class="${Number(period.dollar || 0) >= 0 ? "positive" : "negative"}">${period.status === "available" ? formatSignedCurrency(period.dollar) : "Not available"}</b>
+      <small>${period.status === "available" ? `${formatSignedPct(period.contributionPct)} portfolio contribution · ${formatSignedPct(period.returnPct)} ${escapeHtml(periodKey)} return` : escapeHtml(period.explanation || "Missing source data.")}</small>
+    </div>
+  `;
+}
+
 function renderOverviewConcentrationWarnings(risk = {}, overview = {}, uiState = "SAMPLE_MODE") {
   const target = byId("overviewConcentrationWarnings");
   if (!target) return;
@@ -749,7 +982,14 @@ function renderOverviewMarketDriversSnapshot(report = null) {
     target.innerHTML = '<div class="empty"><strong>No driver read yet.</strong><span>Refresh market data or load sample data to see market drivers.</span></div>';
     return;
   }
-  target.innerHTML = [report.broadMarket, report.aiTech].map((scope) => `
+  const regime = report.marketRegime ? `
+    <div>
+      <span>Market regime · ${escapeHtml(report.marketRegime.confidenceLabel || "Low")} confidence</span>
+      <b>${escapeHtml(report.marketRegime.label || "Mixed")} · ${escapeHtml(report.marketRegime.sourceStatus || "Source-labeled")}</b>
+      <small>${escapeHtml(report.marketRegime.interpretation || "Rule-based regime context pending.")}</small>
+    </div>
+  ` : "";
+  target.innerHTML = regime + [report.broadMarket, report.aiTech].map((scope) => `
     <div>
       <span>${escapeHtml(scope.label)} · ${escapeHtml(scope.confidenceLabel)} confidence</span>
       <b>${escapeHtml(scope.directionLabel)} · ${escapeHtml(scope.moveLabel || "move unavailable")}</b>
@@ -826,6 +1066,59 @@ function renderBreakdowns(breakdowns, uiState = "SAMPLE_MODE", holdings = []) {
   renderBreakdownList("sectorBreakdown", breakdowns.sector, uiState, { cashNote: true });
   renderBreakdownList("sleeveBreakdown", breakdowns.sleeve, uiState);
   renderClassificationNote(holdings, uiState);
+}
+
+function renderAccountAllocationPanel(accountScope = null, uiState = "SAMPLE_MODE") {
+  const target = byId("accountAllocationPanel");
+  if (!target) return;
+  const accounts = Array.isArray(accountScope?.accounts) ? accountScope.accounts : [];
+  if (!isImportedState(uiState)) {
+    target.innerHTML = '<div class="empty">Import a Fidelity CSV or sync provider holdings to view account allocation by tax bucket.</div>';
+    return;
+  }
+  if (!accounts.length) {
+    target.innerHTML = '<div class="empty">No account rows are available for the active portfolio.</div>';
+    return;
+  }
+  target.innerHTML = accounts.map((account) => renderAccountAllocationRow(account)).join("");
+}
+
+function renderAccountAllocationRow(account = {}) {
+  const bucket = account.taxBucket || {};
+  const mixRows = (account.assetMix || []).slice(0, 4).map((row) => `
+    <div>
+      <span>${escapeHtml(row.name)} · ${formatPct(row.weight)} · ${formatCompact(row.value)}</span>
+      <i style="width:${Math.min(100, Math.max(0, Number(row.weight || 0) * 100))}%"></i>
+    </div>
+  `).join("");
+  const topRows = (account.topPositions || []).map((position) => `
+    <li>
+      <span>${renderTickerLink(position.ticker)} · ${formatPct(position.weight)}</span>
+      <span>${formatCompact(position.value)}</span>
+    </li>
+  `).join("");
+  return `
+    <article class="account-allocation-row" data-tax-bucket="${escapeHtml(bucket.key || "other")}">
+      <div class="account-allocation-main">
+        <span class="tax-bucket-pill ${escapeHtml(bucket.className || "tax-bucket-other")}">${escapeHtml(bucket.label || "Other")}</span>
+        <h3>${escapeHtml(account.account || account.label || "Account")}</h3>
+        <p>${formatCurrency(account.value)} · ${formatPct(account.portfolioWeight)} of portfolio · ${account.holdingCount || 0} holding${account.holdingCount === 1 ? "" : "s"}</p>
+        <div class="account-allocation-bar" aria-label="${escapeHtml(`${account.account || "Account"} is ${formatPct(account.portfolioWeight)} of portfolio`)}"><i style="width:${Math.min(100, Math.max(0, Number(account.portfolioWeight || 0) * 100))}%"></i></div>
+        <div class="account-allocation-meta">
+          <span>${escapeHtml(account.accountTypeLabel || bucket.detail || "Account type unknown")}</span>
+          <span>Cash ${formatPct(account.cashWeight)} · daily move ${formatCurrency(account.dailyChange || 0)}</span>
+        </div>
+      </div>
+      <div class="account-allocation-mix">
+        <b>Asset mix</b>
+        <div class="account-mix-bars">${mixRows || "<span>No mix available.</span>"}</div>
+      </div>
+      <div class="account-allocation-top">
+        <b>Top positions</b>
+        <ul>${topRows || "<li><span>No positions available.</span><span></span></li>"}</ul>
+      </div>
+    </article>
+  `;
 }
 
 function renderBreakdownList(id, rows = [], uiState = "SAMPLE_MODE", options = {}) {
@@ -1333,7 +1626,7 @@ function renderAlphaHoldingRankTable(rows = [], activeFilter = "all") {
             <th scope="col">Thesis + factors</th>
             <th scope="col">Review priority</th>
             <th scope="col">Risk + source quality</th>
-            <th scope="col">Factors</th>
+            <th scope="col">Explain</th>
           </tr>
         </thead>
         <tbody>
@@ -1371,7 +1664,7 @@ function renderAlphaHoldingRankRow(row) {
       </td>
       <td class="details-cell">
         <details class="alpha-rank-details">
-          <summary aria-label="Show Alpha Engine factors and rank for ${escapeHtml(row.ticker)}">Factors & rank</summary>
+          <summary aria-label="Explain Alpha Engine score for ${escapeHtml(row.ticker)}">Explain score</summary>
           <div class="alpha-rank-details-grid">
             <div>
               <b>Quality evidence</b>
@@ -1415,7 +1708,7 @@ function renderAlphaHoldingRankRow(row) {
             <div><b>Updated</b><span>${escapeHtml(row.updatedLabel)}</span></div>
           </div>
           ${row.academicValidationWarnings.length ? `<p><b>Validation guardrail:</b> ${escapeHtml(row.academicValidationWarnings.slice(0, 2).join("; "))}</p>` : ""}
-          <p><b>Guardrail:</b> Quality rank and review priority are separate. Inspect the evidence; do not treat this as a forecast or trade instruction.</p>
+          <p><b>Guardrail:</b> Quality rank and review priority are calculated local signals, not AI-generated advice. Inspect the evidence; do not treat this as a forecast or trade instruction.</p>
           <a class="button-link" href="${tickerDetailHash(row.ticker)}">Open ${escapeHtml(row.ticker)} analysis</a>
         </details>
       </td>
@@ -1656,7 +1949,7 @@ function renderAlphaQualityScoreBreakdown(items = []) {
   const visible = (items || []).filter((item) => item?.label);
   if (!visible.length) return "<span>No score component details loaded yet.</span>";
   const finalScore = Math.round(Math.max(0, Math.min(100, visible.reduce((total, item) => total + (Number(item.points) || 0), 0))));
-  return `<span class="alpha-rank-footnote">Final quality = ${escapeHtml(finalScore)}/100 from weighted components and penalties.</span><ul class="alpha-factor-list alpha-score-breakdown">${visible.map((item) => {
+  return `<span class="alpha-rank-footnote">Final quality = ${escapeHtml(finalScore)}/100 from weighted components and penalties. Calculated local score; not an AI explanation.</span><ul class="alpha-factor-list alpha-score-breakdown">${visible.map((item) => {
     const points = Number(item.points) || 0;
     const sign = points > 0 ? "+" : "";
     return `
@@ -1668,6 +1961,39 @@ function renderAlphaQualityScoreBreakdown(items = []) {
   }).join("")}</ul>`;
 }
 
+function renderTransparentScoreBreakdown(breakdown = {}, finalLabel = "Final score") {
+  const components = (breakdown.components || []).filter((item) => item?.label);
+  if (!components.length) return "<span>No score component details loaded yet.</span>";
+  const finalScore = Number.isFinite(Number(breakdown.finalScore)) ? Math.round(Number(breakdown.finalScore)) : Math.round(Math.max(0, Math.min(100, components.reduce((total, item) => total + (Number(item.points) || 0), 0))));
+  const missing = (breakdown.missingData || []).filter(Boolean);
+  return `
+    <span class="alpha-rank-footnote">${escapeHtml(finalLabel)} = ${escapeHtml(finalScore)}/100. ${escapeHtml(breakdown.generatedBy || "Calculated local score. Not an AI explanation.")}</span>
+    ${breakdown.formula ? `<span class="alpha-rank-footnote">Formula: ${escapeHtml(breakdown.formula)}.</span>` : ""}
+    <ul class="alpha-factor-list alpha-score-breakdown">
+      ${components.map((item) => {
+        const points = Number(item.points) || 0;
+        const sign = points > 0 ? "+" : "";
+        return `
+          <li>
+            <b>${escapeHtml(item.label)} · ${sign}${points.toFixed(1)} pts</b>
+            <span>${escapeHtml(scoreComponentInputLabel(item))} · ${Math.round(Math.abs(Number(item.weight) || 0) * 100)}% ${points < 0 ? "penalty" : "weight"}</span>
+            ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
+          </li>
+        `;
+      }).join("")}
+    </ul>
+    ${missing.length ? `<p class="alpha-rank-footnote"><b>Missing-data handling:</b> ${escapeHtml(missing.slice(0, 3).join(" "))}</p>` : '<p class="alpha-rank-footnote"><b>Missing-data handling:</b> No major missing input is affecting this score.</p>'}
+  `;
+}
+
+function scoreComponentInputLabel(item = {}) {
+  if (item.inputLabel) return item.inputLabel;
+  const score = Number(item.score);
+  if (!Number.isFinite(score)) return "No numeric input";
+  if (Math.abs(score) <= 1) return `${Math.round(score01(score) * 100)}/100 input`;
+  return `${Math.round(Math.max(0, Math.min(100, score)))}/100 input`;
+}
+
 function renderAlphaReviewPriorityBreakdown(breakdown = {}) {
   if (!breakdown || !Number.isFinite(Number(breakdown.score))) {
     return "<span>No review-priority math loaded yet.</span>";
@@ -1676,7 +2002,7 @@ function renderAlphaReviewPriorityBreakdown(breakdown = {}) {
   const contributors = (rankMath.topContributors?.length ? rankMath.topContributors : rankMath.components || []).slice(0, 4);
   const penalties = (rankMath.penalties || []).filter((penalty) => Number(penalty.points));
   return `
-    <span class="alpha-rank-footnote">Review priority = max(ticker signal ${formatScore100(breakdown.signalScore)}, top recommendation ${formatScore100(breakdown.recommendationScore)}). It does not lift quality.</span>
+    <span class="alpha-rank-footnote">Review priority = max(ticker signal ${formatScore100(breakdown.signalScore)}, top recommendation ${formatScore100(breakdown.recommendationScore)}). It does not lift quality. Calculated local score; not an AI explanation.</span>
     <ul class="alpha-factor-list alpha-score-breakdown">
       <li>
         <b>${escapeHtml(titleCase(breakdown.source || "review priority"))} · ${formatScore100(breakdown.score)}</b>
@@ -2104,6 +2430,9 @@ function renderHoldingsTable(holdings, uiState = "SAMPLE_MODE") {
       <td colspan="23"><b>Sample holdings only.</b> Import a Fidelity CSV to replace these with Tucker’s real account-level rows.</td>
     </tr>
   `;
+  const emptyRow = uiState === "NO_DATA" || uiState === "IMPORT_FAILED"
+    ? `<tr><td colspan="23" class="empty holdings-empty-state"><strong>No portfolio loaded.</strong><span>Import a Fidelity CSV or holdings JSON to populate this table. You can also try sample data from Overview.</span><div class="inline-actions"><a class="button-link primary" href="#imports">Import portfolio</a><button type="button" data-overview-action="sample">Try sample data</button></div></td></tr>`
+    : '<tr><td colspan="23" class="empty">No holdings match the current filters. Clear search or filters to see loaded rows.</td></tr>';
   target.innerHTML = holdings.length
     ? `${sampleRow}${holdings.map((holding) => `
       <tr>
@@ -2132,7 +2461,7 @@ function renderHoldingsTable(holdings, uiState = "SAMPLE_MODE") {
         <td>${escapeHtml(holding.nextEarnings || "--")}</td>
       </tr>
     `).join("")}`
-    : '<tr><td colspan="23" class="empty">No holdings match the current filters.</td></tr>';
+    : emptyRow;
 }
 
 export function prepareHoldingsForView(holdings, viewMode = "account") {
@@ -2343,6 +2672,8 @@ function renderRebalancePlan(plan, uiState = "SAMPLE_MODE") {
         </div>
       </section>
 
+      ${renderRebalanceSimulator(plan.simulator)}
+
       <section class="rebalance-section">
         <h3>Cash deployment planner</h3>
         <div class="cash-plan">
@@ -2411,6 +2742,87 @@ function renderRebalancePlan(plan, uiState = "SAMPLE_MODE") {
   `;
 }
 
+function renderRebalanceSimulator(simulator = {}) {
+  if (!simulator || !simulator.readOnly) return "";
+  const trades = simulator.estimatedTrades || [];
+  const categories = simulator.categoryAdjustments || [];
+  const beforeAfter = simulator.beforeAfterRows || [];
+  const warnings = simulator.taxWarnings || [];
+  const mode = modeLabel(simulator.mode);
+  return `
+    <section class="rebalance-section" data-rebalance-simulator>
+      <h3>Rebalancing simulator</h3>
+      <div class="target-summary-grid">
+        ${targetMetric("Simulator mode", mode)}
+        ${targetMetric("Modeled sale proceeds", formatCurrency(simulator.saleProceedsModeled || 0))}
+        ${targetMetric("Cash available for adds", formatCurrency(simulator.deployableCash || 0))}
+        ${targetMetric("Portfolio after model", formatCurrency(simulator.totalAfter || simulator.totalValue || 0))}
+      </div>
+      <div class="what-if-callout">
+        <div class="badge-row"><span class="status-badge safe">Read-only</span><span class="status-badge">${escapeHtml(mode)}</span></div>
+        <b>${escapeHtml(simulator.note || "Local rebalance model.")}</b>
+        <span>Estimated adjustments are review prompts only. No brokerage order, trade ticket, or execution step exists here.</span>
+        ${warnings.length ? `<ul class="what-if-warning-list">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : ""}
+      </div>
+      <div class="grid-two">
+        <div>
+          <h3>Estimated ticker adjustments</h3>
+          <div class="mini-list">
+            ${trades.length ? trades.map(renderSimulatorTrade).join("") : '<div><span>No ticker adjustments from this mode.</span><b>Hold</b><small>Current targets are close enough, or no deployable cash/proceeds are available.</small></div>'}
+          </div>
+        </div>
+        <div>
+          <h3>Category context</h3>
+          <div class="mini-list">
+            ${categories.length ? categories.map(renderSimulatorCategory).join("") : '<div><span>No category-level drift above the review threshold.</span><b>Balanced</b><small>Asset class, sleeve, and account targets are close enough for this model.</small></div>'}
+          </div>
+        </div>
+      </div>
+      <div class="target-table-wrap">
+        <table class="target-table compact-table">
+          <thead>
+            <tr><th>Ticker</th><th>Current</th><th>Modeled after</th><th>Target</th><th>Drift after</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            ${beforeAfter.length ? beforeAfter.map((row) => `
+              <tr>
+                <td><b>${renderTickerLink(row.ticker || row.key)}</b><small>Before drift ${formatSignedPct(row.driftBefore)}</small></td>
+                <td class="number-cell">${formatPct(row.currentWeight)}<small>${formatCurrency(row.currentValue)}</small></td>
+                <td class="number-cell">${formatPct(row.afterWeight)}<small>${formatCurrency(row.simulatedValue)}</small></td>
+                <td class="number-cell">${formatPct(row.targetWeight)}</td>
+                <td class="number-cell ${row.driftAfter >= 0 ? "negative" : "positive"}">${formatSignedPct(row.driftAfter)}<small>${formatSignedCurrency(row.driftValueAfter)}</small></td>
+                <td><span class="pill ${targetStatusClass(row.statusAfter)}">${escapeHtml(row.statusAfter)}</span></td>
+              </tr>
+            `).join("") : '<tr><td colspan="6">No before/after rows available yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderSimulatorTrade(trade = {}) {
+  const amount = trade.amount ? formatCurrency(trade.amount) : "Review";
+  const delta = trade.valueDelta ? formatSignedCurrency(trade.valueDelta) : "No modeled change";
+  return `
+    <div>
+      <span>${escapeHtml(trade.action || "Review")} · ${trade.ticker ? renderTickerLink(trade.ticker) : escapeHtml(trade.key || "Target")}</span>
+      <b>${amount}</b>
+      <small>${delta} · ${escapeHtml(trade.rationale || "Review this adjustment in context.")}${trade.taxableWarning ? ` ${escapeHtml(trade.taxableWarning)}` : ""}</small>
+    </div>
+  `;
+}
+
+function renderSimulatorCategory(row = {}) {
+  return `
+    <div>
+      <span>${escapeHtml(scopeLabel(row.scope))} · ${escapeHtml(row.key || "Category")}</span>
+      <b>${escapeHtml(row.reviewAction || row.status || "Review")}</b>
+      <small>${formatSignedPct(row.driftWeight)} · ${formatSignedCurrency(row.driftValue)} · ${escapeHtml(row.rationale || "Review category drift before changing holdings.")}</small>
+    </div>
+  `;
+}
+
 function renderSleeves(sleeves, uiState = "SAMPLE_MODE") {
   const target = byId("sleevePanel");
   if (!target) return;
@@ -2433,20 +2845,20 @@ function renderSleeves(sleeves, uiState = "SAMPLE_MODE") {
   `).join("");
 }
 
-function renderThesisTracker(rows, summary) {
+function renderThesisTracker(rows, summary, snapshots = []) {
   const target = byId("thesisPanel");
-  if (!target) return;
-  target.innerHTML = `
-    <div class="risk-grid">
-      <div class="risk-stat"><span>Needs attention</span><b>${summary?.needsAttention ?? 0}</b></div>
-      <div class="risk-stat"><span>Missing</span><b>${summary?.missing ?? 0}</b></div>
-      <div class="risk-stat"><span>Stale</span><b>${summary?.stale ?? 0}</b></div>
-      <div class="risk-stat"><span>Alpha review</span><b>${summary?.alphaReview ?? 0}</b></div>
-      <div class="risk-stat"><span>Above target risk</span><b>${summary?.aboveTargetWithWeakOrStale ?? 0}</b></div>
-      <div class="risk-stat"><span>Missing guardrails</span><b>${summary?.leveragedGuardrailMissing ?? 0}</b></div>
-    </div>
-    <div class="thesis-list">
-      ${rows.slice(0, 10).map((row) => `
+  if (target) {
+    target.innerHTML = `
+      <div class="risk-grid">
+        <div class="risk-stat"><span>Needs attention</span><b>${summary?.needsAttention ?? 0}</b></div>
+        <div class="risk-stat"><span>Missing</span><b>${summary?.missing ?? 0}</b></div>
+        <div class="risk-stat"><span>Stale</span><b>${summary?.stale ?? 0}</b></div>
+        <div class="risk-stat"><span>Alpha review</span><b>${summary?.alphaReview ?? 0}</b></div>
+        <div class="risk-stat"><span>Above target risk</span><b>${summary?.aboveTargetWithWeakOrStale ?? 0}</b></div>
+        <div class="risk-stat"><span>Missing guardrails</span><b>${summary?.leveragedGuardrailMissing ?? 0}</b></div>
+      </div>
+      <div class="thesis-list">
+        ${rows.slice(0, 10).map((row) => `
         <article class="thesis-card ${escapeHtml(thesisStatusClass(row.thesisStatus))}">
           <div class="thesis-card-head">
             <div>
@@ -2467,8 +2879,57 @@ function renderThesisTracker(rows, summary) {
           ${row.reviewReasons.length ? `<ul class="why-list">${row.reviewReasons.slice(0, 4).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
           ${row.alphaImpact.summary ? `<p class="section-note"><b>Alpha signal:</b> ${escapeHtml(row.alphaImpact.summary)}</p>` : ""}
         </article>
-      `).join("") || '<div class="empty"><strong>No thesis rows yet.</strong><span>Import holdings to build a thesis review list.</span></div>'}
+        `).join("") || '<div class="empty"><strong>No thesis rows yet.</strong><span>Import holdings to build a thesis review list.</span></div>'}
+      </div>
+    `;
+  }
+  renderThesisSnapshotHistory(rows, snapshots);
+}
+
+function renderThesisSnapshotHistory(rows = [], snapshots = []) {
+  const target = byId("thesisSnapshotPanel");
+  if (!target) return;
+  const normalized = [...(snapshots || [])]
+    .sort((a, b) => String(b.capturedAt || "").localeCompare(String(a.capturedAt || "")));
+  if (!normalized.length) {
+    target.innerHTML = `
+      <div class="empty">
+        <strong>No thesis snapshots yet.</strong>
+        <span>Save a snapshot after editing a thesis to preserve what Tucker believed at that point in time.</span>
+      </div>
+    `;
+    return;
+  }
+  const currentByTicker = new Map((rows || []).map((row) => [normalizeTickerSymbol(row.ticker), row]));
+  target.innerHTML = `
+    <div class="provider-status-note">
+      <b>Thesis history</b>
+      <span>${normalized.length} saved snapshot${normalized.length === 1 ? "" : "s"} across ${new Set(normalized.map((snapshot) => snapshot.ticker)).size} ticker${new Set(normalized.map((snapshot) => snapshot.ticker)).size === 1 ? "" : "s"}. User-written and generated summaries are labeled separately.</span>
     </div>
+    <div class="thesis-list">
+      ${normalized.slice(0, 8).map((snapshot) => renderThesisSnapshotCard(snapshot, currentByTicker.get(normalizeTickerSymbol(snapshot.ticker)))).join("")}
+    </div>
+  `;
+}
+
+function renderThesisSnapshotCard(snapshot = {}, currentRow = null) {
+  const comparison = currentRow ? compareThesisSnapshotToProfile(snapshot, currentRow) : null;
+  const sourceLabel = snapshot.sourceType === "generated" ? "Generated" : "User-written";
+  return `
+    <article class="thesis-card">
+      <div class="thesis-card-head">
+        <div class="badge-row">
+          <span class="status-badge">${escapeHtml(sourceLabel)}</span>
+          <span class="status-badge">${escapeHtml(snapshot.profile?.thesisStatus || "Unrated")}</span>
+          <span class="status-badge">${escapeHtml(snapshot.profile?.confidenceLevel || "Unrated")}</span>
+        </div>
+        <b>${renderTickerLink(snapshot.ticker)}</b>
+        <small>${escapeHtml(shortDateTime(snapshot.capturedAt))} · ${escapeHtml(snapshot.sourceLabel || sourceLabel)}</small>
+      </div>
+      <p>${escapeHtml(snapshot.profile?.whyOwned || snapshot.riskSummary?.summary || "Snapshot saved without a thesis note.")}</p>
+      ${comparison ? `<p class="section-note"><b>Current comparison:</b> ${escapeHtml(comparison.summary)}</p>` : '<p class="section-note">Current comparison unavailable because this ticker is not in the active thesis rows.</p>'}
+      ${comparison?.changes?.length ? `<ul class="why-list">${comparison.changes.slice(0, 3).map((change) => `<li>${escapeHtml(change.summary)}</li>`).join("")}</ul>` : ""}
+    </article>
   `;
 }
 
@@ -2527,6 +2988,7 @@ function renderWatchlistIdeaCard(row = {}) {
       </div>
       <div class="ticker-mini-metrics">
         <div><span>Exposure</span><b>${row.owned ? formatCurrency(row.marketValue) : "Not owned"}</b><small>${row.owned ? formatPct(row.portfolioWeight) : "Watchlist only"}</small></div>
+        <div><span>Quote</span><b>${row.quotePrice ? formatCurrency(row.quotePrice) : "Not available"}</b><small>${row.quotePrice ? `${formatSignedPct(row.dailyChangePercent || 0)} today${row.quoteSourceLabel ? ` · ${escapeHtml(row.quoteSourceLabel)}` : ""}` : "Refresh market data to fill"}</small></div>
         <div><span>Signal score</span><b>${row.signalScore ? `${Math.round(row.signalScore)}/100` : "--"}</b><small>${escapeHtml(row.signalAction || "No current signal")}</small></div>
         <div><span>Source</span><b>${escapeHtml(watchlistSourceLabel(row.signalSource))}</b><small>${escapeHtml(row.sourceOfIdea || "Manual")}</small></div>
         <div><span>Review</span><b>${escapeHtml(row.reviewState || "needs review")}</b><small>${escapeHtml(row.lastReviewed || "Not reviewed")}</small></div>
@@ -2815,6 +3277,7 @@ function whatIfActionLabel(action = "") {
 
 function renderRiskDeepDive(risk = {}, breakdowns = {}, overview = {}, holdings = [], uiState = "SAMPLE_MODE", marketDataStatus = {}) {
   const decision = risk.decisionDashboard || {};
+  renderRiskConcentrationSummary(decision.concentrationInterpretation, decision.topPositionWeights || risk.topHoldings || [], decision.leveragedEtfExposure, uiState);
   renderRiskTopPositions(decision.topPositionWeights || risk.topHoldings || [], uiState, marketDataStatus);
   const marketNote = marketDataStatus.status
     ? ` Market movement source: ${marketDataDisplayLabel(marketDataStatus)}. ${marketDataDisplayDetail(marketDataStatus)}`
@@ -2825,6 +3288,35 @@ function renderRiskDeepDive(risk = {}, breakdowns = {}, overview = {}, holdings 
   renderRiskThemeExposurePanel(decision.themeExposure || [], uiState);
   renderRiskAssetMixPanel(decision.assetMix || {}, decision.cashExposure, uiState);
   renderRiskCorrelationPanel(decision.correlationPlaceholder, uiState);
+}
+
+function renderRiskConcentrationSummary(interpretation = {}, topPositions = [], leverageSummary = {}, uiState = "SAMPLE_MODE") {
+  const target = byId("riskConcentrationSummaryPanel");
+  if (!target) return;
+  if (!isImportedState(uiState)) {
+    target.innerHTML = '<div class="empty"><strong>No real concentration summary yet.</strong><span>Import holdings to calculate top-position, top-5, top-10, sector, and leverage concentration.</span></div>';
+    return;
+  }
+  const top = topPositions[0] || {};
+  const drivers = Array.isArray(interpretation.drivers) ? interpretation.drivers : [];
+  target.innerHTML = `
+    <article class="risk-summary-card">
+      <div>
+        <div>
+          <h3>${escapeHtml(interpretation.headline || "Concentration needs review")}</h3>
+          <p>${escapeHtml(interpretation.summary || "Deterministic local read from current position weights and source-labeled exposure data.")}</p>
+        </div>
+        ${renderRiskStatusBadge(interpretation.status || "normal")}
+      </div>
+      <div class="risk-summary-drivers">
+        <div><span>Largest holding</span><b>${escapeHtml(top.name || "None")} · ${formatPct(top.weight || 0)}</b></div>
+        <div><span>Position threshold</span><b>${escapeHtml(top.thresholdLabel || "Below 5%")}</b></div>
+        <div><span>Leveraged notional</span><b>${formatPct(leverageSummary?.notionalWeight || 0)}</b></div>
+        <div><span>Next inspection</span><b>${escapeHtml(interpretation.nextStep || "Open the largest risk row before changing exposure.")}</b></div>
+      </div>
+      ${drivers.length ? `<ul>${drivers.slice(0, 5).map((driver) => `<li>${escapeHtml(driver)}</li>`).join("")}</ul>` : ""}
+    </article>
+  `;
 }
 
 function renderRiskTopPositions(topHoldings = [], uiState = "SAMPLE_MODE", marketDataStatus = {}) {
@@ -2842,13 +3334,14 @@ function renderRiskTopPositions(topHoldings = [], uiState = "SAMPLE_MODE", marke
       const weight = row.weight ?? row.portfolioWeight;
       const details = row.explanation || `${ticker} is ${formatPct(weight)} of portfolio value.`;
       const sourceLabel = marketDataStatus.status ? ` · ${marketDataDisplayLabel(marketDataStatus)}` : "";
+      const thresholdText = row.thresholdFlags?.length ? ` · ${row.thresholdFlags.map((flag) => flag.label).join(", ")}` : "";
       return `
         <article class="risk-row ${escapeHtml(row.status || "normal")}">
           <div class="risk-row-main ranked">
             <span class="risk-rank">${index + 1}</span>
             <div>
               <b>${ticker ? renderTickerLink(ticker) : escapeHtml(row.name)}</b>
-              <span>${escapeHtml(label)}${escapeHtml(sourceLabel)}</span>
+              <span>${escapeHtml(label)}${escapeHtml(sourceLabel)}${escapeHtml(thresholdText)}</span>
             </div>
           </div>
           <div class="risk-row-value">
@@ -2924,10 +3417,33 @@ function renderLeveragedExposurePanel(leverageSummary = {}, holdings = [], overv
       <div class="risk-row-value">
         <b>${formatCurrency(leverageSummary.notionalValue ?? overview.leveragedNotionalExposure)}</b>
         <span>${formatPct(leverageSummary.notionalWeight ?? divide(overview.leveragedNotionalExposure, overview.totalValue))} notional</span>
+        <span>${formatCurrency(leverageSummary.directValue ?? overview.leveragedEtfExposure)} direct · ${formatPct(leverageSummary.directWeight ?? divide(overview.leveragedEtfExposure, overview.totalValue))}</span>
         ${renderRiskStatusBadge(leverageSummary.status || "normal")}
       </div>
     </article>
+    ${renderLeveragedDrawdownScenarios(leverageSummary)}
     ${marketDataStatus.status ? `<p class="section-note">Market data source: ${escapeHtml(marketDataDisplayLabel(marketDataStatus))}. ${escapeHtml(marketDataDisplayDetail(marketDataStatus))}</p>` : ""}
+  `;
+}
+
+export function renderLeveragedDrawdownScenarios(leverageSummary = {}) {
+  const scenarios = Array.isArray(leverageSummary.scenarios) ? leverageSummary.scenarios : [];
+  if (!scenarios.length) return "";
+  return `
+    <article id="riskLeveragedVolatilityDragModule" class="leveraged-education">
+      <h3>Volatility Drag + Drawdown Scenarios</h3>
+      <p>${escapeHtml(leverageSummary.dailyResetExplanation || "Daily-reset leveraged ETFs target their stated multiple for one trading day, not over every long-term holding period.")}</p>
+      <div id="riskLeveragedDrawdownScenarios" class="leveraged-scenario-grid">
+        ${scenarios.map((scenario) => `
+          <div>
+            <span>Underlying ${escapeHtml(scenario.underlyingMoveLabel || formatPct(scenario.underlyingMove || 0))}</span>
+            <b>${formatSignedPct(scenario.estimatedProductMove || 0)}</b>
+            <small>${formatSignedCurrency(scenario.estimatedPortfolioImpact || 0)} portfolio impact · ${formatSignedPct(scenario.estimatedPortfolioImpactPct || 0)}</small>
+          </div>
+        `).join("")}
+      </div>
+      <p>${escapeHtml(leverageSummary.volatilityDragExplanation || "Volatility drag can make multi-day results differ from a simple multiple of the underlying index return.")}</p>
+    </article>
   `;
 }
 
@@ -2953,7 +3469,7 @@ function renderRiskAssetMixPanel(assetMix = {}, cashExposure = {}, uiState = "SA
     if (cashTarget) cashTarget.innerHTML = "";
     return;
   }
-  const assetRows = [assetMix.individualStock, assetMix.etf].filter(Boolean);
+  const assetRows = [assetMix.individualStock, assetMix.normalEtf || assetMix.etf, assetMix.leveragedEtf].filter(Boolean);
   if (assetTarget) {
     assetTarget.innerHTML = assetRows.length
       ? assetRows.map((row) => renderRiskDecisionRow(row, "Inspect holdings")).join("")
@@ -3201,6 +3717,10 @@ function renderRiskPanel(risk, overview, uiState = "SAMPLE_MODE") {
       <div class="risk-stat"><span>QQQ/VGT/NVDA stack</span><b>${formatCurrency(risk.overlap.qqqVgtNvdaStack)}</b></div>
       <div class="risk-stat"><span>Semiconductor stack</span><b>${formatCurrency(risk.overlap.semiconductorStack)}</b></div>
     </div>
+    <details class="alpha-rank-details score-explain-details">
+      <summary aria-label="Explain concentration score">Explain score</summary>
+      ${renderTransparentScoreBreakdown(risk.concentrationScoreBreakdown, "Concentration score")}
+    </details>
     <h3>Stress Tests</h3>
     <div class="stress-list">
       ${risk.stressTests.map((test) => `
@@ -3214,7 +3734,15 @@ function renderRiskPanel(risk, overview, uiState = "SAMPLE_MODE") {
     <h3>Top Risk Contributors</h3>
     <div class="mini-list">
       ${risk.riskContributors.slice(0, 10).map((holding) => `
-        <div><span>${renderTickerLink(holding.ticker)}</span><b>${holding.riskScore}/100</b><small>${formatPct(holding.portfolioWeight)}</small></div>
+        <div class="risk-contributor-row">
+          <span>${renderTickerLink(holding.ticker)}</span>
+          <b>${holding.riskScore}/100</b>
+          <small>${formatPct(holding.portfolioWeight)}</small>
+          <details class="alpha-rank-details score-explain-details">
+            <summary aria-label="Explain risk score for ${escapeHtml(holding.ticker || holding.name || "holding")}">Explain score</summary>
+            ${renderTransparentScoreBreakdown(holding.riskScoreBreakdown, `${holding.ticker || "Holding"} risk score`)}
+          </details>
+        </div>
       `).join("")}
     </div>
   `;
@@ -3262,6 +3790,7 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     (options.marketDataSnapshot?.quotes || []).find((row) => normalizeTickerSymbol(row.ticker) === ticker) ||
     null;
   const thesisRow = (options.thesisRows || []).find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
+  const thesisSnapshots = thesisSnapshotsForTicker(options.thesisSnapshots || [], ticker).slice(0, 6);
   const tickerSignal = (options.tickerSignals || []).find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const watchlistIdea = (options.allWatchlistIdeaRows || options.watchlistIdeaRows || [])
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
@@ -3317,6 +3846,7 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
   const derivedSignalIdea = !owned && !samplePosition && Boolean(watchlistIdea?.derived && !savedWatchlistIdea);
   const displayPrice = quote?.price ?? (shares ? marketValue / shares : firstHolding.price);
   const priceAvailable = Number.isFinite(Number(displayPrice)) && (Boolean(quote) || hasPositionRows);
+  const providerCoverage = tickerProviderCoverage(options.marketDataStatus || options.marketDataSnapshot?.status || {}, ticker, quote);
   const model = {
     ticker,
     name: firstHolding.name || quote?.name || ticker,
@@ -3333,6 +3863,7 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     quote,
     historicalPrices,
     thesisRow,
+    thesisSnapshots,
     tickerSignal,
     watchlistIdea,
     journalEntries,
@@ -3361,8 +3892,11 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     riskLevel: thesisRow?.riskLevel || firstHolding.riskLevel || "Unrated",
     thesisStatus: thesisRow?.thesisStatus || firstHolding.thesisStatus || "No thesis",
     confidenceLevel: thesisRow?.confidenceLevel || watchlistIdea?.conviction || firstHolding.confidenceLevel || "Unrated",
-    marketDataStatus: options.marketDataStatus || options.marketDataSnapshot?.status || {}
+    marketDataStatus: options.marketDataStatus || options.marketDataSnapshot?.status || {},
+    providerCoverage,
+    providerAvailability: tickerProviderAvailability(providerCoverage, quote, options.marketDataStatus || options.marketDataSnapshot?.status || {})
   };
+  model.contextLinks = buildTickerContextLinks(model);
   model.thesisRiskSummary = buildThesisRiskSummary(thesisRow || {}, {
     holding: firstHolding,
     sourceMode: options.thesisSummarySourceMode || "local deterministic"
@@ -3436,13 +3970,7 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
   const marketFreshnessLine = marketDataFreshnessLine(model.marketDataStatus, quote);
   panel.innerHTML = `
     ${model.tracked ? "" : `<div class="empty"><strong>${escapeHtml(model.ticker)} is not in local holdings or sample watch data.</strong><span>Add it to holdings/watchlist data later to populate this page.</span></div>`}
-    <div class="connector-actions ticker-context-actions" aria-label="Ticker page shortcuts">
-      <a class="button-link" href="#holdings">Back to Holdings</a>
-      <a class="button-link" href="#risk">Review Risk</a>
-      <a class="button-link" href="#alpha">Open Alpha</a>
-      <a class="button-link" href="#watchlist">${model.watchlistOnly || model.savedWatchlistIdea ? "Open Watchlist" : "Add research note"}</a>
-      <a class="button-link" href="#journal">Log Decision</a>
-    </div>
+    ${renderTickerContextActions(model)}
     <div class="ticker-detail-grid">
       <div class="ticker-hero">
         <article class="ticker-price-card">
@@ -3484,7 +4012,7 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
         <article class="ticker-note-card">
           <span>Market data status</span>
           <b>${escapeHtml(dataModeLabel(marketDataMode(model.marketDataStatus, quote)))}</b>
-          <p>${escapeHtml(model.marketDataStatus?.detail || "Market data provider: Not configured. Sample data keeps screens wired for later APIs.")}</p>
+          <p>${escapeHtml(model.providerAvailability?.summary || model.marketDataStatus?.detail || "Market data provider: Not configured. Sample data keeps screens wired for later APIs.")}</p>
           ${marketFreshnessLine ? `<p>${escapeHtml(marketFreshnessLine)}</p>` : ""}
         </article>
       </div>
@@ -3527,6 +4055,30 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
       </div>
     </section>
   `;
+}
+
+function renderTickerContextActions(model = {}) {
+  const links = Array.isArray(model.contextLinks) ? model.contextLinks : buildTickerContextLinks(model);
+  return `
+    <div class="connector-actions ticker-context-actions" aria-label="Ticker page shortcuts">
+      ${links.map((link) => `<a class="button-link" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`).join("")}
+    </div>
+  `;
+}
+
+function buildTickerContextLinks(model = {}) {
+  const links = [
+    { href: "#holdings", label: "Back to Holdings", reason: "position" },
+    { href: "#watchlist", label: model.watchlistOnly || model.savedWatchlistIdea ? "Back to Watchlist" : "Open Watchlist", reason: "watchlist" }
+  ];
+  if (model.owned || model.samplePosition) {
+    links.push({ href: "#risk", label: "Review Risk", reason: "risk" });
+  } else {
+    links.push({ href: "#market-intelligence", label: model.watchlistOnly || model.savedWatchlistIdea ? "Open Market Intelligence" : "Back to Signals", reason: "signals" });
+  }
+  links.push({ href: "#alpha", label: "Open Alpha", reason: "alpha" });
+  links.push({ href: "#journal", label: "Log Decision", reason: "journal" });
+  return links;
 }
 
 function renderTickerRecentExternalUpdates(model) {
@@ -4252,8 +4804,46 @@ function renderTickerThesisRisk(model) {
             <p class="section-note">${escapeHtml(summary.caveat || "Local deterministic summary; no AI text was generated.")}</p>
           </details>
         ` : '<div class="empty"><strong>No thesis profile yet.</strong><span>Open Thesis to document why Tucker owns or tracks this ticker, invalidation criteria, and review triggers.</span><a class="button-link" href="#thesis">Open Thesis</a></div>'}
+        ${renderTickerThesisSnapshotHistory(model)}
       </div>
     </section>
+  `;
+}
+
+function renderTickerThesisSnapshotHistory(model = {}) {
+  const snapshots = model.thesisSnapshots || [];
+  if (!snapshots.length) {
+    return `
+      <div class="empty">
+        <strong>No saved thesis history yet.</strong>
+        <span>Open Thesis and save a snapshot to track what Tucker believed over time.</span>
+      </div>
+    `;
+  }
+  return `
+    <details class="signal-details" open>
+      <summary>Thesis history</summary>
+      <div class="thesis-list">
+        ${snapshots.map((snapshot, index) => {
+          const comparison = compareThesisSnapshotToProfile(snapshot, model.thesisRow || snapshot.profile || {});
+          return `
+            <article class="thesis-card">
+              <div class="thesis-card-head">
+                <div class="badge-row">
+                  <span class="status-badge">${escapeHtml(snapshot.sourceType === "generated" ? "Generated" : "User-written")}</span>
+                  <span class="status-badge">${index === 0 ? "Latest" : "Prior"}</span>
+                </div>
+                <b>${escapeHtml(shortDateTime(snapshot.capturedAt))}</b>
+                <small>${escapeHtml(snapshot.profile?.thesisStatus || "Unrated")} · ${escapeHtml(snapshot.profile?.confidenceLevel || "Unrated")}</small>
+              </div>
+              <p>${escapeHtml(snapshot.profile?.whyOwned || snapshot.riskSummary?.summary || "Snapshot saved without a thesis note.")}</p>
+              <p class="section-note"><b>Compared with current:</b> ${escapeHtml(comparison.summary)}</p>
+              ${comparison.changes.length ? `<ul class="why-list">${comparison.changes.slice(0, 3).map((change) => `<li>${escapeHtml(change.summary)}</li>`).join("")}</ul>` : ""}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </details>
   `;
 }
 
@@ -4299,6 +4889,7 @@ function renderTickerDataQuality(model) {
           <b>${escapeHtml(model.dataQuality.summary)}</b>
           <span>${escapeHtml(model.dataQuality.detail)}</span>
         </div>
+        ${renderTickerProviderCoverage(model)}
         <div class="ticker-coverage-grid">
           ${model.dataQuality.rows.map((row) => `
             <div class="ticker-coverage-item ${escapeHtml(row.tone)}"><span>${escapeHtml(row.label)}</span><b>${escapeHtml(row.status)}</b><small>${escapeHtml(row.detail)}</small></div>
@@ -4307,6 +4898,109 @@ function renderTickerDataQuality(model) {
       </div>
     </section>
   `;
+}
+
+function renderTickerProviderCoverage(model = {}) {
+  const coverage = model.providerCoverage || {};
+  const fields = Array.isArray(coverage.fieldCoverage) ? coverage.fieldCoverage : [];
+  if (!fields.length) {
+    return `
+      <div class="ticker-provider-coverage">
+        <div>
+          <b>Provider coverage</b>
+          <span>No per-ticker provider diagnostics yet. Refresh market data from Data Sources after loading a portfolio.</span>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="ticker-provider-coverage">
+      <div>
+        <b>Provider coverage</b>
+        <span>${escapeHtml(coverage.coverageSummary || "Coverage pending")} · ${escapeHtml(coverageGapSummary(coverage))}</span>
+      </div>
+      <div class="coverage-chip-row" aria-label="Provider field coverage for ${escapeHtml(model.ticker)}">
+        ${fields.map((field) => `
+          <span class="coverage-chip ${coverageFieldBadgeClass(field)}">
+            <b>${escapeHtml(field.label)}</b>
+            <small>${escapeHtml(coverageFieldStatusLabel(field))}</small>
+          </span>
+        `).join("")}
+      </div>
+      ${coverage.lastError ? `<p class="section-note">Provider note: ${escapeHtml(String(coverage.lastError))}</p>` : ""}
+    </div>
+  `;
+}
+
+function tickerProviderCoverage(marketDataStatus = {}, ticker = "", quote = null) {
+  const normalizedTicker = normalizeTicker(ticker);
+  const diagnostics = Array.isArray(marketDataStatus.quoteDiagnostics) ? marketDataStatus.quoteDiagnostics : [];
+  const row = diagnostics.find((item) => normalizeTicker(item.ticker) === normalizedTicker);
+  if (row) return row;
+  if (!quote) return { ticker: normalizedTicker, fieldCoverage: [] };
+  const status = quote.dataFreshness || quote.cacheStatus || "unknown";
+  const field = (key, label, available, resourceStatus = status) => ({
+    key,
+    label,
+    missingLabel: label.toLowerCase(),
+    available,
+    status: available ? resourceStatus : "missing",
+    resourceStatus
+  });
+  const fields = [
+    field("quote", "Quote", Number(quote.price || 0) > 0),
+    field("week52Range", "52-week high/low", Number(quote.fiftyTwoWeekHigh || 0) > 0 && Number(quote.fiftyTwoWeekLow || 0) > 0),
+    field("volume", "Volume", Number(quote.volume || 0) > 0),
+    field("averageVolume", "Average volume", Number(quote.averageVolume || 0) > 0),
+    field("marketCap", "Market cap", Number(quote.marketCap || 0) > 0),
+    field("companyProfile", "Company profile", Boolean(quote.name && normalizeTicker(quote.name) !== normalizeTicker(quote.ticker))),
+    field("sectorIndustry", "Sector/industry", Boolean((quote.sector && quote.sector !== "Unknown") || (quote.industry && quote.industry !== "Unknown"))),
+    field("historicalCandles", "Historical candles", Array.isArray(quote.historicalPrices) && quote.historicalPrices.length > 0)
+  ];
+  const available = fields.filter((item) => item.available).map((item) => item.label);
+  const missing = fields.filter((item) => !item.available).map((item) => item.missingLabel);
+  return {
+    ticker: normalizedTicker,
+    fieldCoverage: fields,
+    availableFields: available,
+    missingFields: missing,
+    unavailableFields: missing,
+    staleFields: status === "stale" ? available : [],
+    coverageSummary: `${available.length}/${fields.length} fields available`,
+    coverageStatus: missing.length ? "partial" : "complete",
+    lastError: quote.lastError?.message || quote.lastError || ""
+  };
+}
+
+function tickerProviderAvailability(coverage = {}, quote = null, marketDataStatus = {}) {
+  const fields = Array.isArray(coverage.fieldCoverage) ? coverage.fieldCoverage : [];
+  const availableCount = fields.filter((field) => field.available).length;
+  const missingFields = Array.isArray(coverage.missingFields)
+    ? coverage.missingFields
+    : fields.filter((field) => !field.available).map((field) => field.missingLabel || field.label).filter(Boolean);
+  const staleFields = Array.isArray(coverage.staleFields) ? coverage.staleFields : [];
+  const statusLabel = dataModeLabel(marketDataMode(marketDataStatus, quote));
+  if (!quote && !fields.length) {
+    return {
+      statusLabel,
+      coverageStatus: "missing",
+      availableCount: 0,
+      missingFields,
+      staleFields,
+      summary: `${statusLabel}. No ticker-level quote or provider diagnostics are available yet.`
+    };
+  }
+  const coverageSummary = coverage.coverageSummary || `${availableCount}/${fields.length || 0} fields available`;
+  const missingSummary = missingFields.length ? ` Missing: ${missingFields.slice(0, 4).join(", ")}${missingFields.length > 4 ? `, +${missingFields.length - 4} more` : ""}.` : "";
+  const staleSummary = staleFields.length ? ` Stale: ${staleFields.slice(0, 3).join(", ")}${staleFields.length > 3 ? `, +${staleFields.length - 3} more` : ""}.` : "";
+  return {
+    statusLabel,
+    coverageStatus: coverage.coverageStatus || (missingFields.length ? "partial" : "complete"),
+    availableCount,
+    missingFields,
+    staleFields,
+    summary: `${statusLabel}. ${coverageSummary}.${missingSummary}${staleSummary}`.trim()
+  };
 }
 
 function buildTickerDataQuality(model) {
@@ -4496,6 +5190,7 @@ function renderMarketDrivers(report = null) {
   }
   setStatusBadge("marketDriversSourceBadge", report.sourceStatus || "Source-labeled", dataModeBadgeClass(report.sourceMode));
   heroTarget.innerHTML = `
+    ${renderMarketRegimeCard(report.marketRegime)}
     <div class="market-driver-hero-grid">
       ${renderMarketDriverScopeCard(report.broadMarket)}
       ${renderMarketDriverScopeCard(report.aiTech)}
@@ -4509,6 +5204,43 @@ function renderMarketDrivers(report = null) {
     ? driverRows.slice(0, 10).map(renderMarketDriverRow).join("")
     : '<div class="empty"><strong>No ranked drivers yet.</strong><span>Market prices, social rows, or event read-throughs need to be loaded first.</span></div>';
   sourceTarget.innerHTML = renderMarketDriverSourceSummary(report);
+}
+
+function renderMarketRegimeCard(regime = null) {
+  if (!regime) return "";
+  const signals = (regime.signals || []).slice(0, 6);
+  return `
+    <article class="market-driver-card market-regime-card">
+      <div class="badge-row">
+        <span class="status-badge ${escapeHtml(marketRegimeBadgeClass(regime.regime))}">${escapeHtml(regime.label || "Mixed")}</span>
+        <span class="status-badge">${escapeHtml(regime.confidenceLabel || "Low")} confidence</span>
+        <span class="status-badge ${escapeHtml(dataModeBadgeClass(regime.sourceMode))}">${escapeHtml(regime.sourceStatus || "Source-labeled")}</span>
+      </div>
+      <div>
+        <h3>Market Regime</h3>
+        <div class="move-line"><b>${escapeHtml(regime.summary || "Rule-based regime read pending.")}</b></div>
+      </div>
+      <p>${escapeHtml(regime.interpretation || "Use this as source-labeled context only.")}</p>
+      <div class="target-summary-grid">
+        ${targetMetric("Risk-on score", `${escapeHtml(regime.riskOnScore ?? 0)}`)}
+        ${targetMetric("Risk-off score", `${escapeHtml(regime.riskOffScore ?? 0)}`)}
+        ${targetMetric("Defensive score", `${escapeHtml(regime.defensiveScore ?? 0)}`)}
+        ${targetMetric("Data gaps", `${(regime.missingData || []).length}`)}
+      </div>
+      <div class="market-driver-signal-grid">
+        ${signals.map((signal) => `
+          <div class="provider-status-card ${signal.status === "missing" ? "badge-source-not-configured" : ""}">
+            <div><b>${escapeHtml(signal.label)}</b><span>${escapeHtml(titleCase(String(signal.status || "mixed").replaceAll("-", " ")))}</span></div>
+            <p>${escapeHtml(signal.reading || "Data unavailable")}</p>
+          </div>
+        `).join("")}
+      </div>
+      <div class="news-links">
+        <a href="#risk">Review portfolio risk</a>
+        <a href="#data-sources">Check sources</a>
+      </div>
+    </article>
+  `;
 }
 
 function renderMarketDriverScopeCard(scope = {}) {
@@ -4593,6 +5325,13 @@ function marketDriverDirectionClass(direction = "") {
   if (direction === "up") return "safe";
   if (direction === "down") return "medium";
   if (direction === "unknown") return "demo";
+  return "";
+}
+
+function marketRegimeBadgeClass(regime = "") {
+  if (regime === "risk-on") return "safe";
+  if (regime === "risk-off" || regime === "defensive") return "medium";
+  if (regime === "overbought" || regime === "oversold") return "demo";
   return "";
 }
 
@@ -5468,7 +6207,7 @@ function renderProviderReadiness(readiness = {}) {
   `;
 }
 
-function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = []) {
+export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = []) {
   const target = byId("dataSourceHealthPanel");
   if (!target) return;
   const providerStatuses = Object.values(readiness.providerStatuses || {});
@@ -5521,7 +6260,13 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       demoReady: importAvailability.demoReady,
       availabilityLabel: importAvailability.label,
       guidance: importAvailability.guidance,
-      className: importAvailability.className
+      className: importAvailability.className,
+      providerBacked: false,
+      sourceType: "Local portfolio state",
+      lastSuccessfulAt: report?.importedAt || portfolioStatus?.loadedAt || fidelityStatus?.lastSync,
+      fallbackReason: portfolioStatus?.samplePortfolio
+        ? "Sample portfolio is active until a CSV/JSON import or provider sync is applied."
+        : !portfolioStatus?.realPortfolio ? "No active imported portfolio is loaded yet." : ""
     },
     {
       label: "Market data",
@@ -5533,7 +6278,13 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: marketAvailability.label,
       guidance: marketAvailability.guidance,
       metadata: marketDataMeta,
-      diagnostics: marketDataDiagnosticsHtml(marketDataStatus, marketDataConfig)
+      diagnostics: marketDataDiagnosticsHtml(marketDataStatus, marketDataConfig),
+      providerBacked: Boolean(marketDataStatus.liveProviderCalls || marketDataConfig.liveProviderCalls),
+      sourceType: "Provider-backed quotes",
+      lastSuccessfulAt: marketDataStatus.lastSuccessfulRefresh || marketDataStatus.fetchedAt || marketDataStatus.asOf,
+      fallbackReason: marketAvailability.demoReady
+        ? "Sample quote context is active until Finnhub or another provider is configured."
+        : marketAvailability.configuredPending ? marketAvailability.guidance : ""
     },
     {
       label: "Reddit / social mentions",
@@ -5557,7 +6308,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: redditAvailabilityLabel,
       guidance: redditSource.limitedOrError ? "Reddit provider needs review. Keep this as low-trust social context until refresh succeeds." : redditSource.stale ? "Using stale Reddit context only; avoid treating it as today's signal." : redditSource.live ? redditSource.footer : redditReport?.mentionsImported ? "Local JSON import is usable as low-trust social context." : "No Reddit API calls are active.",
       className: redditSource.className,
-      diagnostics: redditDiagnosticsHtml(redditReport, redditConfig, redditSource, redditLiveStatus, redditMentions.length)
+      diagnostics: redditDiagnosticsHtml(redditReport, redditConfig, redditSource, redditLiveStatus, redditMentions.length),
+      providerBacked: redditSource.providerBacked,
+      sourceType: redditSource.providerBacked ? "Provider-backed social feed" : redditReport?.mentionsImported ? "Local social import" : "Sample social rows",
+      lastSuccessfulAt: redditReport?.lastSuccessfulRefresh || redditReport?.fetchedAt || redditReport?.importedAt,
+      fallbackReason: redditSource.mode === DATA_MODES.SAMPLE ? "Sample Reddit rows are active; no live API call is connected." : redditSource.stale || redditSource.limitedOrError ? redditSource.detail : ""
     },
     {
       label: "X / Twitter",
@@ -5579,7 +6334,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: xAvailabilityLabel,
       guidance: xSource.limitedOrError ? "X provider needs review. Keep this as low-trust social context until refresh succeeds." : xSource.stale ? "Using stale X context only; avoid treating it as today's signal." : xSource.live ? xSource.footer : xReport?.updatesImported ? "Loaded X/social rows are usable as low-trust social context." : "No X API calls are active.",
       className: xSource.className,
-      diagnostics: xSocialDiagnosticsHtml(xReport, xConfig, xSource, xLiveStatus, xUpdates.length)
+      diagnostics: xSocialDiagnosticsHtml(xReport, xConfig, xSource, xLiveStatus, xUpdates.length),
+      providerBacked: xSource.providerBacked,
+      sourceType: xSource.providerBacked ? "Provider-backed social feed" : xReport?.updatesImported ? "Local social import" : "Sample social rows",
+      lastSuccessfulAt: xReport?.lastSuccessfulRefresh || xReport?.fetchedAt || xReport?.importedAt,
+      fallbackReason: xSource.className === "missing" ? "Sample X/social rows are active; no live API call is connected." : xSource.stale || xSource.limitedOrError ? xSource.detail : ""
     },
     {
       label: "Federal disclosures",
@@ -5601,7 +6360,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       availabilityLabel: dataModeLabel(politicianSource.mode),
       guidance: politicianSource.guidance || politicianConfig.sourceRecommendation || "Federal disclosure provider: Not configured.",
       className: politicianSource.className,
-      diagnostics: federalDisclosureDiagnosticsHtml(politicianReport, politicianConfig, politicianTrades, politicianProviderSynced, politicianStale, politicianError)
+      diagnostics: federalDisclosureDiagnosticsHtml(politicianReport, politicianConfig, politicianTrades, politicianProviderSynced, politicianStale, politicianError),
+      providerBacked: politicianSource.providerBacked,
+      sourceType: politicianSource.providerBacked ? "Provider-backed disclosure feed" : politicianReport?.tradesImported ? "Local disclosure import" : "Sample disclosure rows",
+      lastSuccessfulAt: politicianReport?.lastSuccessfulRefresh || politicianReport?.fetchedAt || politicianReport?.importedAt,
+      fallbackReason: politicianSource.mode === DATA_MODES.SAMPLE ? "Sample federal disclosure rows are active; public sync is not configured." : politicianStale || politicianError ? politicianSource.detail : ""
     },
     {
       label: "Seeking Alpha",
@@ -5611,7 +6374,11 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       demoReady: /demo/i.test(String(seekingAlphaStatus.mode || "")),
       availabilityLabel: seekingAlphaStatus.connected ? dataModeLabel(DATA_MODES.IMPORTED) : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
       guidance: seekingAlphaStatus.connected ? "Authorized export/import data is available locally." : "Use authorized exports or a licensed API later; no scraping or password collection.",
-      className: seekingAlphaStatus.connected && /csv|xlsx|import/i.test(String(seekingAlphaStatus.mode || "")) ? "imported-local" : undefined
+      className: seekingAlphaStatus.connected && /csv|xlsx|import/i.test(String(seekingAlphaStatus.mode || "")) ? "imported-local" : undefined,
+      providerBacked: false,
+      sourceType: "Manual premium-rating import",
+      lastSuccessfulAt: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt,
+      fallbackReason: seekingAlphaStatus.connected ? "" : "No authorized Seeking Alpha import is loaded."
     },
     {
       label: "Fidelity",
@@ -5632,25 +6399,42 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       configured: Boolean(fidelityStatus.connected || fidelityImported || plaidLinked),
       configuredPending: Boolean(plaidConfigured && !plaidLinked && !fidelityImported),
       demoReady: /demo/i.test(String(fidelityStatus.mode || "")),
-      availabilityLabel: fidelityImported ? dataModeLabel(DATA_MODES.IMPORTED) : plaidLinked ? dataModeLabel(DATA_MODES.LIVE) : plaidCachedSync ? dataModeLabel(DATA_MODES.CACHED) : /demo/i.test(String(fidelityStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : plaidConfigured ? "Configured" : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
+      availabilityLabel: fidelityImported ? dataModeLabel(DATA_MODES.IMPORTED) : plaidLinked ? dataModeLabel(DATA_MODES.LIVE) : plaidCachedSync ? dataModeLabel(DATA_MODES.CACHED) : /demo/i.test(String(fidelityStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
       guidance: fidelityImported ? "CSV import is active; no direct Fidelity credentials are stored." : plaidLinked ? "Plaid investment holdings are available through the local backend. Access tokens never enter browser code." : plaidCachedSync ? "Reconnect or sync Plaid before relying on brokerage-linked freshness." : plaidConfigured ? "Open Plaid Link from Imports to authorize Fidelity. The dashboard does not collect Fidelity usernames or passwords." : "Use CSV import, or add Plaid credentials to .env for tokenized account linking.",
-      className: fidelityImported ? "imported-local" : plaidLinked ? "configured" : plaidCachedSync ? "configured-pending" : undefined
+      className: fidelityImported ? "imported-local" : plaidLinked ? "configured" : plaidCachedSync ? "configured-pending" : undefined,
+      providerBacked: Boolean(plaidLinked || plaidCachedSync),
+      sourceType: fidelityImported ? "Local brokerage import" : "Tokenized brokerage connector",
+      lastSuccessfulAt: fidelityStatus.lastSync || report?.importedAt || plaidReadiness.lastSync,
+      fallbackReason: fidelityImported ? "" : plaidConfigured && !plaidLinked ? "Plaid keys are present, but no linked Fidelity item is active yet." : "Use CSV import or tokenized Plaid linking before treating holdings as connected."
     },
     {
       label: "OpenAI explanations",
-      status: readiness.aiProviders?.openai?.configured ? "Configured" : "Not configured",
+      status: readiness.aiProviders?.openai?.configured ? "OpenAI key detected" : "Not configured",
       detail: readiness.aiProviders?.openai?.detail || "Optional AI-assisted explanations are off. Local deterministic summaries remain available.",
-      configured: Boolean(readiness.aiProviders?.openai?.configured),
-      configuredPending: false,
+      configured: Boolean(readiness.aiProviders?.openai?.liveProviderCalls),
+      configuredPending: Boolean(readiness.aiProviders?.openai?.configured && !readiness.aiProviders?.openai?.liveProviderCalls),
       demoReady: !readiness.aiProviders?.openai?.configured,
-      availabilityLabel: readiness.aiProviders?.openai?.configured ? "Configured" : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
+      availabilityLabel: readiness.aiProviders?.openai?.liveProviderCalls ? dataModeLabel(DATA_MODES.LIVE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
       guidance: readiness.aiProviders?.openai?.configured
         ? "API calls stay server-side through the local backend. Explanations must remain grounded in dashboard data."
         : "Add OPENAI_API_KEY to local .env only if Tucker wants AI-assisted explanations. Never commit the key.",
-      className: readiness.aiProviders?.openai?.configured ? "configured" : "missing"
+      className: readiness.aiProviders?.openai?.liveProviderCalls ? "configured" : readiness.aiProviders?.openai?.configured ? "configured-pending" : "missing",
+      providerBacked: Boolean(readiness.aiProviders?.openai?.liveProviderCalls),
+      sourceType: "AI explanation provider",
+      lastSuccessfulAt: readiness.aiProviders?.openai?.lastSuccessfulRefresh || readiness.aiProviders?.openai?.lastSync,
+      fallbackReason: readiness.aiProviders?.openai?.liveProviderCalls ? "" : "Deterministic local explanation fallback is used when OpenAI is not enabled."
     }
   ];
-  target.innerHTML = rows.map((row) => `
+  const summary = buildDataSourceHealthSummary(rows);
+  target.innerHTML = `
+    <div class="source-health-summary" aria-label="Data source health summary">
+      <div><b>${escapeHtml(summary.usableCount)}</b><span>usable now</span></div>
+      <div><b>${escapeHtml(summary.reviewCount)}</b><span>needs review</span></div>
+      <div><b>${escapeHtml(summary.providerBackedCount)}</b><span>provider-backed</span></div>
+      <div><b>${escapeHtml(summary.localOnlyCount)}</b><span>local/sample</span></div>
+      <p>Provider-backed sources are separated from local imports, sample rows, and deterministic calculations so source labels stay honest.</p>
+    </div>
+    ${rows.map((row) => `
     <div class="provider-status-card ${escapeHtml(row.className || (row.configured ? "configured" : row.configuredPending ? "configured-pending" : "missing"))}">
       <div>
         <b>${escapeHtml(row.label)}</b>
@@ -5658,13 +6442,14 @@ function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlph
       </div>
       <div>
         <strong>${escapeHtml(row.status)}</strong>
-        <span>${escapeHtml(dataSourceAvailabilityLabel(row))}</span>
+        <span class="status-badge ${escapeHtml(dataModeBadgeClass(dataSourceAvailabilityMode(row)))}">${escapeHtml(dataSourceAvailabilityLabel(row))}</span>
       </div>
+      <p class="source-meta">${escapeHtml(dataSourceHealthMetadata(row))}</p>
       ${row.metadata ? `<p class="source-meta">${escapeHtml(row.metadata)}</p>` : ""}
       <p>${escapeHtml(row.guidance || dataSourceAvailabilityGuidance(row))}</p>
       ${row.diagnostics || ""}
     </div>
-  `).join("");
+  `).join("")}`;
 }
 
 export function portfolioImportDiagnosticsLine(report = {}) {
@@ -5816,14 +6601,16 @@ function formatTradeRange(trade = {}) {
   return `${formatCurrency(low)}-${formatCurrency(high)}`;
 }
 
-function renderSettingsConfiguration(thresholds = {}) {
+function renderSettingsConfiguration(thresholds = {}, options = {}) {
   const target = byId("settingsConfigurationPanel");
   if (!target) return;
   const position = Number(thresholds.maxPositionWeight ?? 0.12);
   const sector = Number(thresholds.maxSectorWeight ?? 0.32);
   const leverage = Number(thresholds.maxLeveragedWeight ?? 0.14);
+  const targetDrift = Number(thresholds.minActionDrift ?? 0.015);
   const tickerScore = Number(thresholds.tickerSignalScore ?? 70);
   const redditAcceleration = Number(thresholds.redditMentionAcceleration ?? 0.6);
+  const providerRows = buildSettingsProviderStatusRows(options.providerReadiness || {}, options);
   const settings = [
     {
       title: "Data refresh",
@@ -5832,7 +6619,7 @@ function renderSettingsConfiguration(thresholds = {}) {
     },
     {
       title: "Risk thresholds",
-      detail: `Review above ${formatPct(position)} position weight, ${formatPct(sector)} sector/theme weight, or ${formatPct(leverage)} leveraged ETF exposure.`,
+      detail: `Review above ${formatPct(position)} position weight, ${formatPct(sector)} sector/theme weight, ${formatPct(leverage)} leveraged ETF exposure, or ${formatPct(targetDrift)} target drift.`,
       value: "Configurable"
     },
     {
@@ -5846,13 +6633,230 @@ function renderSettingsConfiguration(thresholds = {}) {
       value: "In-app only"
     }
   ];
-  target.innerHTML = settings.map((item) => `
-    <div class="note">
-      <b>${escapeHtml(item.title)}</b>
-      <p>${escapeHtml(item.detail)}</p>
-      <span class="status-badge safe">${escapeHtml(item.value)}</span>
+  target.innerHTML = `
+    <section class="settings-group" aria-label="Local rule settings">
+      ${settings.map((item) => `
+        <div class="note">
+          <b>${escapeHtml(item.title)}</b>
+          <p>${escapeHtml(item.detail)}</p>
+          <span class="status-badge safe">${escapeHtml(item.value)}</span>
+        </div>
+      `).join("")}
+    </section>
+    <section class="settings-group provider-setup-grid" aria-label="Provider configuration status">
+      <div class="provider-status-note">
+        <b>Provider configuration status</b>
+        <span>Keys and tokens stay in the local backend. Settings shows presence, freshness, and safe next steps without revealing secret values.</span>
+      </div>
+      ${providerRows.map((row) => renderSettingsProviderStatusCard(row)).join("")}
+    </section>
+  `;
+}
+
+export function buildSettingsProviderStatusRows(readiness = {}, context = {}) {
+  const marketDataStatus = context.marketDataStatus || {};
+  const marketDataConfig = readiness.marketDataConfig || {};
+  const marketAvailability = marketDataSourceAvailability(marketDataStatus, marketDataConfig);
+  const plaid = readiness.connectors?.plaid || {};
+  const openai = readiness.aiProviders?.openai || {};
+  const redditConfig = readiness.redditProviderConfig || {};
+  const redditStatus = (readiness.redditProviderStatuses || {}).redditApi || {};
+  const xConfig = readiness.xProviderConfig || {};
+  const xStatus = (readiness.xProviderStatuses || {}).xApi || {};
+  const politicianConfig = readiness.politicianTradeProviderConfig || {};
+  const politicianStatus = readiness.politicianTradeProviderStatuses?.selected || readiness.politicianTradeProviderStatuses?.senateStockWatcher || {};
+  const seekingAlphaStatus = context.seekingAlphaStatus || {};
+  const fidelityStatus = context.fidelityStatus || {};
+  const latestImportReport = context.latestImportReport || {};
+  const redditReport = context.redditImportReport || {};
+  const xReport = context.xUpdateImportReport || {};
+  const politicianReport = context.politicianTradeImportReport || {};
+
+  return [
+    settingsProviderRow({
+      id: "market-data-provider",
+      title: marketDataConfig.selectedLabel || marketDataStatus.providerLabel || "Market data provider",
+      statusMode: marketAvailability.label,
+      credentialState: credentialStateLabel(marketDataConfig),
+      detail: marketAvailability.guidance,
+      lastSuccess: marketDataStatus.lastSuccessfulRefresh || marketDataStatus.fetchedAt || marketDataStatus.asOf,
+      lastError: providerVisibleError(marketDataStatus, marketDataConfig),
+      setupHint: "Add a market data provider key to the local .env, restart the dev server, then refresh market data.",
+      docsHref: "docs/market-data-provider-config.md",
+      sourceType: "Server-side quote provider",
+      providerBacked: true
+    }),
+    settingsProviderRow({
+      id: "openai-explanations",
+      title: "OpenAI explanations",
+      statusMode: openai.liveProviderCalls ? DATA_MODES.LIVE : DATA_MODES.NOT_CONFIGURED,
+      credentialState: credentialStateLabel(openai),
+      detail: openai.detail || "Optional AI-assisted explanations are off. Deterministic local explanations remain available.",
+      lastSuccess: openai.lastSuccessfulRefresh || openai.lastSync,
+      lastError: providerVisibleError(openai),
+      setupHint: "Add the OpenAI key in local .env only if AI explanations are wanted; deterministic summaries work without it.",
+      docsHref: "docs/local-backend.md",
+      sourceType: "Server-side explanation provider",
+      providerBacked: true
+    }),
+    settingsProviderRow({
+      id: "fidelity-plaid",
+      title: "Fidelity / Plaid",
+      statusMode: plaid.linked ? DATA_MODES.LIVE : fidelityStatus.connected && /csv|import|local-file/i.test(String(fidelityStatus.mode || "")) ? DATA_MODES.IMPORTED : plaid.configured ? DATA_MODES.NOT_CONFIGURED : DATA_MODES.NOT_CONFIGURED,
+      credentialState: plaid.linked ? "Linked locally" : credentialStateLabel(plaid, { configuredLabel: "Credentials present" }),
+      detail: plaid.detail || "CSV import works without brokerage credentials. Plaid linking uses the local backend when configured.",
+      lastSuccess: plaid.lastSync || fidelityStatus.lastSync || latestImportReport.importedAt,
+      lastError: providerVisibleError(plaid, fidelityStatus),
+      setupHint: "Use CSV import first, or add Plaid credentials to local .env and start Plaid Link from Imports.",
+      docsHref: "docs/fidelity-live-connector.md",
+      sourceType: "Brokerage import or tokenized connector",
+      providerBacked: Boolean(plaid.linked || fidelityStatus.provider === "plaid")
+    }),
+    settingsProviderRow({
+      id: "reddit-api",
+      title: "Reddit API",
+      statusMode: providerModeFromConfigAndReport(redditConfig, redditStatus, redditReport),
+      credentialState: credentialStateLabel(redditConfig, { configuredLabel: "OAuth fields present" }),
+      detail: redditConfig.detail || redditStatus.detail || "Sample/local Reddit rows remain active until OAuth is configured and enabled.",
+      lastSuccess: redditReport.lastSuccessfulRefresh || redditReport.fetchedAt || redditReport.importedAt,
+      lastError: providerVisibleError(redditStatus, redditConfig, redditReport),
+      setupHint: "Configure Reddit OAuth fields in local .env and enable live sync only when ready.",
+      docsHref: "docs/reddit-signal-provider.md",
+      sourceType: "Server-side social provider",
+      providerBacked: Boolean(redditConfig.liveProviderCalls || redditStatus.liveProviderCalls)
+    }),
+    settingsProviderRow({
+      id: "x-social-api",
+      title: "X / social API",
+      statusMode: providerModeFromConfigAndReport(xConfig, xStatus, xReport),
+      credentialState: credentialStateLabel(xConfig),
+      detail: xConfig.detail || xStatus.detail || "Sample/local X rows remain active until a compliant provider is configured and enabled.",
+      lastSuccess: xReport.lastSuccessfulRefresh || xReport.fetchedAt || xReport.importedAt,
+      lastError: providerVisibleError(xStatus, xConfig, xReport),
+      setupHint: "Add the social API token to local .env and enable the provider only for compliant API access.",
+      docsHref: "docs/x-provider-setup.md",
+      sourceType: "Server-side social provider",
+      providerBacked: Boolean(xConfig.liveProviderCalls || xStatus.liveProviderCalls)
+    }),
+    settingsProviderRow({
+      id: "federal-disclosures",
+      title: "Federal disclosures",
+      statusMode: providerModeFromConfigAndReport(politicianConfig, politicianStatus, politicianReport),
+      credentialState: politicianConfig.configured ? "Provider selected" : "No provider selected",
+      detail: politicianConfig.detail || politicianStatus.detail || "Local CSV/JSON import is available. Public dataset sync is config-gated.",
+      lastSuccess: politicianReport.lastSuccessfulRefresh || politicianReport.fetchedAt || politicianReport.importedAt,
+      lastError: providerVisibleError(politicianStatus, politicianConfig, politicianReport),
+      setupHint: "Use local disclosure import first; public dataset sync should stay source-attributed and delayed-context only.",
+      docsHref: "docs/politician-trade-ingestion.md",
+      sourceType: "Disclosure import or public dataset",
+      providerBacked: Boolean(politicianConfig.liveProviderCalls || politicianStatus.liveProviderCalls)
+    }),
+    settingsProviderRow({
+      id: "seeking-alpha-import",
+      title: "Seeking Alpha ratings",
+      statusMode: seekingAlphaStatus.connected ? DATA_MODES.IMPORTED : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? DATA_MODES.SAMPLE : DATA_MODES.NOT_CONFIGURED,
+      credentialState: seekingAlphaStatus.connected ? "Imported data loaded" : "No credentials stored",
+      detail: seekingAlphaStatus.message || seekingAlphaStatus.mode || "Use authorized manual exports. The dashboard does not store Seeking Alpha passwords.",
+      lastSuccess: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt,
+      lastError: providerVisibleError(seekingAlphaStatus),
+      setupHint: "Import an authorized CSV/XLSX export when ratings are needed; no unattended scraping or login storage.",
+      docsHref: "docs/seeking-alpha-connector.md",
+      sourceType: "Manual premium-rating import",
+      providerBacked: false
+    })
+  ];
+}
+
+function renderSettingsProviderStatusCard(row = {}) {
+  return `
+    <div class="provider-status-card ${escapeHtml(row.className)}" data-provider-settings-row="${escapeHtml(row.id)}">
+      <div>
+        <b>${escapeHtml(row.title)}</b>
+        <span>${escapeHtml(row.detail)}</span>
+      </div>
+      <div>
+        <strong>${escapeHtml(row.credentialState)}</strong>
+        <span class="status-badge ${escapeHtml(dataModeBadgeClass(row.statusMode))}">${escapeHtml(dataModeLabel(row.statusMode))}</span>
+      </div>
+      <p class="source-meta">${escapeHtml(row.metadata)}</p>
+      <p>${escapeHtml(row.setupHint)} <a href="${escapeHtml(settingsDocsHref(row.docsHref))}">Setup notes</a></p>
     </div>
-  `).join("");
+  `;
+}
+
+function settingsProviderRow(row = {}) {
+  const statusMode = normalizeDataMode(row.statusMode || DATA_MODES.NOT_CONFIGURED);
+  const lastSuccess = row.lastSuccess ? shortDateTime(row.lastSuccess) : "Not yet";
+  const lastError = cleanProviderStatusText(row.lastError || "None");
+  return {
+    ...row,
+    statusMode,
+    lastError,
+    detail: cleanProviderStatusText(row.detail || "Provider status unavailable."),
+    credentialState: cleanProviderStatusText(row.credentialState || "Not configured"),
+    setupHint: cleanProviderStatusText(row.setupHint || "Review setup docs before enabling provider calls."),
+    metadata: [
+      `Type: ${row.sourceType || (row.providerBacked ? "Provider-backed" : "Local/imported")}`,
+      `Last success: ${lastSuccess}`,
+      `Last error: ${lastError}`
+    ].join(" · "),
+    className: dataModeProviderClass(statusMode)
+  };
+}
+
+function credentialStateLabel(config = {}, options = {}) {
+  if (config.liveProviderCalls) return options.activeLabel || "Configured and active";
+  if (config.configured || config.oauthReady) return options.configuredLabel || "Key present; not active";
+  return "Not configured";
+}
+
+function providerModeFromConfigAndReport(config = {}, status = {}, report = {}) {
+  const text = `${config.status || ""} ${status.status || ""} ${report.status || ""} ${report.mode || ""} ${report.dataFreshness || ""} ${report.cacheStatus || ""}`.toLowerCase();
+  if (/rate/.test(text)) return DATA_MODES.RATE_LIMITED;
+  if (/error|failed/.test(text)) return DATA_MODES.ERROR;
+  if (/stale/.test(text)) return DATA_MODES.STALE;
+  if (/cached/.test(text)) return DATA_MODES.CACHED;
+  if (report.importedAt || report.mentionsImported || report.updatesImported || report.tradesImported || /import/.test(text)) return DATA_MODES.IMPORTED;
+  if (/configured-not-connected|not configured|disabled/.test(text)) return DATA_MODES.NOT_CONFIGURED;
+  if (config.liveProviderCalls || status.liveProviderCalls || /\blive\b|connected|synced/.test(text)) return DATA_MODES.LIVE;
+  if (config.configured || status.configured || /configured/.test(text)) return DATA_MODES.NOT_CONFIGURED;
+  return DATA_MODES.NOT_CONFIGURED;
+}
+
+function dataModeProviderClass(mode) {
+  const normalized = normalizeDataMode(mode);
+  if ([DATA_MODES.LIVE, DATA_MODES.CACHED, DATA_MODES.IMPORTED].includes(normalized)) return "configured";
+  if ([DATA_MODES.STALE, DATA_MODES.ERROR, DATA_MODES.PARTIAL, DATA_MODES.RATE_LIMITED].includes(normalized)) return "configured-pending";
+  return "missing";
+}
+
+function providerVisibleError(...sources) {
+  const values = sources.flatMap((source) => {
+    if (!source || typeof source !== "object") return [];
+    return [
+      source.lastError?.message,
+      source.lastError,
+      source.error,
+      source.warning,
+      source.errorMessage,
+      source.detail && /error|failed|rate|stale/i.test(source.detail) ? source.detail : ""
+    ];
+  }).filter(Boolean);
+  return values.length ? values[0] : "";
+}
+
+function settingsDocsHref(href = "") {
+  const text = String(href || "").trim();
+  if (/^docs\/[a-z0-9._/-]+\.md$/i.test(text)) return text;
+  return safeExternalHref(text);
+}
+
+function cleanProviderStatusText(value = "") {
+  return String(value || "")
+    .replace(/Bearer\s+[A-Za-z0-9._:-]+/gi, "Bearer [redacted]")
+    .replace(/\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|password|secret)=([^&\s]+)/gi, "$1=[redacted]")
+    .replace(/\b[A-Za-z0-9._-]{32,}\b/g, "[redacted]")
+    .trim();
 }
 
 function targetMetric(label, value) {
@@ -5886,6 +6890,7 @@ function scopeLabel(scope = "") {
 function modeLabel(mode = "") {
   return ({
     "new-contribution": "New contributions only",
+    "sell-and-rebalance": "Sell and rebalance model",
     "taxable-safe": "Taxable caution",
     "retirement-only": "Retirement/HSA only",
     full: "Full portfolio view"
@@ -6325,12 +7330,48 @@ export function marketDataSourceAvailability(status = {}, config = {}) {
   };
 }
 
+export function dataSourceAvailabilityMode(row = {}) {
+  if (row.availabilityMode) return normalizeDataMode(row.availabilityMode);
+  if (row.availabilityLabel) return normalizeDataMode(row.availabilityLabel);
+  if (row.providerBacked && row.configuredPending) return DATA_MODES.STALE;
+  if (row.configured) return sourceDataMode({ connected: true, ...row });
+  if (row.configuredPending) return DATA_MODES.NOT_CONFIGURED;
+  if (row.demoReady) return DATA_MODES.SAMPLE;
+  return DATA_MODES.NOT_CONFIGURED;
+}
+
 export function dataSourceAvailabilityLabel(row = {}) {
-  if (row.availabilityLabel) return row.availabilityLabel;
-  if (row.configured) return dataModeLabel(sourceDataMode({ connected: true, ...row }));
-  if (row.configuredPending) return "Needs review";
-  if (row.demoReady) return dataModeLabel(DATA_MODES.SAMPLE);
-  return dataModeLabel(DATA_MODES.NOT_CONFIGURED);
+  return dataModeLabel(dataSourceAvailabilityMode(row));
+}
+
+export function buildDataSourceHealthSummary(rows = []) {
+  const counts = rows.reduce((memo, row) => {
+    const mode = dataSourceAvailabilityMode(row);
+    memo[mode] = (memo[mode] || 0) + 1;
+    return memo;
+  }, {});
+  const reviewModes = new Set([DATA_MODES.STALE, DATA_MODES.ERROR, DATA_MODES.PARTIAL, DATA_MODES.RATE_LIMITED]);
+  const usableModes = new Set([DATA_MODES.LIVE, DATA_MODES.CACHED, DATA_MODES.IMPORTED]);
+  const reviewCount = rows.filter((row) => row.configuredPending || reviewModes.has(dataSourceAvailabilityMode(row))).length;
+  const usableCount = rows.filter((row) => usableModes.has(dataSourceAvailabilityMode(row))).length;
+  const providerBackedCount = rows.filter((row) => row.providerBacked).length;
+  return {
+    sourceCount: rows.length,
+    usableCount,
+    reviewCount,
+    providerBackedCount,
+    localOnlyCount: Math.max(0, rows.length - providerBackedCount),
+    counts
+  };
+}
+
+function dataSourceHealthMetadata(row = {}) {
+  const parts = [
+    `Type: ${row.sourceType || (row.providerBacked ? "Provider-backed" : "Local/sample")}`,
+    `Last success: ${row.lastSuccessfulAt ? shortDateTime(row.lastSuccessfulAt) : "Not yet"}`
+  ];
+  if (row.fallbackReason) parts.push(`Fallback: ${row.fallbackReason}`);
+  return parts.join(" · ");
 }
 
 function dataSourceAvailabilityGuidance(row = {}) {
@@ -6438,6 +7479,68 @@ function resourceCoverageLabel(value = "") {
   return dataModeLabel(marketDataMode({ status: text, dataFreshness: text, cacheStatus: text }));
 }
 
+const PROVIDER_COVERAGE_FIELD_ORDER = Object.freeze([
+  ["quote", "Quote"],
+  ["week52Range", "52-week"],
+  ["volume", "Volume"],
+  ["averageVolume", "Avg volume"],
+  ["marketCap", "Market cap"],
+  ["companyProfile", "Profile"],
+  ["sectorIndustry", "Sector/industry"],
+  ["historicalCandles", "History"]
+]);
+
+function coverageFieldsByKey(row = {}) {
+  const fields = Array.isArray(row.fieldCoverage) ? row.fieldCoverage : [];
+  const map = Object.fromEntries(fields.map((field) => [field.key, field]));
+  if (fields.length) return map;
+  return {
+    quote: legacyCoverageField("quote", "Quote", row.quote),
+    week52Range: legacyCoverageField("week52Range", "52-week high/low", row.metric),
+    volume: legacyCoverageField("volume", "Volume", row.quote),
+    averageVolume: legacyCoverageField("averageVolume", "Average volume", row.metric),
+    marketCap: legacyCoverageField("marketCap", "Market cap", row.profile),
+    companyProfile: legacyCoverageField("companyProfile", "Company profile", row.profile),
+    sectorIndustry: legacyCoverageField("sectorIndustry", "Sector/industry", row.profile),
+    historicalCandles: legacyCoverageField("historicalCandles", "Historical candles", row.history)
+  };
+}
+
+function legacyCoverageField(key, label, status) {
+  const normalized = String(status || "unknown").toLowerCase();
+  const available = !["missing", "deferred", "skipped", "disabled", "unknown", ""].includes(normalized);
+  return { key, label, missingLabel: label.toLowerCase(), available, status: normalized || "unknown", resourceStatus: normalized || "unknown" };
+}
+
+function coverageFieldStatusLabel(field = {}) {
+  const status = String(field.status || "").toLowerCase();
+  if (status === "available") return "Available";
+  return resourceCoverageLabel(status || field.resourceStatus || "");
+}
+
+function coverageFieldBadgeClass(field = {}) {
+  const status = String(field.status || "").toLowerCase();
+  if (["live", "available"].includes(status)) return "badge-source-live";
+  if (status === "cached") return "badge-source-cached";
+  if (status === "mock") return "badge-source-sample";
+  if (["stale", "deferred", "skipped"].includes(status)) return "badge-source-stale";
+  if (["missing", "disabled", "unknown"].includes(status)) return "badge-source-not-configured";
+  return dataModeBadgeClass(marketDataMode({ status, dataFreshness: status, cacheStatus: status }));
+}
+
+function coverageGapSummary(row = {}) {
+  const stale = Array.isArray(row.staleFields) ? row.staleFields : [];
+  const unavailable = Array.isArray(row.unavailableFields) && row.unavailableFields.length
+    ? row.unavailableFields
+    : Array.isArray(row.missingFields)
+      ? row.missingFields
+      : [];
+  const parts = [];
+  if (unavailable.length) parts.push(`Missing: ${unavailable.slice(0, 4).join(", ")}${unavailable.length > 4 ? ` +${unavailable.length - 4} more` : ""}`);
+  if (stale.length) parts.push(`Stale: ${stale.slice(0, 4).join(", ")}${stale.length > 4 ? ` +${stale.length - 4} more` : ""}`);
+  return parts.join(" · ") || "Complete";
+}
+
 function marketDataCoverageTableHtml(rows = []) {
   const visible = rows.slice(0, 16);
   if (!visible.length) {
@@ -6450,27 +7553,33 @@ function marketDataCoverageTableHtml(rows = []) {
           <tr>
             <th scope="col">Ticker</th>
             <th scope="col">Status</th>
+            <th scope="col">Coverage</th>
             <th scope="col">Quote</th>
+            <th scope="col">52-week</th>
+            <th scope="col">Volume</th>
+            <th scope="col">Avg volume</th>
+            <th scope="col">Market cap</th>
             <th scope="col">Profile</th>
-            <th scope="col">Fundamentals</th>
+            <th scope="col">Sector / industry</th>
             <th scope="col">History</th>
-            <th scope="col">Missing fields</th>
+            <th scope="col">Missing / stale</th>
             <th scope="col">Last fetch</th>
           </tr>
         </thead>
         <tbody>
           ${visible.map((row) => {
             const mode = marketDataMode({ status: row.status, dataFreshness: row.dataFreshness, cacheStatus: row.cacheStatus });
-            const missingFields = Array.isArray(row.missingFields) && row.missingFields.length ? row.missingFields.join(", ") : "None";
+            const fields = coverageFieldsByKey(row);
             return `
               <tr>
                 <th scope="row">${escapeHtml(row.ticker || "Unknown")}</th>
                 <td><span class="status-badge ${dataModeBadgeClass(mode)}">${escapeHtml(dataModeLabel(mode))}</span></td>
-                <td>${escapeHtml(resourceCoverageLabel(row.quote))}</td>
-                <td>${escapeHtml(resourceCoverageLabel(row.profile))}</td>
-                <td>${escapeHtml(resourceCoverageLabel(row.metric))}</td>
-                <td>${escapeHtml(resourceCoverageLabel(row.history))}</td>
-                <td>${escapeHtml(missingFields)}</td>
+                <td>${escapeHtml(row.coverageSummary || "Coverage pending")}</td>
+                ${PROVIDER_COVERAGE_FIELD_ORDER.map(([key]) => {
+                  const field = fields[key] || {};
+                  return `<td><span class="data-tag ${coverageFieldBadgeClass(field)}">${escapeHtml(coverageFieldStatusLabel(field))}</span></td>`;
+                }).join("")}
+                <td>${escapeHtml(coverageGapSummary(row))}</td>
                 <td>${row.fetchedAt ? escapeHtml(formatDateTime(row.fetchedAt)) : "Not available"}</td>
               </tr>
             `;

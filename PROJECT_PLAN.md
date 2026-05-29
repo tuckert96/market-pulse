@@ -177,6 +177,11 @@ Current real-data workflow repair checkpoint:
 - Data Sources now includes safe Finnhub diagnostics: provider selected, key present yes/no, requested tickers, successful/missing responses, cache status, truncation, and last error.
 - Local backend quote responses include request truncation metadata and `.env` loading repairs whitespace shell credentials that would otherwise shadow the local key.
 - Added Portfolio Health Score v1 as a compact command-center readout on Overview and Daily Brief. It uses existing local portfolio state, import diagnostics, risk analytics, thesis rows, target drift, visible alerts, and market-data status; sample/no-data states stay unscored and route to Imports.
+- Added score transparency pass: Portfolio Health, portfolio concentration, holding risk contributors, and Alpha Engine holding rows now expose `Explain score` details with local deterministic math, factor weights, missing-data handling, and explicit non-AI/non-trade-advice guardrails.
+- Added local backup/restore trust pass: state export now runs through a testable backup contract, includes account-scope and market-data live-mode settings, validates restore files, and shows an apply/cancel preview before localStorage is overwritten.
+- Added Settings provider-status trust pass: the Settings screen now summarizes market data, OpenAI, Plaid/Fidelity, Reddit, X/social, federal disclosures, and Seeking Alpha setup with key-presence state, last success/error metadata, and setup links while keeping secrets server-side.
+- Added first-run onboarding polish: the Overview now shows a guided no-data/sample/import-error setup card with prominent Import Fidelity CSV, Sample, Data Sources, and Settings paths, plus current Portfolio/Market/Provider status labels.
+- Added route compatibility pass: slash-style local paths and `#alpha-engine` now canonicalize into the existing focused screens, preserving Overview card and sidebar navigation without duplicating screens.
 
 Current Finnhub market data checkpoint:
 

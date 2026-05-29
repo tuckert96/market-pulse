@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DATA_MODES, dataModeLabel } from "../src/dataModes.js";
 import { buildMarketDataSnapshot, normalizeMarketQuote } from "../src/marketDataProvider.js";
-import { buildMarketDriverReport } from "../src/marketDrivers.js";
+import { buildMarketDriverReport, buildMarketRegime } from "../src/marketDrivers.js";
 
 const asOf = "2026-05-27T14:30:00.000Z";
 
@@ -40,6 +41,35 @@ function snapshot(quotes) {
     asOf,
     now: asOf
   });
+}
+
+function quoteMap(rows = []) {
+  return Object.fromEntries(rows.map(([ticker, percent]) => {
+    const normalized = normalizeMarketQuote({
+      ticker,
+      name: ticker,
+      price: 100,
+      previousClose: 100 / (1 + percent),
+      dailyChangePercent: percent,
+      asOf,
+      liveProviderCalls: true,
+      sourceMode: "live"
+    }, {
+      providerId: "finnhub",
+      providerLabel: "Finnhub",
+      mode: "live",
+      source: "finnhub",
+      asOf
+    });
+    return [normalized.ticker, normalized];
+  }));
+}
+
+function sourceSummary(mode = DATA_MODES.LIVE) {
+  return {
+    marketDataMode: mode,
+    marketDataLabel: dataModeLabel(mode)
+  };
 }
 
 test("market driver report explains broad market and AI/tech moves without trade commands", () => {
@@ -101,6 +131,9 @@ test("market driver report explains broad market and AI/tech moves without trade
   });
 
   assert.equal(report.broadMarket.label, "Broader Market");
+  assert.ok(report.marketRegime);
+  assert.ok(report.marketRegime.signals.length >= 6);
+  assert.equal(report.marketRegime.sourceStatus, "Live");
   assert.equal(report.aiTech.label, "AI / Tech");
   assert.equal(report.aiTech.proxyTickers.includes("NVDA"), true);
   assert.equal(report.aiTech.drivers.some((driver) => driver.category === "News / events"), true);
@@ -111,6 +144,62 @@ test("market driver report explains broad market and AI/tech moves without trade
   const visibleText = JSON.stringify(report);
   assert.doesNotMatch(visibleText, /\b(buy|sell|place trade|guaranteed|predicts returns)\b/i);
   assert.match(report.aiTech.summary, /source-labeled explanation, not a confirmed cause/i);
+});
+
+test("market regime classifies risk-on, risk-off, and mixed tapes deterministically", () => {
+  const riskOn = buildMarketRegime({
+    quotesByTicker: quoteMap([
+      ["SPY", 0.008], ["QQQ", 0.011], ["DIA", 0.006], ["IWM", 0.009],
+      ["VIX", -0.04], ["TLT", 0.006], ["XLY", 0.009], ["XLU", -0.002], ["XLP", -0.001]
+    ]),
+    sourceSummary: sourceSummary(DATA_MODES.LIVE),
+    asOf
+  });
+  const riskOff = buildMarketRegime({
+    quotesByTicker: quoteMap([
+      ["SPY", -0.009], ["QQQ", -0.014], ["DIA", -0.007], ["IWM", -0.011],
+      ["VIX", 0.065], ["TLT", -0.007]
+    ]),
+    sourceSummary: sourceSummary(DATA_MODES.LIVE),
+    asOf
+  });
+  const mixed = buildMarketRegime({
+    quotesByTicker: quoteMap([
+      ["SPY", 0.001], ["QQQ", -0.001], ["DIA", 0.0005], ["IWM", -0.0005],
+      ["VIX", 0.002], ["TLT", 0.001], ["XLY", 0.001], ["XLU", 0.001]
+    ]),
+    sourceSummary: sourceSummary(DATA_MODES.LIVE),
+    asOf
+  });
+
+  assert.equal(riskOn.regime, "risk-on");
+  assert.ok(riskOn.riskOnScore > riskOn.riskOffScore);
+  assert.equal(riskOff.regime, "risk-off");
+  assert.ok(riskOff.riskOffScore > riskOff.riskOnScore);
+  assert.equal(mixed.regime, "mixed");
+  assert.ok(mixed.signals.every((signal) => signal.label && signal.reading));
+  assert.doesNotMatch(JSON.stringify([riskOn, riskOff, mixed]), /\b(buy|sell|place trade|guaranteed|predicts returns)\b/i);
+});
+
+test("market regime surfaces stale and missing-data states without pretending precision", () => {
+  const stale = buildMarketRegime({
+    quotesByTicker: quoteMap([["SPY", 0.004], ["QQQ", 0.006], ["DIA", 0.001], ["IWM", -0.002]]),
+    sourceSummary: sourceSummary(DATA_MODES.STALE),
+    asOf
+  });
+  const missing = buildMarketRegime({
+    quotesByTicker: {},
+    sourceSummary: sourceSummary(DATA_MODES.NOT_CONFIGURED),
+    asOf
+  });
+
+  assert.equal(stale.sourceStatus, "Stale");
+  assert.ok(stale.actionItems.some((item) => /Refresh market data/i.test(item)));
+  assert.ok(stale.confidenceScore < 80);
+  assert.equal(missing.regime, "mixed");
+  assert.equal(missing.signals.every((signal) => signal.status === "missing"), true);
+  assert.ok(missing.missingData.length >= 4);
+  assert.match(missing.summary, /Source status: Not configured/);
 });
 
 test("market driver report is explicit when real-time source data is missing", () => {

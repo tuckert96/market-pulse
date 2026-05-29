@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ACCOUNT_SCOPE_ALL, buildAccountScopeModel, filterHoldingsByAccountScope } from "../src/accountScope.js";
+import { ACCOUNT_SCOPE_ALL, buildAccountScopeModel, filterHoldingsByAccountScope, inferTaxBucket } from "../src/accountScope.js";
 
 const holdings = [
   { ticker: "MU", account: "Roth IRA", accountType: "Retirement", assetClass: "Equity", marketValue: 12000, dailyChange: 240, costBasis: 10000, sourceAsOf: new Date().toISOString() },
@@ -26,6 +26,18 @@ test("account scope model builds combined and individual account views", () => {
   assert.equal(model.accounts[0].cashWeight, 0.2);
   assert.equal(model.accounts[0].largestHoldingWeight, 0.8);
   assert.equal(model.accounts[0].largestHoldingLabel, "MU");
+  assert.equal(model.accounts[0].taxBucket.label, "Roth");
+  assert.deepEqual(model.accounts[0].assetMix.map((row) => row.name), ["Stock", "Cash"]);
+  assert.deepEqual(model.accounts[0].topPositions.map((row) => row.ticker), ["MU", "SPAXX"]);
+});
+
+test("account scope classifies tax buckets for allocation display", () => {
+  assert.equal(inferTaxBucket("Taxable Brokerage", ["Taxable"]).key, "taxable");
+  assert.equal(inferTaxBucket("Fidelity Roth IRA", ["Retirement"]).key, "roth");
+  assert.equal(inferTaxBucket("Traditional IRA", ["Retirement"]).key, "traditional");
+  assert.equal(inferTaxBucket("Employer 401k", ["Retirement"]).key, "traditional");
+  assert.equal(inferTaxBucket("Fidelity HSA", ["HSA"]).key, "hsa");
+  assert.equal(inferTaxBucket("Mystery Account", ["Unknown"]).key, "other");
 });
 
 test("account scope filters holdings and resets invalid selections to combined", () => {
@@ -50,6 +62,7 @@ test("account scope uses stable account ids when display labels repeat", () => {
   assert.equal(model.accounts.length, 2);
   assert.equal(model.selectedAccount, "plaid-roth-2");
   assert.equal(model.selectedAccountLabel, "Fidelity Roth IRA");
+  assert.deepEqual(model.accounts.map((account) => account.taxBucket.key), ["roth", "roth"]);
   assert.deepEqual(model.scopedHoldings.map((holding) => holding.ticker), ["NVDA"]);
   assert.deepEqual(filterHoldingsByAccountScope(repeatedLabels, "plaid-roth-1").map((holding) => holding.ticker), ["MU"]);
 });
@@ -68,4 +81,6 @@ test("account scope flags leveraged exposure and selected summaries", () => {
   assert.equal(model.selectedSummary.leveragedExposureWeight, 1.5);
   assert.equal(model.selectedSummary.hasLeverageWarning, true);
   assert.equal(model.selectedSummary.cashWeight, 0.5);
+  assert.equal(model.selectedSummary.taxBucket.key, "taxable");
+  assert.deepEqual(model.selectedSummary.assetMix.map((row) => row.name), ["Cash", "ETF/Fund"]);
 });

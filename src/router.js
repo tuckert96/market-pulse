@@ -29,6 +29,8 @@ export const ROUTE_ALIASES = Object.freeze({
   earnings: "calendar",
   command: "daily",
   "command-brief": "daily",
+  "alpha-engine": "alpha",
+  alphaengine: "alpha",
   market: "market-intelligence",
   intelligence: "market-intelligence",
   drivers: "market-drivers",
@@ -71,14 +73,14 @@ export function routeFromHashValue(hash = "", routes = APP_ROUTES, routeAliases 
   const decodedHash = safeDecodeHash(encodedHash);
   const decodeFailed = encodedHash.length > 0 && decodedHash === null;
   const rawHash = decodedHash || "";
-  const requested = rawHash || "overview";
+  const requested = (rawHash || "overview").replace(/^\/+/, "");
   const ticker = parseTickerRoute(requested);
   if (ticker) {
     return {
       route: "ticker",
       ticker,
       canonicalHash: `#/ticker/${encodeURIComponent(ticker)}`,
-      shouldReplace: requested !== `/ticker/${ticker}`
+      shouldReplace: requested !== `ticker/${ticker}`
     };
   }
   const route = routeAliases[requested] || requested;

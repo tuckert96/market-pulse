@@ -1,3 +1,5 @@
+import { inferLeveragedEtfMultiple, isLeveragedEtfTicker } from "./portfolioSchema.js";
+
 export const ACCOUNT_SCOPE_ALL = "all";
 
 export function buildAccountScopeModel(holdings = [], selectedAccount = ACCOUNT_SCOPE_ALL) {
@@ -66,9 +68,32 @@ export function accountRows(holdings = []) {
       label: row.account,
       totalPortfolioValue: portfolioValue,
       accountTypes: [...row.accountTypes],
-      accountTypeLabel: [...row.accountTypes].filter(Boolean).join(", ") || "Account"
+      accountTypeLabel: [...row.accountTypes].filter(Boolean).join(", ") || "Account",
+      taxBucket: inferTaxBucket(row.account, [...row.accountTypes]),
+      assetMix: assetMixFor(row.holdings),
+      topPositions: topPositionsFor(row.holdings)
     }))
     .sort((left, right) => right.value - left.value || left.account.localeCompare(right.account));
+}
+
+export function inferTaxBucket(account = "", accountTypes = []) {
+  const text = `${account} ${accountTypes.join(" ")}`.toLowerCase();
+  if (/hsa|health savings|health/.test(text)) {
+    return { key: "hsa", label: "HSA", className: "tax-bucket-hsa", detail: "Health savings account" };
+  }
+  if (/roth/.test(text)) {
+    return { key: "roth", label: "Roth", className: "tax-bucket-roth", detail: "After-tax retirement bucket" };
+  }
+  if (/traditional|rollover|401\s*\(?k\)?|403\s*\(?b\)?|ira|sep|simple|retirement/.test(text)) {
+    return { key: "traditional", label: "Traditional", className: "tax-bucket-traditional", detail: "Tax-deferred retirement bucket" };
+  }
+  if (/taxable|brokerage|individual|joint|margin/.test(text)) {
+    return { key: "taxable", label: "Taxable", className: "tax-bucket-taxable", detail: "Taxable brokerage bucket" };
+  }
+  if (/cash|bank|checking|savings/.test(text)) {
+    return { key: "cash", label: "Cash", className: "tax-bucket-cash", detail: "Cash or banking bucket" };
+  }
+  return { key: "other", label: "Other", className: "tax-bucket-other", detail: "Account type not classified" };
 }
 
 function accountLabel(holding = {}) {
@@ -93,6 +118,8 @@ function summarizeScope(scope = {}) {
   const staleHoldingCount = holdings.filter(isStaleHolding).length;
   const missingCostBasisCount = holdings.filter(isMissingCostBasis).length;
   const largestHolding = scope.largestHolding || largestHoldingFor(holdings);
+  const accountTypes = Array.isArray(scope.accountTypes) ? scope.accountTypes : [];
+  const taxBucket = scope.taxBucket || inferTaxBucket(scope.account || scope.label, accountTypes);
 
   return {
     ...scope,
@@ -100,7 +127,7 @@ function summarizeScope(scope = {}) {
     holdingCount: holdings.length || scope.holdingCount || 0,
     accountCount: scope.accountCount || 1,
     accountTypeLabel: scope.accountTypeLabel || "Account",
-    accountTypes: Array.isArray(scope.accountTypes) ? scope.accountTypes : [],
+    accountTypes,
     dailyChange,
     dailyChangePercent: value ? dailyChange / value : 0,
     cashValue,
@@ -113,9 +140,49 @@ function summarizeScope(scope = {}) {
     largestHolding,
     largestHoldingLabel: largestHolding?.ticker || "No holdings",
     largestHoldingWeight: value && largestHolding?.value ? largestHolding.value / value : 0,
+    taxBucket,
+    assetMix: Array.isArray(scope.assetMix) ? scope.assetMix : assetMixFor(holdings),
+    topPositions: Array.isArray(scope.topPositions) ? scope.topPositions : topPositionsFor(holdings),
     hasDataQualityWarning: Boolean(staleHoldingCount || missingCostBasisCount),
     hasLeverageWarning: leveragedExposure > value * 0.15
   };
+}
+
+function assetMixFor(holdings = []) {
+  const total = totalValue(holdings);
+  const rows = new Map();
+  holdings.forEach((holding) => {
+    const name = normalizedAssetClass(holding);
+    const current = rows.get(name) || { name, value: 0, count: 0, weight: 0 };
+    current.value += holdingValue(holding);
+    current.count += 1;
+    rows.set(name, current);
+  });
+  return [...rows.values()]
+    .map((row) => ({ ...row, weight: total ? row.value / total : 0 }))
+    .sort((left, right) => right.value - left.value || left.name.localeCompare(right.name));
+}
+
+function topPositionsFor(holdings = []) {
+  const total = totalValue(holdings);
+  return holdings
+    .map((holding) => ({
+      ticker: holding.ticker || holding.name || "Holding",
+      name: holding.name || holding.company || "",
+      value: holdingValue(holding),
+      weight: total ? holdingValue(holding) / total : 0
+    }))
+    .sort((left, right) => right.value - left.value || left.ticker.localeCompare(right.ticker))
+    .slice(0, 3);
+}
+
+function normalizedAssetClass(holding = {}) {
+  if (isCashLikeHolding(holding)) return "Cash";
+  if (isLeveragedHolding(holding)) return "ETF/Fund";
+  const assetClass = String(holding.assetClass || holding.type || "").trim();
+  if (/etf|fund/i.test(assetClass)) return "ETF/Fund";
+  if (/stock|equity/i.test(assetClass)) return "Stock";
+  return assetClass || "Other";
 }
 
 function totalValue(holdings = []) {
@@ -140,15 +207,12 @@ function isCashLikeHolding(holding = {}) {
 }
 
 function isLeveragedHolding(holding = {}) {
-  if (holding.isLeveragedEtf || Number(holding.leveragedMultiple) > 1) return true;
-  return /^(UPRO|SOXL|TQQQ|SPXL|TECL|UDOW|QLD|SSO|FNGU)$/i.test(String(holding.ticker || ""));
+  if (holding.isLeveragedEtf || Math.abs(Number(holding.leveragedMultiple)) > 1) return true;
+  return isLeveragedEtfTicker(holding.ticker, holding);
 }
 
 function inferredLeverageMultiple(holding = {}) {
-  const text = `${holding.ticker || ""} ${holding.name || ""}`.toUpperCase();
-  if (/^(UPRO|SOXL|TQQQ|SPXL|TECL|UDOW|FNGU)\b/.test(text) || /3X|ULTRAPRO/.test(text)) return 3;
-  if (/^(QLD|SSO)\b/.test(text) || /2X|ULTRA\b/.test(text)) return 2;
-  return 1;
+  return inferLeveragedEtfMultiple(holding.ticker, holding) || 1;
 }
 
 function isMissingCostBasis(holding = {}) {

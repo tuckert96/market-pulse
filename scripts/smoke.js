@@ -10,10 +10,12 @@ import { normalizePlaidHoldings, normalizeSnapTradeHoldings } from "../src/fidel
 import { applyMarketDataToHoldings, buildMarketDataProviderConfig, buildMarketDataProviderStatuses, buildMockMarketDataSnapshot, createFinancialModelingPrepProvider, createFinnhubProvider, createMarketDataCache, createMockMarketDataProvider, marketDataCacheTtlConfig, marketDataFallbackProviderIds } from "../src/marketDataProvider.js";
 import { buildDemoMarketEventDataset } from "../src/marketEventProviders.js";
 import { buildMarketDriverReport, MARKET_DRIVER_DEFAULT_TICKERS } from "../src/marketDrivers.js";
+import { applyPortfolioImportPreview, buildPortfolioImportPreview, cancelPortfolioImportPreview } from "../src/importPreviewWorkflow.js";
 import { buildTickerMovementExplainer } from "../src/movementExplainer.js";
 import { parseLocalDataFixtureJson, validateLocalDataBundle } from "../src/localDataContracts.js";
 import { buildPoliticianTradeProviderConfig, createPoliticianTradeProvider, demoPoliticianTrades, importPoliticianTradeFile, politicianTradeProviderStatuses } from "../src/politicianTrades.js";
 import { analyzePortfolio } from "../src/portfolioAnalytics.js";
+import { buildPortfolioAttribution } from "../src/portfolioAttribution.js";
 import { tuckerDemoHoldings } from "../src/portfolioDemoData.js";
 import { buildPortfolioHealth } from "../src/portfolioHealth.js";
 import { buildAffectedExposureSummary } from "../src/portfolioView.js";
@@ -24,6 +26,7 @@ import { normalizeSeekingAlphaRecord } from "../src/seekingAlphaConnector.js";
 import { buildTargetAllocationPlan, defaultTargetAllocations, normalizeTargetAllocations } from "../src/targetAllocations.js";
 import { buildTechnicalAnalysisSnapshot } from "../src/technicalAnalysis.js";
 import { buildThesisAlerts, buildThesisRows, thesisSummary } from "../src/thesisTracker.js";
+import { compareThesisSnapshotToProfile, normalizeThesisSnapshot } from "../src/thesisSnapshots.js";
 import { buildTickerResearchLens } from "../src/tickerResearch.js";
 import { buildCombinedTickerSignals } from "../src/tickerSignals.js";
 import { buildStockPredictionModel } from "../src/stockPredictionModel.js";
@@ -49,6 +52,7 @@ const marketDataProviderStatuses = buildMarketDataProviderStatuses({});
 const marketDataCache = createMarketDataCache();
 const marketDataTtls = marketDataCacheTtlConfig({ MARKET_DATA_QUOTE_TTL_MINUTES: "5" });
 const holdingsWithMarketData = applyMarketDataToHoldings(analysis.holdings, marketDataSnapshot);
+const portfolioAttribution = buildPortfolioAttribution(holdingsWithMarketData, { totalValue: analysis.overview.totalValue });
 const politicianTrades = demoPoliticianTrades();
 const eventCalendar = buildPortfolioEvents({
   calendarEvents: defaultCalendarEvents("2026-05-23T12:00:00-04:00"),
@@ -229,8 +233,10 @@ const alertThresholds = normalizeAlertThresholds({
   tickerSignalScore: 60,
   politicianTradeScore: 55,
   redditMentionAcceleration: 50,
+  minActionDrift: 1.5,
   staleHours: 24
 });
+const targetPlan = buildTargetAllocationPlan(analysis.holdings, defaultTargetAllocations(), { mode: "new-contribution" });
 const localAlerts = buildLocalAlerts({
   analysis,
   tickerSignals,
@@ -241,11 +247,11 @@ const localAlerts = buildLocalAlerts({
     marketDataQuoteProviders: marketDataProviderStatuses
   },
   marketDataStatus: marketDataSnapshot.status,
+  targetPlan,
   thresholds: alertThresholds,
   watchlist: ["MU", "NVDA", "AMD", "SOXL", "UPRO", "VGT", "CRDO"],
   asOf: "2026-05-23T12:00:00-04:00"
 });
-const targetPlan = buildTargetAllocationPlan(analysis.holdings, defaultTargetAllocations(), { mode: "new-contribution" });
 const whatIfResult = simulateWhatIf({
   holdings: analysis.holdings,
   scenario: { action: "add", ticker: "SOXL", amount: 25000, fundingMode: "external" },
@@ -256,6 +262,13 @@ const whatIfResult = simulateWhatIf({
 const thesisRows = buildThesisRows(analysis.holdings, demoThesisProfiles(), { targetPlan, alphaSignals: signals, asOf: "2026-05-23", totalValue: analysis.overview.totalValue });
 const thesisAlerts = buildThesisAlerts(thesisRows);
 const thesisStats = thesisSummary(thesisRows);
+const thesisSnapshot = normalizeThesisSnapshot({
+  ticker: "MU",
+  capturedAt: "2026-05-23T12:00:00-04:00",
+  sourceType: "user-written",
+  profile: demoThesisProfiles().MU
+});
+const thesisSnapshotComparison = compareThesisSnapshotToProfile(thesisSnapshot, { ...demoThesisProfiles().MU, confidenceLevel: "Low" });
 const muMovementExplainer = buildTickerMovementExplainer({
   ticker: "MU",
   owned: true,
@@ -350,7 +363,18 @@ const exposureSummary = buildAffectedExposureSummary({
 ]);
 const indexHtml = readFileSync("index.html", "utf8");
 const appJs = readFileSync("src/app.js", "utf8");
+const portfolioAnalyticsJs = readFileSync("src/portfolioAnalytics.js", "utf8");
 const portfolioViewJs = readFileSync("src/portfolioView.js", "utf8");
+const fidelityImportBranchStart = appJs.indexOf('if (provider === "fidelity")');
+const fidelityImportBranchEnd = appJs.indexOf("if (!result.validation.ok)", fidelityImportBranchStart);
+const fidelityImportBranch = fidelityImportBranchStart >= 0 && fidelityImportBranchEnd > fidelityImportBranchStart
+  ? appJs.slice(fidelityImportBranchStart, fidelityImportBranchEnd)
+  : "";
+const cancelImportStart = appJs.indexOf("function cancelPendingPortfolioImport");
+const cancelImportEnd = appJs.indexOf("function parsePastedFidelityHoldings", cancelImportStart);
+const cancelImportFunction = cancelImportStart >= 0 && cancelImportEnd > cancelImportStart
+  ? appJs.slice(cancelImportStart, cancelImportEnd)
+  : "";
 const accountScopeJs = readFileSync("src/accountScope.js", "utf8");
 const routerJs = readFileSync("src/router.js", "utf8");
 const politicianTradesJs = readFileSync("src/politicianTrades.js", "utf8");
@@ -424,6 +448,15 @@ const fidelityCusipCsv = adapters.buildImportResult({
   fidelityCsv: `Account,Security ID / CUSIP,Security Description,Units Held,Current Price USD,Current Value Dollars,Total Basis
 Taxable,595112103,MICRON TECHNOLOGY INC (MU),10,$100.00,$1000.00,$750.00`
 });
+const csvImportPreview = buildPortfolioImportPreview(csvResult, {
+  fileName: "sample-fidelity-positions.csv",
+  createdAt: "2026-05-28T12:00:00.000Z"
+});
+const canceledCsvImportPreview = cancelPortfolioImportPreview(csvImportPreview);
+const appliedCsvImportPreview = applyPortfolioImportPreview(csvImportPreview, {
+  previousHoldings: [{ ticker: "OLD", account: "Taxable", shares: 1, marketValue: 250 }],
+  importedAt: "2026-05-28T12:05:00.000Z"
+});
 const plaidRows = normalizePlaidHoldings({
   accounts: [{ account_id: "a1", name: "Fidelity Brokerage", subtype: "individual" }],
   securities: [{ security_id: "s1", ticker_symbol: "MU", name: "Micron Technology", sector: "Semiconductors" }],
@@ -447,12 +480,14 @@ assert(existsSync("src/tickerResearch.js"), "ticker research lens module should 
 assert(existsSync("src/quantLensContext.js"), "Quant Lens peer/history context module should exist");
 assert(existsSync("src/alertsEngine.js"), "local alerts engine should exist");
 assert(existsSync("src/dailyCommandBrief.js"), "Daily Command Brief module should exist");
+assert(existsSync("src/portfolioAttribution.js"), "portfolio attribution module should exist");
 assert(existsSync("src/decisionJournal.js"), "Decision Journal module should exist");
 assert(existsSync("src/marketDataProvider.js"), "mock-first market data provider module should exist");
 assert(existsSync("src/marketEventProviders.js"), "market event/news provider module should exist");
 assert(existsSync("src/marketDrivers.js"), "Market Drivers explainer module should exist");
 assert(marketDriversJs.includes("BROAD_MARKET_DRIVER_TICKERS"), "Market Drivers should define broad-market proxy tickers");
 assert(marketDriversJs.includes("AI_TECH_DRIVER_TICKERS"), "Market Drivers should define AI/tech proxy tickers");
+assert(marketDriversJs.includes("MARKET_REGIME_TICKERS"), "Market Drivers should define market-regime proxy tickers");
 assert(marketDriversJs.includes("source-labeled explanation, not a confirmed cause"), "Market Drivers should avoid fake-causality language");
 assert(marketDriversJs.includes("socialEvidenceForScope"), "Market Drivers should consume social evidence when available");
 assert(marketDriversJs.includes("newsReadThroughDriver"), "Market Drivers should consume news/event read-throughs when available");
@@ -608,6 +643,8 @@ assert(researchLensSmoke.buffettChecklist.missingEvidence.some((item) => /cash|d
 assert(researchLensSmoke.valuationContext.note.includes("Margin-of-safety"), "ticker research lens should provide margin-of-safety context");
 assert(tickerSignals.every((signal) => Array.isArray(signal.whyScoreIsHigh) && Array.isArray(signal.missingData)), "combined ticker signals should include explanation fields");
 assert(localAlerts.some((alert) => alert.type === "position-weight"), "local alerts should include position weight threshold rules");
+assert(localAlerts.some((alert) => alert.type === "target-allocation-drift"), "local alerts should include target allocation drift rules");
+assert(localAlerts.filter((alert) => alert.type === "target-allocation-drift").every((alert) => /not a trade command/i.test(alert.detail)), "target drift alerts should use review language");
 assert(localAlerts.some((alert) => alert.type === "ticker-signal"), "local alerts should include ticker signal threshold rules");
 assert(localAlerts.some((alert) => alert.type === "politician-trade-match"), "local alerts should include politician disclosure match rules");
 assert(localAlerts.some((alert) => alert.type === "reddit-mention-acceleration"), "local alerts should include Reddit acceleration rules");
@@ -674,6 +711,7 @@ assert(indexHtml.includes('id="syncPlaidFidelityBtn"'), "Imports should include 
 assert(indexHtml.includes('id="unlinkPlaidFidelityBtn"'), "Imports should include a Plaid disconnect action");
 assert(indexHtml.includes('id="fidelityPlaidStatus"'), "Imports should show Plaid Link readiness and error status next to the button");
 assert(indexHtml.includes('id="accountScopePanel"'), "Sidebar should include a clickable account scope panel");
+assert(indexHtml.includes('id="accountAllocationPanel"'), "Holdings should include a dedicated account allocation panel");
 assert(appJs.includes("startPlaidFidelityLink"), "app.js should wire Plaid Link startup");
 assert(appJs.includes("exchangeFidelityPublicToken"), "app.js should exchange Plaid public token through the local backend");
 assert(appJs.includes("syncPlaidFidelityHoldings"), "app.js should sync Plaid holdings into active portfolio state");
@@ -682,6 +720,8 @@ assert(appJs.includes("buildAccountScopeModel") && appJs.includes("filterHolding
 assert(appJs.includes("handleAccountScopeClick"), "app.js should wire sidebar account scope buttons");
 assert(accountScopeJs.includes("selectedSummary") && accountScopeJs.includes("portfolioWeight") && accountScopeJs.includes("cashWeight"), "Account scope model should expose selected value, portfolio weight, and cash weight");
 assert(accountScopeJs.includes("dailyChangePercent") && accountScopeJs.includes("missingCostBasisCount") && accountScopeJs.includes("staleHoldingCount"), "Account scope model should expose daily move and data-quality signals");
+assert(accountScopeJs.includes("inferTaxBucket") && accountScopeJs.includes("assetMix") && accountScopeJs.includes("topPositions"), "Account scope model should expose tax bucket, asset mix, and top positions");
+assert(appJs.includes("data-tax-bucket") && portfolioViewJs.includes("tax-bucket-pill") && indexHtml.includes(".tax-bucket-roth") && indexHtml.includes(".tax-bucket-taxable") && indexHtml.includes(".tax-bucket-hsa"), "Account allocation UI should distinguish Roth, taxable, and HSA buckets");
 assert(accountScopeJs.includes("leveragedExposure") && appJs.includes("accountScopeWarning"), "Account scope selector should surface leverage and warning context");
 assert(appJs.includes("Portfolio scope") && appJs.includes("formatSignedPercent"), "Account scope UI should use clear scope copy and signed daily move formatting");
 assert(portfolioViewJs.includes("accountDetail") && portfolioViewJs.includes("formatCompact(accountSummary.value)"), "Data mode indicator should include selected account value and holding count");
@@ -778,6 +818,7 @@ assert(appJs.includes("buildMarketDriverReport"), "app.js should build the Marke
 assert(appJs.includes("marketDrivers,"), "app.js should pass Market Drivers into render and Daily Brief");
 assert(portfolioViewJs.includes("renderMarketDrivers"), "Portfolio view should render the Market Drivers screen");
 assert(portfolioViewJs.includes("renderOverviewMarketDriversSnapshot"), "Overview should show a compact Market Drivers snapshot");
+assert(portfolioViewJs.includes("renderMarketRegimeCard"), "Market Drivers screen should render a market regime panel");
 assert(marketDataSelectionJs.includes('"market-driver-proxy"'), "market data selection should request market-driver proxies separately from default research tickers");
 assert(!indexHtml.includes("https://cdn.plaid.com/link/v2/stable/link-initialize.js"), "Plaid CDN script should lazy-load only after Tucker starts the Plaid connector flow");
 assert(appJs.includes("function loadPlaidLinkScript"), "app.js should lazy-load Plaid Link only when the connector flow starts");
@@ -841,6 +882,8 @@ assert(indexHtml.includes('data-screen="market-intelligence"'), "index.html shou
 assert(indexHtml.includes('data-screen="signal-review"'), "index.html should define a focused Signal Review screen");
 assert(indexHtml.includes('data-screen="data-sources"'), "index.html should define a focused Data Sources screen");
 assert(indexHtml.includes('data-screen="settings"'), "index.html should define a focused Settings screen");
+assert(routerJs.includes('"alpha-engine": "alpha"'), "router should support the Alpha Engine route alias from dashboard docs");
+assert(routerJs.includes('replace(/^\\/+/, "")'), "router should normalize slash-style local routes into focused hash screens");
 assert(indexHtml.includes("nav-more"), "secondary research/planning tools should be grouped instead of competing with the main nav");
 assert(indexHtml.includes('<details class="nav-more" open>'), "secondary research/planning tools should stay reachable on mobile");
 assert(!/aside \.nav-more,\s*\.sidebar-card/s.test(indexHtml), "mobile nav should not hide secondary research routes");
@@ -874,9 +917,11 @@ assert(eventCalendarSummary.next7 >= 1, "event calendar summary should count nea
 assert(eventCalendarImport.eventsImported === 1 && eventCalendarImport.records[0].sourceMode === "imported", "calendar CSV import should normalize imported event rows");
 assert(indexHtml.includes('id="watchlistIdeasPanel"'), "Watchlist route should include idea rows panel");
 assert(indexHtml.includes('id="watchlistSummaryPanel"'), "Watchlist route should include summary panel");
+assert(indexHtml.includes('id="watchlistQuickTicker"') && indexHtml.includes('id="quickAddWatchlistBtn"'), "Watchlist route should expose a quick add ticker flow");
 assert(indexHtml.includes('id="watchlistStatusFilter"') && indexHtml.includes('id="watchlistSourceFilter"'), "Watchlist route should include status and source filters");
 assert(routerJs.includes('watchlist: { title: "Watchlist"'), "router should expose Watchlist route metadata");
 assert(appJs.includes("growthDashboardWatchlistIdeas"), "app should persist watchlist ideas locally");
+assert(appJs.includes("quickAddWatchlistIdea"), "app should support simple user-managed watchlist add flow");
 assert(appJs.includes("promoteTickerSignalToIdea"), "app should let ticker signals promote into the idea pipeline");
 assert(indexHtml.includes('class="overview-digest-grid command-brief-grid overview-priority-grid"'), "Overview should use a compact command brief grid");
 assert(indexHtml.includes("Portfolio Value & Daily Move"), "Overview should lead with portfolio value and daily move");
@@ -949,6 +994,9 @@ assert(portfolioViewJs.includes("function renderSignalReview"), "portfolio view 
 assert(portfolioViewJs.includes("Backtesting-lite"), "Signal Review should use exploratory backtesting-lite language");
 assert(portfolioViewJs.includes("This is not a validated strategy or a prediction engine"), "Signal Review should not imply validated prediction power");
 assert(portfolioViewJs.includes("buildTickerDetailModel"), "portfolio view should build ticker detail data from local state");
+assert(appJs.includes("window.location.hash || pathRoute"), "ticker pages should support direct /ticker/SYMBOL path fallback");
+assert(portfolioViewJs.includes("providerAvailability"), "ticker detail model should expose provider availability summary");
+assert(portfolioViewJs.includes("function buildTickerContextLinks"), "ticker pages should expose portfolio/watchlist context links");
 assert(portfolioViewJs.includes("Price Trend"), "ticker detail page should include a price trend section");
 assert(portfolioViewJs.includes("Technical Signal Context"), "ticker detail page should include native technical-analysis context");
 assert(portfolioViewJs.includes("Return distribution") && portfolioViewJs.includes("Spectral scan") && portfolioViewJs.includes("Regime proxy"), "ticker technical context should expose the deeper GitHub dashboard diagnostics");
@@ -966,6 +1014,13 @@ assert(indexHtml.includes("--surface-elevated"), "index.html should include Appl
 assert(indexHtml.includes("--radius-large"), "index.html should include large-radius card tokens");
 assert(indexHtml.includes("--shadow-soft"), "index.html should include soft-shadow design tokens");
 assert(indexHtml.includes('id="thirtySecondBriefPanel"'), "index.html should include portfolio snapshot command panel");
+assert(indexHtml.includes('id="firstRunOnboardingPanel"'), "Overview should include a guided first-run onboarding panel");
+assert(indexHtml.includes(".first-run-card"), "first-run onboarding should use a styled app-native card");
+assert(portfolioViewJs.includes("buildFirstRunOnboardingModel"), "portfolio view should build deterministic first-run onboarding state");
+assert(portfolioViewJs.includes("Import your portfolio to begin"), "first-run onboarding should clearly guide no-data users to import");
+assert(portfolioViewJs.includes("Sample portfolio is active"), "first-run onboarding should clearly label sample mode");
+assert(portfolioViewJs.includes("data-overview-action=\"sample\""), "first-run onboarding should expose the existing sample-data action");
+assert(portfolioViewJs.includes("holdings-empty-state"), "Holdings should show a first-run empty state instead of a filter-only message");
 assert(indexHtml.includes('id="fidelityFile"'), "index.html should include Fidelity CSV import control");
 assert(indexHtml.includes('aria-label="Import Fidelity CSV or holdings JSON file"'), "Fidelity CSV/JSON file input should have an accessible label");
 assert(indexHtml.includes('id="fidelityDropZone"'), "Fidelity integration should expose a drag-and-drop import zone");
@@ -982,6 +1037,7 @@ assert(!indexHtml.includes("Advanced dashboard filters"), "stale advanced dashbo
 assert(indexHtml.includes('id="importSummaryPanel"'), "index.html should include import summary panel");
 assert(indexHtml.includes('id="importDebugPanel"'), "index.html should include import debug panel");
 assert(indexHtml.includes('id="targetAllocationsPanel"'), "index.html should include target allocations panel");
+assert(indexHtml.includes('value="sell-and-rebalance"'), "Targets screen should expose a sell-and-rebalance simulator mode");
 assert(indexHtml.includes('href="#what-if"'), "sidebar should include What-If simulator route");
 assert(indexHtml.includes('id="what-if" data-screen="what-if"'), "index.html should include What-If screen");
 assert(indexHtml.includes('id="whatIfAction"'), "What-If screen should include scenario action control");
@@ -1026,6 +1082,10 @@ assert(indexHtml.includes("Fidelity portfolio import"), "Data Sources should foc
 assert(!indexHtml.includes("Start Fidelity connector") && !indexHtml.includes("Sync holdings"), "no-op Fidelity connector controls should not remain visible before a backend exists");
 assert(indexHtml.includes("clearPortfolioBtn"), "Settings should expose a local clear portfolio control");
 assert(portfolioViewJs.includes("Signal / not owned"), "ticker pages should distinguish signal-only tickers from watchlist-only tickers");
+assert(portfolioViewJs.includes("renderPortfolioAttribution"), "Holdings screen should render contribution-to-return attribution");
+assert(indexHtml.includes('id="portfolioAttributionPanel"'), "Holdings screen should include a portfolio attribution panel");
+assert(portfolioAttribution.periods.daily.availableCount >= 1, "portfolio attribution should produce daily contribution rows");
+assert(portfolioAttribution.rows.every((row) => row.ticker && row.daily), "portfolio attribution rows should stay ticker keyed with period details");
 assert(portfolioViewJs.includes("STALE_PERSISTED_REPAIRED"), "portfolio UI should label repaired local holdings instead of treating them as sample data");
 assert(appJs.includes("realPortfolioImport"), "app.js should distinguish real imports from sample/demo data");
 assert(appJs.includes("import { normalizeSeekingAlphaWorkbook }"), "app.js should include Seeking Alpha workbook import path");
@@ -1037,6 +1097,15 @@ assert(appJs.includes("saveAlertThresholdsFromUi"), "app.js should save configur
 assert(appJs.includes("growthDashboardTargetAllocations"), "app.js should persist target allocations");
 assert(appJs.includes("targetAllocations: state.targetAllocations"), "state export should include target allocations");
 assert(appJs.includes("buildThesisAlerts"), "app.js should wire thesis alerts into the attention system");
+assert(appJs.includes("growthDashboardThesisSnapshots"), "app.js should persist thesis snapshots locally");
+assert(appJs.includes("thesisSnapshots: state.thesisSnapshots"), "state export should include thesis snapshots");
+assert(appJs.includes("buildDashboardStateRestorePreview") && appJs.includes("pendingStateRestore"), "dashboard state restore should preview before applying local backup data");
+assert(appJs.includes("accountScope: state.accountScope") && appJs.includes("marketDataLiveMode: state.marketDataLiveMode"), "dashboard state backup should include local account scope and market data live-mode settings");
+assert(indexHtml.includes('id="stateRestorePreview"') && appJs.includes("Apply restore") && appJs.includes("Cancel"), "settings should show an apply/cancel restore preview for state backups");
+assert(indexHtml.includes('id="saveThesisSnapshotBtn"') && indexHtml.includes('id="thesisSnapshotPanel"'), "Thesis route should include snapshot save and history UI");
+assert(portfolioViewJs.includes("renderTickerThesisSnapshotHistory"), "Ticker pages should render thesis snapshot history");
+assert(thesisSnapshot.ticker === "MU" && thesisSnapshot.sourceType === "user-written", "thesis snapshots should normalize source labels");
+assert(thesisSnapshotComparison.changed, "thesis snapshot comparison should detect current-vs-prior changes");
 assert(appJs.includes("syncTickerTargetFromThesis"), "thesis target edits should sync into target allocations");
 assert(appJs.includes("applyManualImportMapping"), "app.js should include manual CSV mapping fallback");
 assert(appJs.includes("Preview before applying"), "app.js should render a pre-apply import preview");
@@ -1052,8 +1121,18 @@ assert(appJs.includes("handleFidelityDrop"), "app.js should wire drag-and-drop F
 assert(appJs.includes("Map columns"), "manual Fidelity mapping should use human-readable copy");
 assert(appJs.includes("Rows needing review"), "app.js should show row-review diagnostics for partial imports");
 assert(appJs.includes("cancelPendingPortfolioImport"), "app.js should allow canceling a portfolio import preview");
+assert(fidelityImportBranch.includes("buildPortfolioImportPreview") && fidelityImportBranch.includes("pendingCsvImport =") && fidelityImportBranch.includes("preview") && fidelityImportBranch.includes("persist: false") && fidelityImportBranch.includes("return;"), "Fidelity file uploads should stage a preview and return before mutating holdings");
+assert(!fidelityImportBranch.includes("mergeImportedRecords"), "Fidelity file uploads should not merge holdings before preview confirmation");
+assert(cancelImportFunction.includes("cancelPortfolioImportPreview") && !cancelImportFunction.includes("mergeImportedRecords") && !cancelImportFunction.includes("saveHoldings") && !cancelImportFunction.includes("saveLatestImportReport") && !cancelImportFunction.includes("saveFidelityStatus"), "canceling a portfolio import preview should not mutate or persist holdings");
+assert(csvImportPreview.canApply && csvImportPreview.acceptedRows === csvResult.records.length, "portfolio import preview should stage all accepted CSV rows");
+assert(canceledCsvImportPreview.changed === false && canceledCsvImportPreview.clearPendingPreview === true, "portfolio import preview cancel should clear pending state without applying holdings");
+assert(appliedCsvImportPreview.changed && appliedCsvImportPreview.holdings.length === csvResult.records.length && appliedCsvImportPreview.fidelityStatus.mode === "csv-imported", "portfolio import preview confirm should produce applied holdings and CSV-imported status");
+assert(appJs.includes("What changed since last import") && appJs.includes("renderImportChangeSummary"), "confirmed imports should render a portfolio change summary");
+assert(appliedCsvImportPreview.importReport.changeSummary.removedPositions.some((row) => row.ticker === "OLD"), "portfolio import confirm should compare against the previous active portfolio");
+assert(appliedCsvImportPreview.importReport.changeSummary.rowsSkipped >= 0 && appliedCsvImportPreview.importReport.changeSummary.rowsFlagged >= 0, "portfolio import change summary should include skipped and flagged row counts");
 assert(marketDataSelectionJs.includes("!holding.cash && holding.assetClass !== \"Cash\"") && marketDataSelectionJs.includes("holding.marketDataEligible !== false"), "market data requests should skip cash-like and local-identifier holdings before calling live quote providers");
 assert(portfolioViewJs.includes("Market data diagnostics"), "Data Sources should expose safe market-data provider diagnostics");
+assert(portfolioViewJs.includes("coverageSummary") && portfolioViewJs.includes("52-week high/low") && portfolioViewJs.includes("Average volume") && portfolioViewJs.includes("ticker-provider-coverage"), "Finnhub diagnostics should expose per-ticker field coverage in Data Sources and ticker pages");
 assert(indexHtml.includes('accept=".csv,.json,text/csv,application/json"'), "portfolio import should accept CSV and holdings JSON");
 assert(csvResult.validation.ok, "sample CSV import path should validate");
 assert(csvResult.records.some((record) => record.ticker === "NVDA"), "sample CSV import should include NVDA");
@@ -1117,6 +1196,8 @@ assert(marketDataSnapshot.quotesByTicker.SMH && marketDataSnapshot.quotesByTicke
 assert(holdingsWithMarketData.some((holding) => holding.ticker === "MU" && holding.marketDataIsMock), "mock market data should enrich holdings");
 assert(["up", "down", "mixed", "unknown"].includes(marketDriverReport.broadMarket.direction), "Market Drivers should return a broad-market direction");
 assert(["up", "down", "mixed", "unknown"].includes(marketDriverReport.aiTech.direction), "Market Drivers should return an AI/tech direction");
+assert(["risk-on", "risk-off", "mixed", "overbought", "oversold", "defensive"].includes(marketDriverReport.marketRegime.regime), "Market Drivers should include a deterministic market regime classification");
+assert(marketDriverReport.marketRegime.signals.length >= 6, "Market regime should expose contributing signals");
 assert(marketDriverReport.broadMarket.drivers.length > 0, "Market Drivers should generate broad-market driver rows");
 assert(marketDriverReport.aiTech.drivers.length > 0, "Market Drivers should generate AI/tech driver rows");
 assert(marketDriverReport.aiTech.drivers.some((row) => row.href === "#risk" || row.href === "#market-intelligence"), "AI/tech drivers should link to relevant deep screens");
@@ -1127,6 +1208,11 @@ assert(targetPlan.rows.some((row) => row.scope === "ticker" && row.key === "MU")
 assert(targetPlan.cashPlan.availableCash >= 0, "target allocation plan should include a cash deployment planner");
 assert(targetPlan.leveragedGuardrails.some((item) => item.ticker === "UPRO" || item.ticker === "SOXL"), "target allocation plan should include leveraged ETF guardrails");
 assert(targetPlan.suggestions.every((item) => /^Review|^Hold/i.test(item.action)), "rebalance suggestions should be review prompts, not trade commands");
+assert(targetPlan.simulator?.readOnly === true, "target allocation plan should include a read-only rebalancing simulator");
+assert(Array.isArray(targetPlan.simulator.beforeAfterRows), "rebalancing simulator should expose before/after allocation rows");
+assert(Array.isArray(targetPlan.simulator.estimatedTrades), "rebalancing simulator should expose estimated ticker adjustments");
+assert(portfolioViewJs.includes("renderRebalanceSimulator"), "Targets view should render the rebalancing simulator");
+assert(portfolioViewJs.includes("No brokerage order, trade ticket, or execution step exists here."), "rebalancing simulator UI should explicitly avoid execution");
 assert(whatIfResult.status === "ready", "What-If simulator should return a ready result for a valid scenario");
 assert(whatIfResult.readOnly === true, "What-If simulator should explicitly be read-only");
 assert(whatIfResult.deltas.totalValue.delta > 0, "external add scenario should show total value delta");
@@ -1151,16 +1237,25 @@ assert(indexHtml.includes('id="alphaRecommendationFilter"'), "Alpha Engine shoul
 assert(indexHtml.includes("alpha-ranking-table"), "Alpha Engine should render a table-based holdings rank");
 assert(portfolioViewJs.includes("buildRankedAlphaHoldingRows"), "Alpha route should build ranked holding rows");
 assert(portfolioViewJs.includes("renderAlphaHoldingRankTable"), "Alpha route should render a table-based holdings rank");
-assert(portfolioViewJs.includes("alpha-rank-details") && /Why this rank\?/.test(alphaEngineDoc), "Holding rank details should explain score drivers");
+assert(portfolioViewJs.includes("alpha-rank-details") && portfolioViewJs.includes("Explain score") && /Why this rank\?/.test(alphaEngineDoc), "Holding rank details should explain score drivers");
+assert(portfolioAnalyticsJs.includes("riskScoreBreakdown") && portfolioViewJs.includes("renderTransparentScoreBreakdown"), "Risk and Alpha scores should expose transparent score math");
+assert(portfolioViewJs.includes("Calculated local score; not an AI explanation") && portfolioViewJs.includes("Missing-data handling"), "Score explanation UI should distinguish calculated signals from AI explanations and missing-data handling");
 assert(portfolioViewJs.includes("do not treat this as a forecast or trade instruction"), "Alpha Engine should avoid trade-command framing");
 assert(portfolioViewJs.includes("buildAffectedExposureSummary"), "Market Intelligence should use a shared affected exposure summary helper");
 assert(portfolioViewJs.includes("ticker-chips"), "Market Intelligence should render deduplicated ticker chips");
 assert(portfolioViewJs.includes("renderRiskDeepDive"), "Risk route should render dedicated deep-dive panels");
+assert(portfolioViewJs.includes("renderRiskConcentrationSummary"), "Risk route should render concentration summary panel");
 assert(portfolioViewJs.includes("renderRiskThemeExposurePanel"), "Risk route should render theme exposure panel");
 assert(portfolioViewJs.includes("renderRiskAssetMixPanel"), "Risk route should render asset mix and cash exposure panel");
 assert(portfolioViewJs.includes("renderRiskCorrelationPanel"), "Risk route should render correlation and overlap panel");
+assert(portfolioAnalyticsJs.includes("POSITION_CONCENTRATION_THRESHOLDS"), "Risk analytics should expose explicit 5/10/20/30 concentration thresholds");
+assert(portfolioAnalyticsJs.includes("buildConcentrationInterpretation"), "Risk analytics should generate deterministic concentration interpretations");
+assert(portfolioAnalyticsJs.includes("securityTypeExposure"), "Risk analytics should separate single stocks, normal ETFs, leveraged ETFs, and cash");
+assert(portfolioAnalyticsJs.includes("LEVERAGED_ETF_UNDERLYING_DRAWDOWNS") && portfolioAnalyticsJs.includes("buildLeveragedEtfDrawdownScenarios"), "Risk analytics should model leveraged ETF drawdown scenarios");
 assert(portfolioViewJs.includes("Measured pairs"), "Risk correlation panel should display measured pair correlations when history exists");
-assert(indexHtml.includes("riskThemeExposurePanel") && indexHtml.includes("riskCashExposurePanel") && indexHtml.includes("riskCorrelationPanel"), "Risk route should include decision-grade risk panel targets");
+assert(indexHtml.includes("riskConcentrationSummaryPanel") && indexHtml.includes("riskThemeExposurePanel") && indexHtml.includes("riskCashExposurePanel") && indexHtml.includes("riskCorrelationPanel"), "Risk route should include decision-grade risk panel targets");
+assert(indexHtml.includes(".risk-summary-card") && indexHtml.includes(".risk-summary-drivers"), "Risk concentration summary should have stable responsive styling");
+assert(indexHtml.includes(".leveraged-scenario-grid") && indexHtml.includes("repeat(auto-fit, minmax(8rem, 1fr))") && portfolioViewJs.includes("riskLeveragedVolatilityDragModule") && portfolioViewJs.includes("Volatility Drag + Drawdown Scenarios"), "Risk route should show leveraged ETF volatility drag scenarios");
 assert(indexHtml.includes("grid-template-columns: minmax(18rem, 1fr) max-content"), "Risk rows should reserve readable label width before value/action columns");
 assert(indexHtml.includes(".risk-row-main.ranked") && indexHtml.includes("grid-template-columns: auto minmax(0, 1fr)"), "Top position risk rows should align rank and label horizontally");
 assert(indexHtml.includes(".risk-row-main b,") && indexHtml.includes("word-break: keep-all"), "Risk ticker labels should not wrap one character per line");
@@ -1172,7 +1267,12 @@ assert(indexHtml.includes(".sidebar-card.account-scope-card") && indexHtml.inclu
 assert(indexHtml.includes("normal") && indexHtml.includes("elevated") && indexHtml.includes("extreme"), "Risk status labels should have visible styles");
 assert(portfolioViewJs.includes("renderMarketTickerSignals"), "Market Intelligence route should render ticker watchlist signal cards");
 assert(portfolioViewJs.includes("renderDataSourceHealth"), "Data Sources route should render future-source readiness matrix");
+assert(portfolioViewJs.includes("buildDataSourceHealthSummary") && portfolioViewJs.includes("provider-backed") && portfolioViewJs.includes("Last success:") && portfolioViewJs.includes("Fallback:"), "Data Sources health should summarize provider-backed/local status, freshness, and fallback reasons");
+assert(indexHtml.includes(".source-health-summary"), "Data Sources health summary should have dedicated responsive styling");
 assert(portfolioViewJs.includes("renderSettingsConfiguration"), "Settings route should render local configuration placeholders");
+assert(portfolioViewJs.includes("buildSettingsProviderStatusRows") && portfolioViewJs.includes("Provider configuration status"), "Settings should expose provider configuration status without showing secrets");
+assert(portfolioViewJs.includes("data-provider-settings-row") && portfolioViewJs.includes("Last error:"), "Settings provider cards should show credential state, last success, and last error metadata");
+assert(appJs.includes("aiProviders: config.aiProviders || {}") && appJs.includes("config.aiProviders?.openai?.liveProviderCalls"), "OpenAI provider readiness should pass from local backend config into Settings");
 assert(portfolioViewJs.includes("Manual/imported holdings"), "Data Sources should show manual/imported holdings readiness");
 assert(portfolioViewJs.includes("Reddit"), "Data Sources should include future Reddit source status");
 assert(portfolioViewJs.includes("Reddit diagnostics"), "Data Sources should expose Reddit diagnostics without provider internals");
@@ -1183,6 +1283,7 @@ assert(portfolioViewJs.includes("Data refresh"), "Settings should include data r
 assert(portfolioViewJs.includes("Risk thresholds"), "Settings should include risk threshold configuration placeholder");
 assert(portfolioViewJs.includes("Watchlist preferences"), "Settings should include watchlist preference placeholder");
 assert(portfolioViewJs.includes("renderWatchlistIdeas"), "Portfolio view should render Watchlist / Ideas workflow");
+assert(portfolioViewJs.includes("<span>Quote</span>"), "Watchlist cards should show quote context when available");
 assert(portfolioViewJs.includes('data-watchlist-action="promote-signal"'), "Signal cards should expose Track idea promotion controls");
 assert(watchlistIdeaRows.some((row) => row.status === "owned" && row.owned), "watchlist rows should derive owned status from holdings");
 assert(filterWatchlistIdeaRows(watchlistIdeaRows, { status: "candidate" }).every((row) => row.status === "candidate"), "watchlist status filter should work");

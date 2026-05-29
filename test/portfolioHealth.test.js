@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPortfolioHealth } from "../src/portfolioHealth.js";
+import { PORTFOLIO_HEALTH_COMPONENT_WEIGHTS, buildPortfolioHealth, buildPortfolioHealthScoreBreakdown } from "../src/portfolioHealth.js";
 
 const asOf = "2026-05-26T20:00:00-04:00";
 
@@ -33,6 +33,8 @@ test("portfolio health stays honest before real portfolio import", () => {
   assert.equal(health.tone, "sample");
   assert.equal(health.nextActions[0].href, "#imports");
   assert.match(health.summary, /not Tucker's real portfolio/i);
+  assert.equal(health.scoreBreakdown.generatedBy, "Calculated local portfolio health score. Not an AI explanation.");
+  assert.ok(health.scoreBreakdown.missingData.some((item) => /Import holdings/i.test(item)));
 });
 
 test("portfolio health produces a strong read when imported data is well covered", () => {
@@ -61,6 +63,22 @@ test("portfolio health produces a strong read when imported data is well covered
   assert.ok(["Strong", "Usable"].includes(health.label));
   assert.ok(health.strengths.some((strength) => /data is usable|freshness is usable|Targets/i.test(strength)));
   assert.ok(health.components.every((component) => component.href.startsWith("#")));
+  assert.equal(health.scoreBreakdown.finalScore, health.score);
+  assert.ok(health.scoreBreakdown.components.some((component) => component.key === "dataTrust" && component.weight === PORTFOLIO_HEALTH_COMPONENT_WEIGHTS.dataTrust));
+  assert.ok(health.scoreBreakdown.components.every((component) => Number.isFinite(component.points)));
+});
+
+test("portfolio health score breakdown preserves weighted math", () => {
+  const breakdown = buildPortfolioHealthScoreBreakdown([
+    { key: "dataTrust", label: "Data trust", score: 80, weight: 22, detail: "Usable import." },
+    { key: "concentration", label: "Concentration", score: 60, weight: 20, detail: "Moderate concentration." }
+  ], 29.6, 30);
+
+  assert.equal(breakdown.finalScore, 30);
+  assert.equal(breakdown.rawScore, 29.6);
+  assert.deepEqual(breakdown.components.map((component) => component.points), [17.6, 12]);
+  assert.match(breakdown.formula, /weighted average/i);
+  assert.doesNotMatch(JSON.stringify(breakdown), /\b(ai-generated advice|guaranteed)\b/i);
 });
 
 test("portfolio health prioritizes weak data, stale sources, and risk review", () => {

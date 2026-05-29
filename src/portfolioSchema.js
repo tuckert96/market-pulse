@@ -54,14 +54,19 @@ const DEFAULTS = Object.freeze({
   targetWeight: 0
 });
 
-const ETF_ASSET_CLASS = new Set(["UPRO", "TQQQ", "SOXL", "VGT", "VOO", "QQQ", "SGOV", "BIL"]);
-const LEVERAGED_ETFS = new Map([
+export const KNOWN_LEVERAGED_ETF_MULTIPLES = new Map([
   ["UPRO", 3],
   ["TQQQ", 3],
   ["SOXL", 3],
   ["SPXL", 3],
-  ["SQQQ", -3]
+  ["SQQQ", -3],
+  ["TECL", 3],
+  ["UDOW", 3],
+  ["FNGU", 3],
+  ["QLD", 2],
+  ["SSO", 2]
 ]);
+const ETF_ASSET_CLASS = new Set([...KNOWN_LEVERAGED_ETF_MULTIPLES.keys(), "VGT", "VOO", "VTI", "IVV", "SPY", "QQQ", "SGOV", "BIL"]);
 const SEMICONDUCTORS = new Set(["NVDA", "AMD", "MU", "SOXL", "TSM", "AVGO", "SMH", "CRDO"]);
 const MEGA_CAP_TECH = new Set(["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "META", "TSLA", "AVGO"]);
 const CORE_MEGA_CAP_RISK = new Set(["MSFT", "AAPL", "NVDA", "GOOGL", "GOOG", "AMZN", "META", "BRK.B", "BRK.A"]);
@@ -71,6 +76,8 @@ const CASH_LIKE_TICKERS = new Set(["CASH", "FCASH", "FDIC", "SPAXX", "FDRXX", "F
 
 export function normalizeHolding(input = {}, options = {}) {
   const ticker = normalizeTicker(input.ticker || input.symbol);
+  const inferredLeveragedMultiple = inferLeveragedEtfMultiple(ticker, input);
+  const explicitLeveragedFlag = input.isLeveragedEtf === true || /^(true|yes|1)$/i.test(String(input.isLeveragedEtf || ""));
   const shares = numberFrom(input.shares, input.quantity, 0);
   const price = numberFrom(input.price, input.lastPrice, input.currentPrice, 0);
   const marketValue = numberFrom(input.marketValue, input.positionValue, shares * price);
@@ -142,9 +149,9 @@ export function normalizeHolding(input = {}, options = {}) {
     totalDebt: numberFrom(input.totalDebt, input.debt, undefined),
     debtToEquity: numberFrom(input.debtToEquity, undefined),
     nextEarnings: input.nextEarnings || input.earningsDate,
-    leveragedMultiple: numberFrom(input.leveragedMultiple, LEVERAGED_ETFS.get(ticker) || 1),
-    beta: numberFrom(input.beta, inferBeta(ticker, assetClass, sector)),
-    isLeveragedEtf: Boolean(input.isLeveragedEtf ?? LEVERAGED_ETFS.has(ticker)),
+    leveragedMultiple: numberFrom(input.leveragedMultiple, inferredLeveragedMultiple || 1),
+    beta: numberFrom(input.beta, inferBeta(ticker, assetClass, sector, input)),
+    isLeveragedEtf: Boolean(isLeveragedEtfTicker(ticker, input) || explicitLeveragedFlag || Math.abs(numberFrom(input.leveragedMultiple)) > 1),
     isSemiconductor: Boolean(input.isSemiconductor ?? (SEMICONDUCTORS.has(ticker) || /semiconductor/i.test(sector))),
     isAiTheme: Boolean(input.isAiTheme ?? (SEMICONDUCTORS.has(ticker) || /ai|artificial intelligence/i.test(String(input.tags || "")))),
     isMegaCapTech: Boolean(input.isMegaCapTech ?? MEGA_CAP_TECH.has(ticker)),
@@ -233,6 +240,24 @@ export function normalizeTicker(value) {
     .replace(/[^A-Z0-9.-]/g, "");
 }
 
+export function knownLeveragedEtfMultiple(ticker) {
+  return KNOWN_LEVERAGED_ETF_MULTIPLES.get(normalizeTicker(ticker)) || 0;
+}
+
+export function inferLeveragedEtfMultiple(ticker, input = {}) {
+  const known = knownLeveragedEtfMultiple(ticker);
+  if (known) return known;
+  const text = `${normalizeTicker(ticker)} ${input.name || ""} ${input.company || ""} ${input.description || ""}`.toUpperCase();
+  const inverse = /INVERSE|SHORT|BEAR/.test(text);
+  if (/3X|ULTRAPRO|TRIPLE/.test(text)) return inverse ? -3 : 3;
+  if (/2X|ULTRA\b|DOUBLE/.test(text)) return inverse ? -2 : 2;
+  return 0;
+}
+
+export function isLeveragedEtfTicker(ticker, input = {}) {
+  return Math.abs(inferLeveragedEtfMultiple(ticker, input)) > 1;
+}
+
 export function sanitizeAccountLabel(value = "") {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -292,7 +317,7 @@ function inferSector(ticker, input) {
 function inferSleeve(ticker, assetClass, sector, input) {
   if (assetClass === "Cash") return "Cash";
   if (assetClass === "Treasuries") return "Treasuries / hedge";
-  if (["UPRO", "TQQQ", "SOXL"].includes(ticker)) return "Leveraged growth";
+  if (isLeveragedEtfTicker(ticker, input)) return "Leveraged growth";
   if (/semiconductor/i.test(sector)) return "AI / semiconductor";
   if (["VOO", "VGT", "QQQ"].includes(ticker)) return "Core index";
   if (input.speculative) return "Speculative";
@@ -301,7 +326,7 @@ function inferSleeve(ticker, assetClass, sector, input) {
 
 function inferRiskLevel(ticker, assetClass, sector, input) {
   if (input.riskLevel) return input.riskLevel;
-  if (LEVERAGED_ETFS.has(ticker)) return "Very high";
+  if (isLeveragedEtfTicker(ticker, input)) return "Very high";
   if (/semiconductor/i.test(sector)) return "High";
   if (assetClass === "Cash" || assetClass === "Treasuries") return "Low";
   if (ticker === "VGT" || ticker === "QQQ") return "Medium-high";
@@ -310,7 +335,7 @@ function inferRiskLevel(ticker, assetClass, sector, input) {
 
 function inferHoldingRiskCategory(ticker, input = {}) {
   if (input.riskCategory) return input.riskCategory;
-  if (LEVERAGED_ETFS.has(ticker) || input.isLeveragedEtf) return "leveraged_etf";
+  if (input.isLeveragedEtf || isLeveragedEtfTicker(ticker, input)) return "leveraged_etf";
   if (BROAD_INDEX_RISK.has(ticker)) return "broad_index";
   if (CORE_MEGA_CAP_RISK.has(ticker)) return "core_mega_cap";
   if (CYCLICAL_HIGH_BETA_RISK.has(ticker)) return "cyclical_high_beta";
@@ -318,11 +343,10 @@ function inferHoldingRiskCategory(ticker, input = {}) {
   return "speculative_growth";
 }
 
-function inferBeta(ticker, assetClass, sector) {
+function inferBeta(ticker, assetClass, sector, input = {}) {
   if (isCashLikeHolding(ticker, { assetClass, sector }) || assetClass === "Cash") return 0;
   if (assetClass === "Treasuries") return 0.15;
-  if (ticker === "UPRO") return 3;
-  if (ticker === "TQQQ" || ticker === "SOXL") return 3.3;
+  if (isLeveragedEtfTicker(ticker, input)) return Math.max(2, Math.abs(inferLeveragedEtfMultiple(ticker, input))) * 1.05;
   if (/semiconductor/i.test(sector)) return 1.7;
   if (ticker === "VGT" || ticker === "QQQ") return 1.2;
   return 1;

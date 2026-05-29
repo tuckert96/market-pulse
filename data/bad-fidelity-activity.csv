@@ -1,0 +1,4 @@
+Transaction Date,Action,Symbol,Description,Quantity,Price,Amount,Account,Notes
+05/22/2026,Buy,MU,Micron Technology,10,$104.50,"-$1,045.00",Taxable Brokerage,activity export row
+05/23/2026,Sell,BAD!,Invalid ticker row,5,$12.00,$60.00,Roth IRA,bad ticker
+05/24/2026,Dividend,SPAXX,Fidelity Government Money Market,not-a-number,$1.00,$10.00,Taxable Brokerage,bad quantity

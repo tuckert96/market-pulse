@@ -4,6 +4,7 @@ import { summarizeRedditMentions } from "./redditSignals.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
 
 export const BROAD_MARKET_DRIVER_TICKERS = Object.freeze(["SPY", "QQQ", "DIA", "IWM"]);
+export const MARKET_REGIME_TICKERS = Object.freeze(["SPY", "QQQ", "DIA", "IWM", "VIX", "VIXY", "VXX", "TLT", "IEF", "XLY", "XLU", "XLP"]);
 export const AI_TECH_DRIVER_TICKERS = Object.freeze([
   "QQQ",
   "VGT",
@@ -21,7 +22,7 @@ export const AI_TECH_DRIVER_TICKERS = Object.freeze([
   "SOXL"
 ]);
 export const MARKET_DRIVER_DEFAULT_TICKERS = Object.freeze([
-  ...new Set([...BROAD_MARKET_DRIVER_TICKERS, ...AI_TECH_DRIVER_TICKERS])
+  ...new Set([...BROAD_MARKET_DRIVER_TICKERS, ...AI_TECH_DRIVER_TICKERS, ...MARKET_REGIME_TICKERS])
 ]);
 
 const SCOPE_LABELS = Object.freeze({
@@ -56,6 +57,11 @@ export function buildMarketDriverReport({
     politicianTrades,
     providerReadiness,
     marketEvents
+  });
+  const marketRegime = buildMarketRegime({
+    quotesByTicker,
+    sourceSummary,
+    asOf
   });
   const broadMarket = buildDriverScope({
     id: "broad-market",
@@ -99,6 +105,7 @@ export function buildMarketDriverReport({
     sourceStatus: sourceSummary.overallLabel,
     sourceMode: sourceSummary.overallMode,
     headline: buildReportHeadline(broadMarket, aiTech),
+    marketRegime,
     broadMarket,
     aiTech,
     topDrivers,
@@ -520,6 +527,241 @@ function actionItemsForScope({ key, direction, exposureWeight, drivers, missingD
   return unique(items).slice(0, 4);
 }
 
+export function buildMarketRegime({ quotesByTicker = {}, sourceSummary = {}, asOf = new Date().toISOString() } = {}) {
+  const signals = [
+    indexTrendSignal(quotesByTicker),
+    breadthSignal(quotesByTicker),
+    volatilitySignal(quotesByTicker),
+    ratesSignal(quotesByTicker),
+    leadershipSignal(quotesByTicker),
+    defensiveLeadershipSignal(quotesByTicker)
+  ];
+  const available = signals.filter((signal) => signal.status !== "missing");
+  const riskOnScore = available.reduce((sum, signal) => sum + (Number(signal.riskOnPoints) || 0), 0);
+  const riskOffScore = available.reduce((sum, signal) => sum + (Number(signal.riskOffPoints) || 0), 0);
+  const defensiveScore = available.reduce((sum, signal) => sum + (Number(signal.defensivePoints) || 0), 0);
+  const stretchUp = available.some((signal) => signal.status === "overbought");
+  const stretchDown = available.some((signal) => signal.status === "oversold");
+  const missingData = signals
+    .filter((signal) => signal.status === "missing")
+    .map((signal) => signal.missingLabel || `${signal.label} is unavailable.`);
+  const regime = classifyMarketRegime({ riskOnScore, riskOffScore, defensiveScore, stretchUp, stretchDown, availableCount: available.length });
+  const sourceMode = sourceSummary.marketDataMode || DATA_MODES.NOT_CONFIGURED;
+  const sourceStatus = sourceSummary.marketDataLabel || dataModeLabel(sourceMode);
+  const confidenceScore = regimeConfidence({ availableCount: available.length, missingCount: missingData.length, sourceMode, riskOnScore, riskOffScore });
+
+  return {
+    id: "market-regime",
+    asOf,
+    regime,
+    label: marketRegimeLabel(regime),
+    score: Math.round((riskOnScore - riskOffScore) * 10),
+    riskOnScore: roundOne(riskOnScore),
+    riskOffScore: roundOne(riskOffScore),
+    defensiveScore: roundOne(defensiveScore),
+    confidenceScore,
+    confidenceLabel: confidenceLabel(confidenceScore),
+    sourceStatus,
+    sourceMode,
+    summary: marketRegimeSummary(regime, sourceStatus),
+    interpretation: marketRegimeInterpretation(regime),
+    signals,
+    missingData,
+    actionItems: marketRegimeActionItems(regime, sourceMode, missingData)
+  };
+}
+
+function indexTrendSignal(quotesByTicker) {
+  const quotes = quotesFor(quotesByTicker, ["SPY", "QQQ", "DIA", "IWM"]);
+  if (!quotes.length) return missingSignal("index-trend", "Index trend", "SPY, QQQ, DIA, and IWM quotes are unavailable.");
+  const average = averageMove(quotes);
+  const status = average >= 0.012 ? "overbought" : average <= -0.012 ? "oversold" : average > 0.003 ? "risk-on" : average < -0.003 ? "risk-off" : "neutral";
+  return regimeSignal({
+    id: "index-trend",
+    label: "Index trend",
+    status,
+    reading: `${formatSignedPercent(average)} average across ${quotes.map((quote) => quote.ticker).join(", ")}`,
+    evidence: quotes.map((quote) => `${quote.ticker} ${formatSignedPercent(quote.dailyChangePercent)}`),
+    riskOnPoints: average > 0.003 ? Math.min(2.8, 0.8 + Math.abs(average) * 120) : 0,
+    riskOffPoints: average < -0.003 ? Math.min(2.8, 0.8 + Math.abs(average) * 120) : 0
+  });
+}
+
+function breadthSignal(quotesByTicker) {
+  const quotes = quotesFor(quotesByTicker, ["SPY", "QQQ", "DIA", "IWM", "VGT", "SMH", "SOXX", "XLY", "XLU", "XLP"]);
+  if (quotes.length < 3) return missingSignal("breadth", "Breadth proxy", "At least three index, sector, or theme proxy quotes are needed.");
+  const positive = quotes.filter((quote) => Number(quote.dailyChangePercent) > 0.001).length;
+  const negative = quotes.filter((quote) => Number(quote.dailyChangePercent) < -0.001).length;
+  const ratio = positive / quotes.length;
+  const status = ratio >= 0.7 ? "risk-on" : ratio <= 0.3 ? "risk-off" : "mixed";
+  return regimeSignal({
+    id: "breadth",
+    label: "Breadth proxy",
+    status,
+    reading: `${positive}/${quotes.length} proxies positive`,
+    evidence: [`${positive} positive`, `${negative} negative`, `${quotes.length - positive - negative} flat/mixed`],
+    riskOnPoints: ratio >= 0.7 ? 1.6 : ratio >= 0.55 ? 0.7 : 0,
+    riskOffPoints: ratio <= 0.3 ? 1.6 : ratio <= 0.45 ? 0.7 : 0
+  });
+}
+
+function volatilitySignal(quotesByTicker) {
+  const quote = firstQuote(quotesByTicker, ["VIX", "VIXY", "VXX"]);
+  if (!quote) return missingSignal("volatility", "Volatility proxy", "VIX, VIXY, or VXX quote is unavailable.");
+  const move = Number(quote.dailyChangePercent);
+  const status = move > 0.025 ? "risk-off" : move < -0.025 ? "risk-on" : "neutral";
+  return regimeSignal({
+    id: "volatility",
+    label: "Volatility proxy",
+    status,
+    reading: `${quote.ticker} ${formatSignedPercent(move)}`,
+    evidence: [`${quote.ticker} daily move ${formatSignedPercent(move)}`],
+    riskOnPoints: move < -0.025 ? Math.min(1.7, 0.8 + Math.abs(move) * 18) : 0,
+    riskOffPoints: move > 0.025 ? Math.min(2.2, 1 + Math.abs(move) * 20) : 0
+  });
+}
+
+function ratesSignal(quotesByTicker) {
+  const quote = firstQuote(quotesByTicker, ["TLT", "IEF"]);
+  if (!quote) return missingSignal("rates", "Rates proxy", "TLT or IEF quote is unavailable.");
+  const move = Number(quote.dailyChangePercent);
+  const status = move > 0.004 ? "risk-on" : move < -0.004 ? "risk-off" : "neutral";
+  return regimeSignal({
+    id: "rates",
+    label: "Rates proxy",
+    status,
+    reading: `${quote.ticker} ${formatSignedPercent(move)}`,
+    evidence: [`${quote.ticker} daily move ${formatSignedPercent(move)}`],
+    riskOnPoints: move > 0.004 ? Math.min(1.2, 0.4 + Math.abs(move) * 70) : 0,
+    riskOffPoints: move < -0.004 ? Math.min(1.2, 0.4 + Math.abs(move) * 70) : 0
+  });
+}
+
+function leadershipSignal(quotesByTicker) {
+  const qqq = quoteFor(quotesByTicker, "QQQ");
+  const spy = quoteFor(quotesByTicker, "SPY");
+  const iwm = quoteFor(quotesByTicker, "IWM");
+  if (!qqq || !spy) return missingSignal("leadership", "Growth / small-cap leadership", "QQQ and SPY quotes are needed for leadership.");
+  const qqqSpread = Number(qqq.dailyChangePercent) - Number(spy.dailyChangePercent);
+  const iwmSpread = iwm ? Number(iwm.dailyChangePercent) - Number(spy.dailyChangePercent) : null;
+  const riskOn = qqqSpread > 0.002 && (iwmSpread === null || iwmSpread > -0.003);
+  const riskOff = qqqSpread < -0.002 && (iwmSpread === null || iwmSpread < 0.003);
+  return regimeSignal({
+    id: "leadership",
+    label: "Growth / small-cap leadership",
+    status: riskOn ? "risk-on" : riskOff ? "risk-off" : "mixed",
+    reading: `QQQ vs SPY ${formatSignedPercent(qqqSpread)}${iwmSpread === null ? "" : `; IWM vs SPY ${formatSignedPercent(iwmSpread)}`}`,
+    evidence: [`QQQ ${formatSignedPercent(qqq.dailyChangePercent)}`, `SPY ${formatSignedPercent(spy.dailyChangePercent)}`, iwm ? `IWM ${formatSignedPercent(iwm.dailyChangePercent)}` : ""].filter(Boolean),
+    riskOnPoints: riskOn ? 1.4 : 0,
+    riskOffPoints: riskOff ? 1.2 : 0
+  });
+}
+
+function defensiveLeadershipSignal(quotesByTicker) {
+  const defensive = quotesFor(quotesByTicker, ["XLU", "XLP"]);
+  const growth = quotesFor(quotesByTicker, ["QQQ", "XLY"]);
+  if (!defensive.length || !growth.length) return missingSignal("defensive-leadership", "Defensive leadership", "XLU/XLP plus QQQ/XLY quotes are needed.");
+  const defensiveAvg = averageMove(defensive);
+  const growthAvg = averageMove(growth);
+  const spread = defensiveAvg - growthAvg;
+  return regimeSignal({
+    id: "defensive-leadership",
+    label: "Defensive leadership",
+    status: spread > 0.004 ? "defensive" : spread < -0.004 ? "risk-on" : "neutral",
+    reading: `Defensives vs growth ${formatSignedPercent(spread)}`,
+    evidence: [`Defensive avg ${formatSignedPercent(defensiveAvg)}`, `Growth avg ${formatSignedPercent(growthAvg)}`],
+    riskOnPoints: spread < -0.004 ? 0.8 : 0,
+    riskOffPoints: spread > 0.004 ? 0.8 : 0,
+    defensivePoints: spread > 0.004 ? 1.5 : 0
+  });
+}
+
+function classifyMarketRegime({ riskOnScore, riskOffScore, defensiveScore, stretchUp, stretchDown, availableCount }) {
+  if (!availableCount) return "mixed";
+  const spread = riskOnScore - riskOffScore;
+  if (stretchUp && spread >= 1.2) return "overbought";
+  if (stretchDown && spread <= -1.2) return "oversold";
+  if (defensiveScore >= 1.5 && riskOffScore >= riskOnScore - 0.5) return "defensive";
+  if (spread >= 2) return "risk-on";
+  if (spread <= -2) return "risk-off";
+  return "mixed";
+}
+
+function regimeConfidence({ availableCount, missingCount, sourceMode, riskOnScore, riskOffScore }) {
+  let score = 35 + Math.min(30, availableCount * 7) + Math.min(12, Math.abs(riskOnScore - riskOffScore) * 4);
+  if ([DATA_MODES.LIVE, DATA_MODES.CACHED].includes(sourceMode)) score += 12;
+  if ([DATA_MODES.SAMPLE, DATA_MODES.NOT_CONFIGURED].includes(sourceMode)) score -= 8;
+  if ([DATA_MODES.STALE, DATA_MODES.ERROR, DATA_MODES.PARTIAL, DATA_MODES.RATE_LIMITED].includes(sourceMode)) score -= 14;
+  score -= Math.min(18, missingCount * 3);
+  return Math.round(clamp(score, 8, 92));
+}
+
+function marketRegimeLabel(regime) {
+  return ({
+    "risk-on": "Risk-on",
+    "risk-off": "Risk-off",
+    mixed: "Mixed",
+    overbought: "Overbought",
+    oversold: "Oversold",
+    defensive: "Defensive"
+  })[regime] || "Mixed";
+}
+
+function marketRegimeSummary(regime, sourceStatus) {
+  const prefix = `${marketRegimeLabel(regime)} tape`;
+  if (regime === "mixed") return `${prefix}: signals are split or incomplete. Source status: ${sourceStatus}.`;
+  return `${prefix}: rule-based proxy signals lean ${marketRegimeLabel(regime).toLowerCase()}. Source status: ${sourceStatus}.`;
+}
+
+function marketRegimeInterpretation(regime) {
+  return ({
+    "risk-on": "Growth, small-cap, or broad participation is improving. Treat it as context for exposure and concentration review, not a directive.",
+    "risk-off": "Broad proxies are under pressure or volatility is rising. Inspect downside exposure, stale data, and thesis risk before making portfolio changes.",
+    mixed: "The tape is not sending a clean message. Prioritize source quality and portfolio-specific alerts over broad market read-throughs.",
+    overbought: "The market is strong enough to look stretched on short-term proxy signals. Review concentration and target drift before adding risk.",
+    oversold: "The market is weak enough to look stretched on short-term proxy signals. Review whether alerts are price-driven or thesis-driven.",
+    defensive: "Defensive proxies are leading or riskier groups are lagging. Review high-beta, leveraged, and AI/tech exposure carefully."
+  })[regime] || "Use this as deterministic context only.";
+}
+
+function marketRegimeActionItems(regime, sourceMode, missingData = []) {
+  const items = [];
+  if (missingData.length) items.push("Check Data Sources for missing regime inputs.");
+  if ([DATA_MODES.STALE, DATA_MODES.ERROR, DATA_MODES.PARTIAL, DATA_MODES.RATE_LIMITED].includes(sourceMode)) items.push("Refresh market data before leaning on the regime read.");
+  if (regime === "risk-off" || regime === "defensive") items.push("Inspect Risk / Concentration for high-beta and leveraged exposure.");
+  if (regime === "overbought") items.push("Review target drift and oversized winners.");
+  if (regime === "oversold") items.push("Separate price drawdown alerts from broken thesis alerts.");
+  if (!items.length) items.push("Use the contributing signals below, then inspect holdings and alerts.");
+  return unique(items).slice(0, 4);
+}
+
+function regimeSignal({ id, label, status, reading, evidence = [], riskOnPoints = 0, riskOffPoints = 0, defensivePoints = 0 }) {
+  return {
+    id,
+    label,
+    status,
+    reading,
+    evidence: evidence.filter(Boolean).slice(0, 5),
+    riskOnPoints: roundOne(riskOnPoints),
+    riskOffPoints: roundOne(riskOffPoints),
+    defensivePoints: roundOne(defensivePoints)
+  };
+}
+
+function missingSignal(id, label, missingLabel) {
+  return {
+    id,
+    label,
+    status: "missing",
+    reading: "Data unavailable",
+    evidence: [],
+    riskOnPoints: 0,
+    riskOffPoints: 0,
+    defensivePoints: 0,
+    missingLabel
+  };
+}
+
 function buildReportHeadline(broadMarket, aiTech) {
   return `Broad market: ${broadMarket.directionLabel}. AI/tech: ${aiTech.directionLabel}.`;
 }
@@ -574,6 +816,26 @@ function eventTickers(event = {}) {
     ...(event.inferredTickersAffected || []),
     ...(event.tickersMentioned || [])
   ].map(normalizeTicker).filter(Boolean));
+}
+
+function quoteFor(quotesByTicker = {}, ticker = "") {
+  const row = quotesByTicker[normalizeTicker(ticker)];
+  if (!row || !Number.isFinite(Number(row.dailyChangePercent))) return null;
+  return row;
+}
+
+function firstQuote(quotesByTicker = {}, tickers = []) {
+  return tickers.map((ticker) => quoteFor(quotesByTicker, ticker)).find(Boolean) || null;
+}
+
+function quotesFor(quotesByTicker = {}, tickers = []) {
+  return tickers.map((ticker) => quoteFor(quotesByTicker, ticker)).filter(Boolean);
+}
+
+function averageMove(quotes = []) {
+  const usable = quotes.filter((quote) => Number.isFinite(Number(quote.dailyChangePercent)));
+  if (!usable.length) return 0;
+  return usable.reduce((total, quote) => total + Number(quote.dailyChangePercent || 0), 0) / usable.length;
 }
 
 function isHoldingRelevantToScope(holding = {}, themeSet, key) {
@@ -637,6 +899,10 @@ function formatCurrency(value) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
+}
+
+function roundOne(value) {
+  return Math.round((Number(value) || 0) * 10) / 10;
 }
 
 function unique(values = []) {

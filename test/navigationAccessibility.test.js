@@ -99,10 +99,14 @@ test("ticker detail route keeps native anchor and route announcement behavior", 
   assert.match(indexHtml, /id="tickerDetailPanel"/);
   assert.match(routerJs, /canonicalHash: `#\/ticker\/\$\{encodeURIComponent\(ticker\)\}`/);
   assert.match(appJs, /selectedTicker: routeFromHash\(\)\.ticker/);
+  assert.match(appJs, /window\.location\.hash \|\| pathRoute/);
   assert.match(appJs, /window\.addEventListener\("hashchange", render\)/);
   assert.match(portfolioViewJs, /export function renderTickerLink/);
   assert.match(portfolioViewJs, /function renderTickerDetailPage/);
   assert.match(portfolioViewJs, /href="\$\{tickerDetailHash\(normalized\)\}"/);
+  assert.match(portfolioViewJs, /function buildTickerContextLinks/);
+  assert.match(portfolioViewJs, /href: "#holdings"/);
+  assert.match(portfolioViewJs, /href: "#watchlist"/);
   assert.doesNotMatch(portfolioViewJs, /data-ticker-link[^\\n]+role="link"/);
   assert.doesNotMatch(portfolioViewJs, /data-ticker-link[^\\n]+tabindex="0"/);
 });
@@ -138,7 +142,9 @@ test("sample, imported, live, cached, stale, error, and not-configured provider 
   assert.match(portfolioViewJs, /configured: \[DATA_MODES\.LIVE, DATA_MODES\.CACHED, DATA_MODES\.IMPORTED\]\.includes\(redditSource\.mode\)/);
   assert.match(portfolioViewJs, /politicianProviderSynced/);
   assert.match(portfolioViewJs, /configured: \[DATA_MODES\.LIVE, DATA_MODES\.CACHED, DATA_MODES\.IMPORTED\]\.includes\(politicianSource\.mode\)/);
-  assert.match(portfolioViewJs, /if \(row\.demoReady\) return dataModeLabel\(DATA_MODES\.SAMPLE\)/);
+  assert.match(portfolioViewJs, /export function dataSourceAvailabilityMode/);
+  assert.match(portfolioViewJs, /if \(row\.demoReady\) return DATA_MODES\.SAMPLE/);
+  assert.match(portfolioViewJs, /return dataModeLabel\(dataSourceAvailabilityMode\(row\)\)/);
 });
 
 test("demo and research-only imports cannot masquerade as real holdings", () => {
@@ -174,6 +180,9 @@ test("file inputs remain keyboard accessible through focusable controls", () => 
   assert.match(indexHtml, /\.button-label:focus-within/);
   assert.match(indexHtml, /id="fidelityFile" type="file"[^>]+aria-label="Import Fidelity CSV or holdings JSON file"/);
   assert.match(indexHtml, /id="stateFile" type="file"[^>]+aria-label="Import dashboard state JSON file"/);
+  assert.match(indexHtml, /id="stateRestorePreview" class="state-restore-preview" hidden/);
+  assert.match(appJs, /data-state-restore-action/);
+  assert.match(appJs, /Backup preview ready/);
   assert.match(indexHtml, /id="redditJsonFile" type="file"[^>]+aria-label="Import Reddit mention JSON file"/);
   assert.match(indexHtml, /id="politicianTradesFile" type="file"[^>]+aria-label="Import federal disclosure CSV or JSON file"/);
 });
@@ -204,7 +213,9 @@ test("Alpha Engine uses a semantic holdings ranking table with native details", 
   assert.match(portfolioViewJs, /<th scope="col">Quality score<\/th>/);
   assert.match(portfolioViewJs, /<th scope="col">Review priority<\/th>/);
   assert.match(portfolioViewJs, /<details class="alpha-rank-details">/);
-  assert.match(portfolioViewJs, /<summary aria-label="Show Alpha Engine factors and rank for \$\{escapeHtml\(row\.ticker\)\}">Factors & rank<\/summary>/);
+  assert.match(portfolioViewJs, /<summary aria-label="Explain Alpha Engine score for \$\{escapeHtml\(row\.ticker\)\}">Explain score<\/summary>/);
+  assert.match(portfolioViewJs, /renderTransparentScoreBreakdown/);
+  assert.match(portfolioViewJs, /Calculated local score; not an AI explanation/);
   assert.match(portfolioViewJs, /The Quant Lens is now a first-class Alpha quality input/);
   assert.match(indexHtml, /Quality score = Institutional Quant Lens \+ academic factor discipline \+ thesis \+ source quality/);
   assert.match(indexHtml, /Review priority is a separate urgency read/);
@@ -248,6 +259,8 @@ test("brief and risk layouts do not collapse labels into one-character columns",
   assert.doesNotMatch(indexHtml, /\.risk-row-main b,\s*[\r\n]+\s*\.risk-row-main span/);
   assert.match(indexHtml, /\.risk-row-value\s*\{[\s\S]*min-width:\s*8\.5rem/);
   assert.match(indexHtml, /\.risk-row-value \.button-link,[\s\S]*\.risk-row \.compact-link\s*\{[\s\S]*white-space:\s*nowrap/);
+  assert.match(indexHtml, /\.leveraged-scenario-grid\s*\{[\s\S]*repeat\(auto-fit, minmax\(8rem, 1fr\)\)/);
+  assert.match(portfolioViewJs, /<article id="riskLeveragedVolatilityDragModule" class="leveraged-education">/);
   assert.match(indexHtml, /\.market-tape-scroll\s*\{[\s\S]*max-width:\s*100%[\s\S]*overflow-x:\s*auto/);
   assert.match(indexHtml, /@media \(max-width: 720px\)[\s\S]*\.workspace-nav\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(indexHtml, /\.risk-row > p\s*\{[\s\S]*grid-column:\s*1 \/ -1/);

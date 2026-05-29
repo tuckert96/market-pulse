@@ -71,6 +71,7 @@ function buildWorkflow(records, uiState = "IMPORTED_CLEAN") {
     redditMentions,
     providerReadiness,
     marketDataStatus,
+    targetPlan,
     thresholds: normalizeAlertThresholds({}),
     watchlist: watchlistIdeaTickers(watchlistIdeaRows),
     asOf

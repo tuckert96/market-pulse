@@ -13,6 +13,7 @@ import { buildMarketProviderStatuses } from "./marketEventProviders.js";
 import { applyMarketDataToHoldings, buildMarketDataProviderConfig, buildMarketDataProviderStatuses, buildMockMarketDataSnapshot, shouldPreserveMarketDataSnapshot } from "./marketDataProvider.js";
 import { buildMarketIntelligenceAlerts, demoMarketIntelligenceEvents } from "./marketIntelligence.js";
 import { analyzePortfolio } from "./portfolioAnalytics.js";
+import { buildPortfolioAttribution } from "./portfolioAttribution.js";
 import { buildPortfolioDataQualitySummary } from "./portfolioDataQuality.js";
 import { buildPortfolioHealth } from "./portfolioHealth.js";
 import { tuckerDemoHoldings } from "./portfolioDemoData.js";
@@ -55,6 +56,13 @@ import {
   unlinkFidelityConnection
 } from "./fidelityConnector.js";
 import {
+  applyPortfolioImportPreview,
+  buildPortfolioImportPreview,
+  canApplyPortfolioImportResult,
+  cancelPortfolioImportPreview,
+  isPortfolioImportResult
+} from "./importPreviewWorkflow.js";
+import {
   buildPoliticianTradeProviderConfig,
   importPoliticianTradeFile,
   loadPoliticianTrades,
@@ -87,7 +95,12 @@ import { summarizeSleeves } from "./rebalanceEngine.js";
 import { APP_ROUTES as routes, ROUTE_ALIASES as routeAliases, routeFromHashValue } from "./router.js";
 import { normalizeSeekingAlphaWorkbook } from "./seekingAlphaWorkbook.js";
 import { buildSignalReviewRows, filterSignalReviewRows } from "./signalReview.js";
-import { sanitizeImportedState, sanitizeStateForBackup } from "./stateSanitizer.js";
+import {
+  buildDashboardStateBackupPayload,
+  buildDashboardStateRestorePreview,
+  parseDashboardStateBackupJson,
+  validateDashboardStateBackupPayload
+} from "./stateBackup.js";
 import {
   buildTargetAllocationPlan,
   defaultTargetAllocations,
@@ -95,7 +108,8 @@ import {
   targetId,
   targetRecordFromFormRow
 } from "./targetAllocations.js";
-import { buildThesisAlerts, buildThesisRows, normalizeThesisProfile, thesisSummary } from "./thesisTracker.js";
+import { buildThesisAlerts, buildThesisRiskSummary, buildThesisRows, normalizeThesisProfile, thesisSummary } from "./thesisTracker.js";
+import { normalizeThesisSnapshot, normalizeThesisSnapshots, upsertThesisSnapshot } from "./thesisSnapshots.js";
 import { buildCombinedTickerSignals, DEFAULT_TICKER_SIGNAL_WATCHLIST } from "./tickerSignals.js";
 import { normalizeWhatIfScenario, simulateWhatIf } from "./whatIfSimulator.js";
 import {
@@ -120,6 +134,7 @@ const seekingAlphaStatusKey = "growthDashboardSeekingAlphaStatus";
 const marketEventsKey = "growthDashboardMarketEvents";
 const alphaEventsKey = "growthDashboardAlphaEvents";
 const thesisProfilesKey = "growthDashboardThesisProfiles";
+const thesisSnapshotsKey = "growthDashboardThesisSnapshots";
 const targetAllocationsKey = "growthDashboardTargetAllocations";
 const alertStateKey = "growthDashboardAlertState";
 const alertThresholdsKey = "growthDashboardAlertThresholds";
@@ -220,6 +235,7 @@ const state = {
   marketEvents: loadMarketEvents(),
   alphaEvents: loadAlphaEvents(),
   thesisProfiles: loadThesisProfiles(),
+  thesisSnapshots: loadThesisSnapshots(),
   targetAllocations: loadTargetAllocations(),
   alertState: loadAlertState(),
   alertThresholds: loadAlertThresholds(),
@@ -261,6 +277,7 @@ let lastHoldingSortStatusText = "";
 let latestTickerSignals = [];
 let marketDataLiveModeTimer = null;
 let marketDataLiveModeInFlight = false;
+let pendingStateRestore = null;
 
 function loadHoldings() {
   try {
@@ -492,6 +509,19 @@ function loadThesisProfiles() {
 
 function saveThesisProfiles() {
   safeSetLocalStorage(thesisProfilesKey, JSON.stringify(state.thesisProfiles));
+}
+
+function loadThesisSnapshots() {
+  try {
+    return normalizeThesisSnapshots(JSON.parse(localStorage.getItem(thesisSnapshotsKey)) || []);
+  } catch {
+    return [];
+  }
+}
+
+function saveThesisSnapshots() {
+  state.thesisSnapshots = normalizeThesisSnapshots(state.thesisSnapshots);
+  safeSetLocalStorage(thesisSnapshotsKey, JSON.stringify(state.thesisSnapshots));
 }
 
 function loadTargetAllocations() {
@@ -808,6 +838,7 @@ function render() {
     redditMentions: state.redditMentions,
     providerReadiness: state.providerReadiness,
     marketDataStatus: marketDataSnapshot.status,
+    targetPlan,
     thresholds: alertThresholds,
     watchlist: watchlistTickers
   });
@@ -870,6 +901,7 @@ function render() {
   });
   const alphaRecommendationFilter = $("alphaRecommendationFilter")?.value || "all";
   const filteredAlphaRecommendations = filterAlphaRecommendations(alphaRecommendations, alphaRecommendationFilter);
+  const portfolioAttribution = buildPortfolioAttribution(analysis.holdings, { totalValue: analysis.overview.totalValue });
   const whatIfScenario = readWhatIfScenario();
   const whatIfResult = simulateWhatIf({
     holdings: analysis.holdings,
@@ -916,6 +948,7 @@ function render() {
     decisionBrief,
     dailyBrief,
     portfolioHealth,
+    portfolioAttribution,
     whatIfScenario,
     whatIfResult,
     alertLifecycle,
@@ -923,6 +956,7 @@ function render() {
     targetAllocations: state.targetAllocations,
     sleeves,
     thesisRows,
+    thesisSnapshots: state.thesisSnapshots,
     thesisSummary: thesisSummary(thesisRows),
     uiState,
     portfolioStatus,
@@ -1040,7 +1074,9 @@ function safeErrorMessage(error, fallback = "The operation failed safely.") {
 }
 
 function routeFromHash() {
-  return routeFromHashValue(window.location.hash, routes, routeAliases);
+  const pathname = window.location.pathname || "";
+  const pathRoute = pathname && pathname !== "/" && !/\/index\.html$/i.test(pathname) ? pathname : "";
+  return routeFromHashValue(window.location.hash || pathRoute, routes, routeAliases);
 }
 
 function applyRoute() {
@@ -1245,7 +1281,8 @@ function renderAccountScopePanel(model = {}) {
         label: account.account,
         value: account.value,
         detail: `${formatPercent(account.portfolioWeight)} of portfolio · ${account.holdingCount} holding${account.holdingCount === 1 ? "" : "s"} · cash ${formatPercent(account.cashWeight)}`,
-        subdetail: `${account.accountTypeLabel} · largest ${account.largestHoldingLabel} ${formatPercent(account.largestHoldingWeight)}`,
+        subdetail: `${account.taxBucket?.label || account.accountTypeLabel} · ${account.accountTypeLabel} · largest ${account.largestHoldingLabel} ${formatPercent(account.largestHoldingWeight)}`,
+        taxBucket: account.taxBucket,
         warning: accountScopeWarning(account),
         selected: selected === account.accountKey
       })).join("")}
@@ -1254,10 +1291,10 @@ function renderAccountScopePanel(model = {}) {
   `;
 }
 
-function renderAccountScopeButton({ account, label, value, detail, subdetail = "", warning = "", selected }) {
+function renderAccountScopeButton({ account, label, value, detail, subdetail = "", taxBucket = null, warning = "", selected }) {
   const ariaLabel = `${label}. ${formatCurrency(value)}. ${detail}${subdetail ? `. ${subdetail}` : ""}${warning ? `. ${warning}` : ""}${selected ? ". Selected." : ""}`;
   return `
-    <button class="account-scope-button ${selected ? "active" : ""}" type="button" data-account-scope="${escapeHtml(account)}" data-account-label="${escapeHtml(label)}" data-account-value="${escapeHtml(value)}" data-account-holdings="${escapeHtml(label === "All accounts" ? "" : detail)}" aria-label="${escapeHtml(ariaLabel)}" title="${escapeHtml(ariaLabel)}" aria-pressed="${selected ? "true" : "false"}">
+    <button class="account-scope-button ${selected ? "active" : ""}" type="button" data-account-scope="${escapeHtml(account)}" data-account-label="${escapeHtml(label)}" data-tax-bucket="${escapeHtml(taxBucket?.key || "combined")}" data-account-value="${escapeHtml(value)}" data-account-holdings="${escapeHtml(label === "All accounts" ? "" : detail)}" aria-label="${escapeHtml(ariaLabel)}" title="${escapeHtml(ariaLabel)}" aria-pressed="${selected ? "true" : "false"}">
       <span>${escapeHtml(label)}${selected ? ' <em class="selected-marker">Selected</em>' : ""}</span>
       <b>${formatCurrency(value)}</b>
       <small>${escapeHtml(detail)}</small>
@@ -1349,18 +1386,11 @@ function showImportStatus(result, options = {}) {
 }
 
 function isPortfolioImport(result) {
-  return (result.fidelityRecords || []).length > 0 ||
-    (result.importReport?.providerReports || []).some((report) => report.provider === "fidelity" && report.holdingsImported > 0);
+  return isPortfolioImportResult(result);
 }
 
 function canApplyPortfolioImport(result) {
-  const blockedStatuses = new Set(["Failed", "Needs manual mapping"]);
-  return Boolean(
-    result?.validation?.ok &&
-    isPortfolioImport(result) &&
-    (result.records || []).length > 0 &&
-    !blockedStatuses.has(result.importReport?.health?.status)
-  );
+  return canApplyPortfolioImportResult(result);
 }
 
 function friendlyImportHealth(report, options = {}) {
@@ -1398,6 +1428,14 @@ function skippedNonHoldingRows(report = {}) {
   return (report.rejectedRows || []).filter((row) => row.classification === "non-holding row");
 }
 
+function flattenExpectedColumns(expectedColumns = []) {
+  if (Array.isArray(expectedColumns)) return expectedColumns;
+  if (expectedColumns && typeof expectedColumns === "object") {
+    return Object.values(expectedColumns).flat().filter(Boolean);
+  }
+  return [];
+}
+
 function renderImportDebugPanel(result, options = {}) {
   const target = $("importDebugPanel");
   if (!target) return;
@@ -1418,6 +1456,7 @@ function renderImportDebugPanel(result, options = {}) {
     .map(([field, column]) => `<span><b>${escapeHtml(field)}</b> ${escapeHtml(column || "not mapped")}</span>`)
     .join("");
   const canApply = options.preview && canApplyPortfolioImport(result);
+  const changeSummary = options.applied ? report.changeSummary : null;
   const holdingRowsNeedingReview = countHoldingRowsNeedingReview(report);
   const successCta = isPortfolioImport(result) && !canApply
     ? `
@@ -1463,6 +1502,32 @@ function renderImportDebugPanel(result, options = {}) {
   const duplicates = (report.duplicateRows || [])
     .map((row) => `<li>${escapeHtml(row.ticker || "Unknown")} in ${escapeHtml(row.account || "Unassigned")} merged from row${(row.rowNumbers || []).length === 1 ? "" : "s"} ${escapeHtml((row.rowNumbers || []).join(", ") || "unknown")}.</li>`)
     .join("");
+  const expectedColumns = flattenExpectedColumns(report.expectedColumns)
+    .filter((item) => item.required)
+    .map((item) => `<li>${escapeHtml(item.label)}: ${escapeHtml((item.examples || []).join(", "))}</li>`)
+    .join("");
+  const missingHints = (report.missingColumnHints || [])
+    .map((hint) => `<li>${escapeHtml(hint)}</li>`)
+    .join("");
+  const recoveryActions = (report.recoveryActions || [])
+    .map((action) => `<li>${escapeHtml(action)}</li>`)
+    .join("");
+  const visibleReviewRows = reviewRows.slice(0, 3)
+    .map((row) => `<li>Row ${escapeHtml(row.rowNumber)}: ${escapeHtml((row.reasons || []).join(", "))}</li>`)
+    .join("");
+  const troubleshooting = (friendly?.tone === "error" || holdingRowsNeedingReview > 0 || missingHints || recoveryActions)
+    ? `
+      <div class="import-preview-card" role="${friendly?.tone === "error" ? "alert" : "region"}" aria-label="CSV import troubleshooting">
+        <div>
+          <b>${friendly?.tone === "error" ? "Import needs a fix" : "Rows need review before they can be imported"}</b>
+          <span>${missingHints ? "The parser could not confidently map every required Fidelity holdings column." : "Accepted holdings are safe to preview/apply; the rows below were left out for review."}</span>
+        </div>
+        ${visibleReviewRows ? `<p><b>First rows needing review</b></p><ul>${visibleReviewRows}</ul>` : ""}
+        ${missingHints ? `<p><b>Columns to check</b></p><ul>${missingHints}</ul>` : ""}
+        ${recoveryActions ? `<p><b>What to try next</b></p><ul>${recoveryActions}</ul>` : ""}
+      </div>
+    `
+    : "";
 
   target.hidden = false;
   target.innerHTML = `
@@ -1479,10 +1544,13 @@ function renderImportDebugPanel(result, options = {}) {
       <div><b>Skipped non-holding rows</b><span>${escapeHtml(skippedRows.length)}</span></div>
       <div><b>Total market value</b><span>${formatCurrency(report.totalMarketValue)}</span></div>
     </div>
+    ${changeSummary ? renderImportChangeSummary(changeSummary) : ""}
+    ${troubleshooting}
     ${canApply ? renderImportPreview(result) : successCta}
     <details>
       <summary>Technical import details</summary>
       <p><b>Detected columns:</b> ${escapeHtml((report.detectedColumns || []).join(", ") || "none")}</p>
+      ${expectedColumns ? `<p><b>Expected Fidelity holdings columns</b></p><ul>${expectedColumns}</ul>` : ""}
       <p><b>Tickers detected:</b> ${escapeHtml((report.tickersDetected || []).join(", ") || "none")}</p>
       <p><b>Accounts detected:</b> ${escapeHtml((report.accountsDetected || []).join(", ") || "none")}</p>
       <div class="import-mapping-used">${mappingRows || "<span>No automatic mapping detected.</span>"}</div>
@@ -1494,6 +1562,58 @@ function renderImportDebugPanel(result, options = {}) {
       ${unsupported ? `<p><b>Unsupported/unmapped columns</b></p><ul>${unsupported}</ul>` : ""}
     </details>
     ${pendingCsvImport ? renderManualMappingControls(report) : ""}
+  `;
+}
+
+function renderImportChangeSummary(summary = {}) {
+  const metric = (label, value, detail = "") => `
+    <div>
+      <b>${escapeHtml(value)}</b>
+      <span>${escapeHtml(label)}${detail ? ` · ${escapeHtml(detail)}` : ""}</span>
+    </div>
+  `;
+  return `
+    <section class="import-change-summary" aria-label="What changed since last import">
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">What changed since last import</p>
+          <h3>${escapeHtml(summary.hasPreviousPortfolio ? "Portfolio delta" : "First imported portfolio")}</h3>
+          <p>${escapeHtml(summary.summaryText || "Import applied. Review the changed positions below.")}</p>
+        </div>
+      </div>
+      <div class="import-change-metrics">
+        ${metric("Imported rows", summary.rowsImported || 0)}
+        ${metric("Skipped rows", summary.rowsSkipped || 0, "non-holding rows")}
+        ${metric("Flagged rows", summary.rowsFlagged || 0, "need review")}
+        ${metric("Duplicate rows", summary.duplicateRowsMerged || 0, "merged")}
+        ${metric("Portfolio value change", formatCurrency(summary.valueChange || 0), `${formatCurrency(summary.previousTotalValue || 0)} → ${formatCurrency(summary.nextTotalValue || 0)}`)}
+      </div>
+      <div class="import-change-grid">
+        ${renderImportChangeList("New positions", summary.newPositions, "No new tickers.")}
+        ${renderImportChangeList("Removed or zero positions", summary.removedPositions, "No positions disappeared.")}
+        ${renderImportChangeList("Increased positions", summary.increasedPositions, "No increased positions.")}
+        ${renderImportChangeList("Decreased positions", summary.decreasedPositions, "No decreased positions.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderImportChangeList(title, rows = [], emptyText = "No changes.") {
+  const visible = rows.slice(0, 5);
+  const items = visible.map((row) => `
+    <li>
+      <span><b>${escapeHtml(row.ticker || "UNKNOWN")}</b>${row.name ? ` ${escapeHtml(row.name)}` : ""}</span>
+      <span>${formatCurrency(row.valueChange || 0)} · ${formatNumber(row.sharesChange || 0)} shares</span>
+    </li>
+  `).join("");
+  const more = rows.length > visible.length
+    ? `<li><span>${escapeHtml(rows.length - visible.length)} more position${rows.length - visible.length === 1 ? "" : "s"}</span><span>Open Holdings for details</span></li>`
+    : "";
+  return `
+    <article>
+      <h4>${escapeHtml(title)}</h4>
+      <ul>${items || `<li><span>${escapeHtml(emptyText)}</span><span></span></li>`}${more}</ul>
+    </article>
   `;
 }
 
@@ -1623,7 +1743,12 @@ function applyManualImportMapping() {
   });
 
   if (result.validation.ok) {
+    const preview = buildPortfolioImportPreview(result, {
+      provider: pendingCsvImport.provider,
+      fileName: pendingCsvImport.fileName
+    });
     pendingCsvImport.result = result;
+    pendingCsvImport.preview = preview;
     showImportStatus(result, { preview: pendingCsvImport.provider === "fidelity" && canApplyPortfolioImport(result), persist: false });
     if (pendingCsvImport.provider !== "fidelity") {
       mergeSeekingAlphaRecords(result.records, "csv-import");
@@ -1640,37 +1765,35 @@ async function applyPendingPortfolioImport() {
     return;
   }
   const result = pendingCsvImport.result;
-  if (!canApplyPortfolioImport(result)) {
+  const preview = pendingCsvImport.preview || buildPortfolioImportPreview(result, {
+    provider: pendingCsvImport.provider,
+    fileName: pendingCsvImport.fileName
+  });
+  const applied = applyPortfolioImportPreview(preview, {
+    previousHoldings: state.holdings
+  });
+  if (!applied.changed) {
     showImportStatus(result, { persist: false });
     return;
   }
-  mergeImportedRecords(result.records, { replace: true, render: false });
-  state.fidelityStatus = {
-    connected: false,
-    provider: "csv-import",
-    lastSync: result.importReport?.importedAt || new Date().toISOString(),
-    mode: "csv-imported",
-    holdings: result.importReport?.holdingsImported || result.records.length,
-    accounts: result.importReport?.accountsDetected?.length || 0,
-    totalMarketValue: result.importReport?.totalMarketValue || 0,
-    fileName: result.importReport?.fileName || pendingCsvImport.fileName,
-    skippedNonHoldingRows: skippedNonHoldingRows(result.importReport).length,
-    rowsNeedingReview: countHoldingRowsNeedingReview(result.importReport),
-    message: `Fidelity import applied: ${result.importReport?.holdingsImported || result.records.length} holding${(result.importReport?.holdingsImported || result.records.length) === 1 ? "" : "s"} loaded locally.`
-  };
+  mergeImportedRecords(applied.holdings, { replace: true, render: false });
+  state.latestImportReport = applied.importReport;
+  state.fidelityStatus = applied.fidelityStatus;
+  saveLatestImportReport();
   saveFidelityStatus();
   renderFidelityStatus();
   pendingCsvImport = null;
-  showImportStatus(result, { persist: true, render: false, applied: true });
+  showImportStatus({ ...result, importReport: applied.importReport }, { persist: false, render: false, applied: true });
   await refreshMarketDataSnapshot({ renderAfter: false });
   render();
 }
 
 function cancelPendingPortfolioImport() {
+  const canceled = cancelPortfolioImportPreview(pendingCsvImport?.preview || null);
   pendingCsvImport = null;
   const status = $("importStatus");
   if (status) {
-    status.textContent = "Import preview canceled. No holdings were changed.";
+    status.textContent = canceled.message;
     status.className = "import-status pending";
   }
   const panel = $("importDebugPanel");
@@ -1713,7 +1836,11 @@ function parsePastedFidelityHoldings() {
     fileName: "pasted-fidelity-table.csv",
     csv: value,
     isJson: false,
-    result
+    result,
+    preview: buildPortfolioImportPreview(result, {
+      provider: "fidelity",
+      fileName: "pasted-fidelity-table.csv"
+    })
   };
   showImportStatus(result, { preview: canApplyPortfolioImport(result), persist: false });
 }
@@ -1823,9 +1950,14 @@ function renderSeekingAlphaInsights(insights) {
 }
 
 function exportDashboardState() {
-  const payload = {
-    schemaVersion: 1,
-    exportedAt: new Date().toISOString(),
+  const payload = buildDashboardStateBackupPayload(dashboardStateBackupSlice());
+  showStateStatus("State JSON exported. Treat it as sensitive because it contains holdings.", "success");
+  renderStateRestorePreview(null);
+  downloadJson(payload, `tucker-dashboard-state-${today()}.json`);
+}
+
+function dashboardStateBackupSlice() {
+  return {
     holdings: state.holdings,
     fidelityStatus: state.fidelityStatus,
     seekingAlphaStatus: state.seekingAlphaStatus,
@@ -1834,6 +1966,7 @@ function exportDashboardState() {
     alertState: state.alertState,
     alertThresholds: state.alertThresholds,
     thesisProfiles: state.thesisProfiles,
+    thesisSnapshots: state.thesisSnapshots,
     targetAllocations: state.targetAllocations,
     politicianTrades: persistPoliticianTradeCacheRecords(state.politicianTrades, persistedReportFreshness(state.politicianTradeImportReport, "politician")),
     politicianTradeImportReport: persistedSourceReportForStorage(state.politicianTradeImportReport, "politician"),
@@ -1849,14 +1982,9 @@ function exportDashboardState() {
     eventCalendarImportReport: state.eventCalendarImportReport,
     quantScoreHistory: state.quantScoreHistory,
     latestImportReport: state.latestImportReport,
-    safety: {
-      includesPasswords: false,
-      includesApiKeys: false,
-      note: "Local dashboard backup. Review before sharing because holdings are sensitive financial data."
-    }
+    accountScope: state.accountScope,
+    marketDataLiveMode: state.marketDataLiveMode
   };
-  downloadJson(sanitizeStateForBackup(payload), `tucker-dashboard-state-${today()}.json`);
-  showStateStatus("State JSON exported. Treat it as sensitive because it contains holdings.", "success");
 }
 
 function exportTargetAllocations() {
@@ -1890,18 +2018,91 @@ function importStateFile(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try {
-      const payload = JSON.parse(String(reader.result || "{}"));
-      applyImportedState(payload);
-      showStateStatus("State JSON imported and saved locally.", "success");
-      renderFidelityStatus();
-      renderSeekingAlphaStatus();
-      render();
-    } catch (error) {
-      showStateStatus(`State import failed: ${safeErrorMessage(error)}`, "error");
+    const parsed = parseDashboardStateBackupJson(String(reader.result || ""));
+    if (!parsed.ok) {
+      pendingStateRestore = null;
+      renderStateRestorePreview(null);
+      showStateStatus(`State import failed: ${parsed.errors.join(" ")}`, "error");
+      return;
     }
+    pendingStateRestore = buildDashboardStateRestorePreview(parsed.payload, dashboardStateBackupSlice());
+    renderStateRestorePreview(pendingStateRestore);
+    showStateStatus("Backup preview ready. Review the changes, then apply restore if it looks right.", "pending");
+  };
+  reader.onerror = () => {
+    pendingStateRestore = null;
+    renderStateRestorePreview(null);
+    showStateStatus("State import failed: file could not be read.", "error");
   };
   reader.readAsText(file);
+}
+
+function applyPendingStateRestore() {
+  if (!pendingStateRestore?.ok) {
+    showStateStatus("No valid restore preview is ready.", "error");
+    return;
+  }
+  try {
+    applyImportedState(pendingStateRestore.payload);
+    pendingStateRestore = null;
+    renderStateRestorePreview(null);
+    showStateStatus("State JSON restored and saved locally. Provider statuses are disconnected until revalidated.", "success");
+    renderFidelityStatus();
+    renderSeekingAlphaStatus();
+    renderMarketDataLiveModeControls();
+    render();
+  } catch (error) {
+    showStateStatus(`State restore failed: ${safeErrorMessage(error)}`, "error");
+  }
+}
+
+function cancelPendingStateRestore() {
+  pendingStateRestore = null;
+  renderStateRestorePreview(null);
+  showStateStatus("State restore canceled. Current dashboard state was not changed.", "pending");
+}
+
+function renderStateRestorePreview(preview) {
+  const target = $("stateRestorePreview");
+  if (!target) return;
+  if (!preview) {
+    target.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  target.hidden = false;
+  if (!preview.ok) {
+    target.innerHTML = `
+      <div class="import-health error">
+        <strong>Backup cannot be restored</strong>
+        <ul>${(preview.errors || []).map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>
+      </div>
+    `;
+    return;
+  }
+  const changedRows = (preview.changes || []).filter((row) => row.changes);
+  const unchangedCount = Math.max(0, (preview.changes || []).length - changedRows.length);
+  target.innerHTML = `
+    <div class="import-health pending">
+      <strong>Restore preview</strong>
+      <span>Backup schema v${escapeHtml(preview.schemaVersion)}${preview.exportedAt ? ` · exported ${escapeHtml(backupDateLabel(preview.exportedAt))}` : ""}</span>
+      <small>${escapeHtml(changedRows.length)} area${changedRows.length === 1 ? "" : "s"} will change; ${escapeHtml(unchangedCount)} area${unchangedCount === 1 ? "" : "s"} look unchanged.</small>
+    </div>
+    <div class="backup-preview-list">
+      ${(preview.changes || []).map((row) => `
+        <div class="${row.changes ? "changed" : "unchanged"}">
+          <b>${escapeHtml(row.label)}</b>
+          <span>${escapeHtml(row.current)} current to ${escapeHtml(row.restored)} restored</span>
+          <small>${escapeHtml(row.detail)}</small>
+        </div>
+      `).join("")}
+    </div>
+    ${(preview.warnings || []).length ? `<ul class="quality-warnings">${preview.warnings.slice(0, 6).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : ""}
+    <div class="connector-actions">
+      <button id="applyStateRestoreBtn" type="button" class="primary" data-state-restore-action="apply">Apply restore</button>
+      <button id="cancelStateRestoreBtn" type="button" data-state-restore-action="cancel">Cancel</button>
+    </div>
+  `;
 }
 
 function clearPortfolioData() {
@@ -1933,19 +2134,19 @@ function clearPortfolioData() {
 }
 
 function applyImportedState(payload) {
-  if (!payload || typeof payload !== "object") throw new Error("File does not contain a dashboard state object.");
-  payload = sanitizeImportedState(payload);
-  if (payload.schemaVersion !== undefined && Number(payload.schemaVersion) !== 1) {
-    throw new Error("State file schema version is not supported.");
-  }
-  if (!Array.isArray(payload.holdings)) throw new Error("State file is missing a holdings array.");
+  const validation = validateDashboardStateBackupPayload(payload);
+  if (!validation.ok) throw new Error(validation.errors.join(" "));
+  payload = validation.payload;
   state.holdings = normalizeHoldings(payload.holdings);
-  state.accountScope = ACCOUNT_SCOPE_ALL;
+  state.accountScope = typeof payload.accountScope === "string" && payload.accountScope.trim()
+    ? payload.accountScope
+    : ACCOUNT_SCOPE_ALL;
   state.fidelityStatus = restoredConnectorStatus(payload.fidelityStatus, loadFidelityStatus(), "Fidelity");
   state.seekingAlphaStatus = restoredConnectorStatus(payload.seekingAlphaStatus, loadSeekingAlphaStatus(), "Seeking Alpha");
   state.marketEvents = Array.isArray(payload.marketEvents) ? payload.marketEvents : demoMarketIntelligenceEvents();
   state.alphaEvents = Array.isArray(payload.alphaEvents) ? payload.alphaEvents : demoAlphaEvents();
   state.thesisProfiles = safeObject(payload.thesisProfiles, demoThesisProfiles());
+  state.thesisSnapshots = Array.isArray(payload.thesisSnapshots) ? normalizeThesisSnapshots(payload.thesisSnapshots) : loadThesisSnapshots();
   state.targetAllocations = normalizeTargetAllocations(Array.isArray(payload.targetAllocations) ? payload.targetAllocations : defaultTargetAllocations());
   state.alertState = normalizeAlertState(payload.alertState || emptyAlertState());
   state.alertThresholds = normalizeAlertThresholds(payload.alertThresholds || DEFAULT_ALERT_THRESHOLDS);
@@ -1967,6 +2168,7 @@ function applyImportedState(payload) {
   state.eventCalendar = Array.isArray(payload.eventCalendar) ? normalizeCalendarEvents(payload.eventCalendar) : loadEventCalendar();
   state.eventCalendarImportReport = safeObject(payload.eventCalendarImportReport, null);
   state.quantScoreHistory = normalizeQuantScoreHistory(payload.quantScoreHistory || []);
+  state.marketDataLiveMode = normalizeMarketDataLiveMode(payload.marketDataLiveMode || state.marketDataLiveMode || {});
   state.marketDataSnapshot = null;
   latestTickerSignals = [];
   pendingCsvImport = null;
@@ -1976,6 +2178,7 @@ function applyImportedState(payload) {
   saveMarketEvents();
   saveAlphaEvents();
   saveThesisProfiles();
+  saveThesisSnapshots();
   saveTargetAllocations();
   saveAlertState();
   saveAlertThresholds();
@@ -1994,6 +2197,7 @@ function applyImportedState(payload) {
   saveEventCalendarImportReport();
   saveQuantScoreHistory();
   saveAccountScope();
+  saveMarketDataLiveMode();
 }
 
 function restoredConnectorStatus(importedStatus, fallback, label) {
@@ -2146,9 +2350,11 @@ function syncThesisEditorOptions(holdings) {
   const target = $("thesisTicker");
   if (!target) return;
   const previous = target.value;
-  const tickers = holdings
+  const holdingTickers = holdings
     .filter((holding) => holding.ticker && holding.assetClass !== "Cash")
     .map((holding) => holding.ticker);
+  const snapshotTickers = (state.thesisSnapshots || []).map((snapshot) => snapshot.ticker).filter(Boolean);
+  const tickers = [...new Set([...holdingTickers, ...snapshotTickers])].sort((a, b) => a.localeCompare(b));
   target.innerHTML = [...new Set(tickers)]
     .sort((a, b) => a.localeCompare(b))
     .map((ticker) => `<option value="${escapeHtml(ticker)}">${escapeHtml(ticker)}</option>`)
@@ -2277,6 +2483,32 @@ function saveWatchlistIdeaFromEditor() {
   state.watchlistIdeas = upsertWatchlistIdea(state.watchlistIdeas, record);
   saveWatchlistIdeas();
   showWatchlistStatus(`${ticker} idea saved locally.`, "success");
+  render();
+}
+
+function quickAddWatchlistIdea() {
+  const ticker = normalizeTicker($("watchlistQuickTicker")?.value || "");
+  if (!ticker) {
+    showWatchlistStatus("Enter a valid ticker to add it to the watchlist.", "error");
+    return;
+  }
+  const status = $("watchlistQuickStatus")?.value || "watching";
+  const existing = state.watchlistIdeas.find((row) => normalizeTicker(row.ticker) === ticker);
+  const record = normalizeWatchlistIdea({
+    ...(existing || {}),
+    ticker,
+    status,
+    thesis: existing?.thesis || "Added from the quick watchlist flow. Add a thesis before treating this as a candidate.",
+    sourceOfIdea: existing?.sourceOfIdea || "Manual watchlist",
+    dateAdded: existing?.dateAdded || today(),
+    updatedAt: new Date().toISOString()
+  });
+  state.watchlistIdeas = upsertWatchlistIdea(state.watchlistIdeas, record);
+  saveWatchlistIdeas();
+  setInputValue("watchlistQuickTicker", "");
+  fillWatchlistEditor(record);
+  showWatchlistStatus(`${ticker} saved to the local watchlist. Portfolio holdings were not changed.`, "success");
+  window.location.hash = "#watchlist";
   render();
 }
 
@@ -2564,11 +2796,9 @@ function fillThesisEditor(ticker, holdings = []) {
   $("thesisLastReviewedDate").value = profile.lastReviewedDate || "";
 }
 
-function saveThesisFromEditor(reviewedToday = false) {
-  const ticker = $("thesisTicker").value;
-  if (!ticker) return;
+function thesisProfileFromEditor(ticker, reviewedToday = false) {
   const targetAllocation = Math.max(0, Number($("thesisTargetAllocation").value) || 0) / 100;
-  state.thesisProfiles[ticker] = {
+  return {
     ...(state.thesisProfiles[ticker] || {}),
     ticker,
     whyOwned: $("thesisWhyOwned").value.trim(),
@@ -2589,10 +2819,54 @@ function saveThesisFromEditor(reviewedToday = false) {
     notes: $("thesisNotes").value.trim(),
     lastReviewedDate: reviewedToday ? today() : $("thesisLastReviewedDate").value
   };
+}
+
+function saveThesisFromEditor(reviewedToday = false, options = {}) {
+  const ticker = $("thesisTicker").value;
+  if (!ticker) return;
+  state.thesisProfiles[ticker] = thesisProfileFromEditor(ticker, reviewedToday);
   saveThesisProfiles();
-  syncTickerTargetFromThesis(ticker, targetAllocation);
+  syncTickerTargetFromThesis(ticker, state.thesisProfiles[ticker].targetAllocation);
   $("thesisEditorStatus").textContent = `${ticker} thesis saved locally.`;
+  if (options.renderAfter !== false) render();
+}
+
+function saveThesisSnapshotFromEditor() {
+  const ticker = normalizeTicker($("thesisTicker")?.value || "");
+  if (!ticker) {
+    $("thesisEditorStatus").textContent = "Choose a ticker before saving a thesis snapshot.";
+    return;
+  }
+  saveThesisFromEditor(false, { renderAfter: false });
+  const snapshot = currentThesisSnapshot(ticker, {
+    sourceType: $("thesisSnapshotSourceType")?.value || "user-written",
+    createdFrom: "thesis-editor",
+    capturedAt: new Date().toISOString()
+  });
+  state.thesisSnapshots = upsertThesisSnapshot(state.thesisSnapshots, snapshot);
+  saveThesisSnapshots();
+  $("thesisEditorStatus").textContent = `${ticker} thesis snapshot saved locally. History does not place or imply a trade.`;
   render();
+}
+
+function currentThesisSnapshot(ticker, options = {}) {
+  const holdings = analyzePortfolio(applyThesisProfiles(state.holdings)).holdings;
+  const targetPlan = buildTargetAllocationPlan(holdings, state.targetAllocations, { mode: $("rebalanceMode")?.value });
+  const totalValue = holdings.reduce((sum, holding) => sum + (Number(holding.marketValue) || 0), 0);
+  const thesisRows = buildThesisRows(holdings, state.thesisProfiles, { targetPlan, totalValue, asOf: options.capturedAt });
+  const row = thesisRows.find((item) => normalizeTicker(item.ticker) === ticker);
+  const profile = normalizeThesisProfile(state.thesisProfiles[ticker] || {}, holdings.find((holding) => normalizeTicker(holding.ticker) === ticker) || { ticker });
+  const riskSummary = buildThesisRiskSummary(row || { ...profile, ticker }, { holding: holdings.find((holding) => normalizeTicker(holding.ticker) === ticker) || { ticker } });
+  const sourceType = options.sourceType === "generated" ? "generated" : "user-written";
+  return normalizeThesisSnapshot({
+    ticker,
+    capturedAt: options.capturedAt,
+    sourceType,
+    sourceLabel: sourceType === "generated" ? "Generated thesis/risk summary" : "User-written thesis",
+    createdFrom: options.createdFrom || "thesis-editor",
+    profile,
+    riskSummary
+  });
 }
 
 function syncTickerTargetFromThesis(ticker, targetAllocation) {
@@ -2699,12 +2973,17 @@ function importFile(file, provider) {
         ? buildSeekingAlphaWorkbookImportResult(await normalizeSeekingAlphaWorkbook(reader.result))
         : buildCsvImportResult(provider, String(reader.result || ""), adapters, { fileName: file.name, isJson: isJsonFile(file) });
       if (provider === "fidelity") {
+        const preview = buildPortfolioImportPreview(result, {
+          provider,
+          fileName: file.name
+        });
         pendingCsvImport = {
           provider,
           fileName: file.name,
           csv: String(reader.result || ""),
           isJson: isJsonFile(file),
-          result
+          result,
+          preview
         };
         showImportStatus(result, { preview: canApplyPortfolioImport(result), persist: false });
         return;
@@ -2958,6 +3237,7 @@ function syncAlertThresholdInputs() {
   setInputValue("alertPoliticianTradeScore", thresholdPercentInput(thresholds.politicianTradeScore));
   setInputValue("alertRedditAcceleration", thresholdPercentInput(thresholds.redditMentionAcceleration));
   setInputValue("alertStaleHours", thresholds.staleHours);
+  setInputValue("alertMinTargetDrift", thresholdPercentInput(thresholds.minActionDrift));
 }
 
 function saveAlertThresholdsFromUi() {
@@ -2969,7 +3249,7 @@ function saveAlertThresholdsFromUi() {
     politicianTradeScore: $("alertPoliticianTradeScore")?.value,
     redditMentionAcceleration: $("alertRedditAcceleration")?.value,
     staleHours: $("alertStaleHours")?.value,
-    minActionDrift: state.alertThresholds.minActionDrift,
+    minActionDrift: $("alertMinTargetDrift")?.value,
     largeMovePercent: state.alertThresholds.largeMovePercent
   });
   saveAlertThresholds();
@@ -3506,7 +3786,15 @@ function wireEvents() {
   });
   $("demoSeekingAlphaBtn").addEventListener("click", demoSyncSeekingAlpha);
   $("exportStateBtn").addEventListener("click", exportDashboardState);
-  $("stateFile").addEventListener("change", (event) => importStateFile(event.target.files[0]));
+  $("stateFile").addEventListener("change", (event) => {
+    importStateFile(event.target.files[0]);
+    event.target.value = "";
+  });
+  $("stateRestorePreview")?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-state-restore-action]")?.dataset.stateRestoreAction;
+    if (action === "apply") applyPendingStateRestore();
+    if (action === "cancel") cancelPendingStateRestore();
+  });
   $("clearPortfolioBtn")?.addEventListener("click", clearPortfolioData);
   $("saveTargetsBtn").addEventListener("click", saveTargetsFromUi);
   $("resetTargetsBtn").addEventListener("click", resetTargetTemplate);
@@ -3525,6 +3813,10 @@ function wireEvents() {
   $("marketDataLiveModeInterval")?.addEventListener("change", (event) => setMarketDataLiveModeInterval(event.target.value));
   $("saveAlertThresholdsBtn").addEventListener("click", saveAlertThresholdsFromUi);
   $("resetAlertThresholdsBtn").addEventListener("click", resetAlertThresholds);
+  $("quickAddWatchlistBtn")?.addEventListener("click", quickAddWatchlistIdea);
+  $("watchlistQuickTicker")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") quickAddWatchlistIdea();
+  });
   $("saveWatchlistIdeaBtn")?.addEventListener("click", saveWatchlistIdeaFromEditor);
   $("clearWatchlistIdeaBtn")?.addEventListener("click", clearWatchlistEditor);
   $("deleteWatchlistIdeaBtn")?.addEventListener("click", deleteWatchlistIdeaFromEditor);
@@ -3554,6 +3846,7 @@ function wireEvents() {
   });
   $("saveThesisBtn").addEventListener("click", () => saveThesisFromEditor(false));
   $("markReviewedBtn").addEventListener("click", () => saveThesisFromEditor(true));
+  $("saveThesisSnapshotBtn")?.addEventListener("click", saveThesisSnapshotFromEditor);
   $("sampleBtn").addEventListener("click", () => {
     if (confirmSampleOverwrite()) loadSampleData();
   });
@@ -3592,6 +3885,7 @@ function loadSampleData() {
   state.marketEvents = demoMarketIntelligenceEvents();
   state.alphaEvents = demoAlphaEvents();
   state.thesisProfiles = demoThesisProfiles();
+  state.thesisSnapshots = [];
   state.targetAllocations = defaultTargetAllocations();
   state.alertState = emptyAlertState();
   state.alertThresholds = normalizeAlertThresholds(DEFAULT_ALERT_THRESHOLDS);
@@ -3618,6 +3912,7 @@ function loadSampleData() {
   saveMarketEvents();
   saveAlphaEvents();
   saveThesisProfiles();
+  saveThesisSnapshots();
   saveTargetAllocations();
   saveAlertState();
   saveAlertThresholds();
@@ -3696,10 +3991,11 @@ async function refreshProviderReadiness() {
       redditProviderStatuses: config.redditProviderStatuses || redditProviderStatuses({}, state.redditSettings),
       xProviderConfig: config.xProviderConfig || buildXProviderConfig({}, state.xSettings),
       xProviderStatuses: config.xProviderStatuses || xProviderStatuses({}, state.xSettings),
+      aiProviders: config.aiProviders || {},
       message: marketDataConfig.liveProviderCalls
         ? "Local backend readiness loaded. Market data calls run through the server-side proxy."
         : "Local backend readiness loaded. Sample market data remains active until credentials are configured.",
-      liveProviderCalls: Boolean(marketDataConfig.liveProviderCalls || config.politicianTradeProviderConfig?.liveProviderCalls || config.redditProviderConfig?.liveProviderCalls || config.xProviderConfig?.liveProviderCalls)
+      liveProviderCalls: Boolean(marketDataConfig.liveProviderCalls || config.politicianTradeProviderConfig?.liveProviderCalls || config.redditProviderConfig?.liveProviderCalls || config.xProviderConfig?.liveProviderCalls || config.aiProviders?.openai?.liveProviderCalls)
     };
     if (canRunMarketDataLiveRefresh()) {
       await refreshMarketDataSnapshot({ renderAfter: false, reason: "live-mode" });
@@ -3727,6 +4023,7 @@ async function refreshProviderReadiness() {
       redditProviderStatuses: redditProviderStatuses({}, state.redditSettings),
       xProviderConfig: buildXProviderConfig({}, state.xSettings),
       xProviderStatuses: xProviderStatuses({}, state.xSettings),
+      aiProviders: {},
       message: "Sample mode. Run npm run dev to check local backend key presence.",
       liveProviderCalls: false
     };
@@ -3998,6 +4295,12 @@ function setInputValue(id, value) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function backupDateLabel(value = "") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "unknown date";
+  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 function safeObject(value, fallback) {

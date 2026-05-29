@@ -438,6 +438,18 @@ export interface MarketDataQuote {
   dataFreshness?: "live" | "cached" | "stale" | "mock" | string;
   cacheStatus?: "live" | "cached" | "stale" | "mock" | string;
   fetchedAt?: string;
+  resourceFreshness?: {
+    quote?: string;
+    profile?: string;
+    metric?: string;
+    history?: string;
+  };
+  requestBudget?: {
+    maxQuoteTickers?: number;
+    enrichmentTickerLimit?: number;
+    deferredEnrichmentTickers?: string[];
+  };
+  deferredEnrichmentTickers?: string[];
   providerName?: string;
   lastSuccessfulRefresh?: string;
   lastError?: {
@@ -448,6 +460,37 @@ export interface MarketDataQuote {
   liveProviderCalls: boolean;
   asOf: string;
   staleAfter?: string;
+}
+
+export interface MarketDataCoverageField {
+  key: string;
+  label: string;
+  missingLabel: string;
+  resource: "quote" | "profile" | "metric" | "history" | string;
+  available: boolean;
+  status: "live" | "cached" | "stale" | "mock" | "available" | "missing" | "deferred" | "skipped" | "disabled" | string;
+  resourceStatus?: string;
+}
+
+export interface MarketDataQuoteDiagnostic {
+  ticker: string;
+  status: MarketDataStatusValue | string;
+  dataFreshness?: string;
+  cacheStatus?: string;
+  quote?: string;
+  profile?: string;
+  metric?: string;
+  history?: string;
+  fieldCoverage: MarketDataCoverageField[];
+  availableFields: string[];
+  missingFields: string[];
+  deferredFields?: string[];
+  staleFields?: string[];
+  unavailableFields?: string[];
+  coverageSummary: string;
+  coverageStatus: "complete" | "partial" | "stale" | "missing" | string;
+  fetchedAt?: string | null;
+  lastError?: string;
 }
 
 export interface MarketDataProviderStatus {
@@ -469,6 +512,14 @@ export interface MarketDataProviderStatus {
     message: string;
     at?: string;
   } | null;
+  requestedTickers?: string[];
+  requestedTickerCount?: number;
+  missingTickers?: string[];
+  truncatedTickers?: string[];
+  warnings?: string[];
+  fallbackReason?: string;
+  cache?: MarketDataSnapshot["cache"];
+  quoteDiagnostics?: MarketDataQuoteDiagnostic[];
 }
 
 export interface MarketDataProviderConfig {
@@ -525,6 +576,12 @@ export interface MarketDataSnapshot {
       message: string;
       at?: string;
     } | null;
+    requestBudget?: {
+      maxQuoteTickers?: number;
+      enrichmentTickerLimit?: number;
+      deferredEnrichmentTickers?: string[];
+    } | null;
+    deferredEnrichmentTickers?: string[];
   };
   lastSuccessfulRefresh?: string | null;
   lastError?: {
@@ -535,7 +592,9 @@ export interface MarketDataSnapshot {
   quotesByTicker: Record<string, MarketDataQuote>;
   requestedTickers?: string[];
   missingTickers?: string[];
+  truncatedTickers?: string[];
   warnings?: string[];
+  fallbackReason?: string;
   error?: string;
   sourceTypes: string[];
   status: MarketDataProviderStatus;
