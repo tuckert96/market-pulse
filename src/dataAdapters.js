@@ -546,6 +546,9 @@
   }
 
   function buildImportResult(inputs = {}) {
+    const hasFidelityInput = inputs.fidelityRows !== undefined || inputs.fidelityCsv !== undefined || inputs.fidelityJson !== undefined;
+    const hasSeekingAlphaInput = inputs.seekingAlphaCsv !== undefined || inputs.seekingAlphaRows !== undefined;
+    const preferredProvider = hasFidelityInput || !hasSeekingAlphaInput ? "fidelity" : "seekingAlpha";
     let fidelityInput = inputs.fidelityRows || inputs.fidelityCsv || [];
     if (!inputs.fidelityRows && inputs.fidelityJson) {
       try {
@@ -578,7 +581,7 @@
       validation
     });
 
-    const importReport = combineImportReports([fidelityImport.report, seekingAlphaImport.report]);
+    const importReport = combineImportReports([fidelityImport.report, seekingAlphaImport.report], { preferredProvider });
     if (fidelityRecords.length) {
       importReport.holdingsImported = mergeResult.records.length;
       importReport.totalMarketValue = fidelityImport.report.totalMarketValue;
@@ -1034,11 +1037,22 @@
     };
   }
 
-  function combineImportReports(reports = []) {
+  function combineImportReports(reports = [], options = {}) {
     const active = reports.filter((report) => report.rowsParsed || report.detectedColumns.length || report.holdingsImported);
     if (!active.length) {
+      const preferredProvider = options.preferredProvider || "fidelity";
+      const fallbackReport = reports.find((report) => report.provider === preferredProvider) || reports[0] || {};
+      const expectedColumns = fallbackReport.expectedColumns?.length
+        ? fallbackReport.expectedColumns
+        : expectedColumnsForProvider(preferredProvider);
+      const missingHints = fallbackReport.missingColumnHints?.length
+        ? fallbackReport.missingColumnHints
+        : missingColumnHints(preferredProvider, fallbackReport.columnMapping || {});
+      const recoveryActions = fallbackReport.recoveryActions?.length
+        ? fallbackReport.recoveryActions
+        : recoveryActionsForImport({ provider: preferredProvider, headers: [], columnMapping: fallbackReport.columnMapping || {}, rejectedRows: [] });
       return {
-        fileName: "",
+        fileName: fallbackReport.fileName || "",
         detectedFileDate: "",
         detectedColumns: [],
         unsupportedColumns: [],
@@ -1047,16 +1061,20 @@
         rejectedRows: [],
         duplicateRows: [],
         missingRequiredFields: [],
-        expectedColumns: [],
-        missingColumnHints: [],
-        recoveryActions: [],
+        expectedColumns,
+        missingColumnHints: missingHints,
+        recoveryActions,
         columnMapping: {},
         mappingWarnings: [],
         totalMarketValue: 0,
         accountsDetected: [],
         tickersDetected: [],
-        providerReports: [],
-        health: { status: "Failed", tone: "error", message: "Failed: no CSV rows were parsed." }
+        providerReports: fallbackReport.provider ? [fallbackReport] : [],
+        health: {
+          status: "Failed",
+          tone: "error",
+          message: `Failed: no CSV rows were parsed. Expected columns include ${shortExpectedColumnList(expectedColumns)}.`
+        }
       };
     }
 

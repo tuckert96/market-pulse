@@ -625,6 +625,24 @@ test("bad Fidelity activity CSV fails with actionable diagnostics and expected c
   assert.ok(report.recoveryActions.some((action) => /Positions\/Holdings/i.test(action)));
 });
 
+test("empty Fidelity CSV still explains expected holdings columns", () => {
+  const result = adapters.buildImportResult({
+    fidelityFileName: "empty-fidelity.csv",
+    fidelityCsv: ""
+  });
+  const report = result.importReport;
+
+  assert.equal(result.records.length, 0);
+  assert.equal(report.health.status, "Failed");
+  assert.match(report.health.message, /no CSV rows were parsed/i);
+  assert.match(report.health.message, /Symbol/);
+  assert.equal(report.fileName, "empty-fidelity.csv");
+  assert.ok(report.expectedColumns.some((column) => column.field === "ticker" && column.examples.includes("Symbol")));
+  assert.ok(report.expectedColumns.some((column) => column.field === "marketValue" && column.examples.includes("Current Value")));
+  assert.ok(report.missingColumnHints.some((hint) => /Ticker\/symbol column not mapped/i.test(hint)));
+  assert.ok(report.recoveryActions.some((action) => /Map columns/i.test(action)));
+});
+
 test("Fidelity footer rows do not inflate missing required field diagnostics", () => {
   const result = adapters.buildImportResult({
     fidelityCsv: `Account Name,Symbol,Description,Quantity,Last Price,Current Value,Cost Basis
