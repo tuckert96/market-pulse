@@ -989,6 +989,9 @@ assert(portfolioViewJs.includes("function renderSignalReview"), "portfolio view 
 assert(portfolioViewJs.includes("Backtesting-lite"), "Signal Review should use exploratory backtesting-lite language");
 assert(portfolioViewJs.includes("This is not a validated strategy or a prediction engine"), "Signal Review should not imply validated prediction power");
 assert(portfolioViewJs.includes("buildTickerDetailModel"), "portfolio view should build ticker detail data from local state");
+assert(appJs.includes("window.location.hash || pathRoute"), "ticker pages should support direct /ticker/SYMBOL path fallback");
+assert(portfolioViewJs.includes("providerAvailability"), "ticker detail model should expose provider availability summary");
+assert(portfolioViewJs.includes("function buildTickerContextLinks"), "ticker pages should expose portfolio/watchlist context links");
 assert(portfolioViewJs.includes("Price Trend"), "ticker detail page should include a price trend section");
 assert(portfolioViewJs.includes("Technical Signal Context"), "ticker detail page should include native technical-analysis context");
 assert(portfolioViewJs.includes("Return distribution") && portfolioViewJs.includes("Spectral scan") && portfolioViewJs.includes("Regime proxy"), "ticker technical context should expose the deeper GitHub dashboard diagnostics");

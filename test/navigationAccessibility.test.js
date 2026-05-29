@@ -94,10 +94,14 @@ test("ticker detail route keeps native anchor and route announcement behavior", 
   assert.match(indexHtml, /id="tickerDetailPanel"/);
   assert.match(routerJs, /canonicalHash: `#\/ticker\/\$\{encodeURIComponent\(ticker\)\}`/);
   assert.match(appJs, /selectedTicker: routeFromHash\(\)\.ticker/);
+  assert.match(appJs, /window\.location\.hash \|\| pathRoute/);
   assert.match(appJs, /window\.addEventListener\("hashchange", render\)/);
   assert.match(portfolioViewJs, /export function renderTickerLink/);
   assert.match(portfolioViewJs, /function renderTickerDetailPage/);
   assert.match(portfolioViewJs, /href="\$\{tickerDetailHash\(normalized\)\}"/);
+  assert.match(portfolioViewJs, /function buildTickerContextLinks/);
+  assert.match(portfolioViewJs, /href: "#holdings"/);
+  assert.match(portfolioViewJs, /href: "#watchlist"/);
   assert.doesNotMatch(portfolioViewJs, /data-ticker-link[^\\n]+role="link"/);
   assert.doesNotMatch(portfolioViewJs, /data-ticker-link[^\\n]+tabindex="0"/);
 });

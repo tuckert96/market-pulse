@@ -55,6 +55,18 @@ test("route resolver canonicalizes aliases, ticker pages, invalid hashes, and ma
     canonicalHash: "#/ticker/MU",
     shouldReplace: false
   });
+  assert.deepEqual(routeFromHashValue("#ticker/mu"), {
+    route: "ticker",
+    ticker: "MU",
+    canonicalHash: "#/ticker/MU",
+    shouldReplace: true
+  });
+  assert.deepEqual(routeFromHashValue("/ticker/mu"), {
+    route: "ticker",
+    ticker: "MU",
+    canonicalHash: "#/ticker/MU",
+    shouldReplace: true
+  });
   assert.deepEqual(routeFromHashValue("#does-not-exist"), {
     route: "overview",
     canonicalHash: "#overview",
