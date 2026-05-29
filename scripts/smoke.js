@@ -1012,6 +1012,13 @@ assert(indexHtml.includes("--surface-elevated"), "index.html should include Appl
 assert(indexHtml.includes("--radius-large"), "index.html should include large-radius card tokens");
 assert(indexHtml.includes("--shadow-soft"), "index.html should include soft-shadow design tokens");
 assert(indexHtml.includes('id="thirtySecondBriefPanel"'), "index.html should include portfolio snapshot command panel");
+assert(indexHtml.includes('id="firstRunOnboardingPanel"'), "Overview should include a guided first-run onboarding panel");
+assert(indexHtml.includes(".first-run-card"), "first-run onboarding should use a styled app-native card");
+assert(portfolioViewJs.includes("buildFirstRunOnboardingModel"), "portfolio view should build deterministic first-run onboarding state");
+assert(portfolioViewJs.includes("Import your portfolio to begin"), "first-run onboarding should clearly guide no-data users to import");
+assert(portfolioViewJs.includes("Sample portfolio is active"), "first-run onboarding should clearly label sample mode");
+assert(portfolioViewJs.includes("data-overview-action=\"sample\""), "first-run onboarding should expose the existing sample-data action");
+assert(portfolioViewJs.includes("holdings-empty-state"), "Holdings should show a first-run empty state instead of a filter-only message");
 assert(indexHtml.includes('id="fidelityFile"'), "index.html should include Fidelity CSV import control");
 assert(indexHtml.includes('aria-label="Import Fidelity CSV or holdings JSON file"'), "Fidelity CSV/JSON file input should have an accessible label");
 assert(indexHtml.includes('id="fidelityDropZone"'), "Fidelity integration should expose a drag-and-drop import zone");

@@ -5,6 +5,7 @@ import {
   buildDataSourceHealthSummary,
   buildAffectedExposureSummary,
   buildAlphaSourceIssueRows,
+  buildFirstRunOnboardingModel,
   buildRankedAlphaHoldingRows,
   buildSettingsProviderStatusRows,
   buildTickerDetailModel,
@@ -159,6 +160,53 @@ test("data source health summary separates usable provider data from local/sampl
   assert.equal(summary.reviewCount, 1);
   assert.equal(summary.providerBackedCount, 3);
   assert.equal(summary.localOnlyCount, 3);
+});
+
+test("first-run onboarding model gives clear no-data and sample-mode next actions", () => {
+  const empty = buildFirstRunOnboardingModel({
+    portfolioStatus: {
+      uiState: "NO_DATA",
+      label: "No portfolio loaded",
+      detail: "Import a Fidelity CSV/JSON file or load sample data to populate portfolio screens.",
+      activePortfolio: false
+    },
+    marketDataStatus: { status: "not configured", label: "Finnhub not configured" },
+    providerReadiness: { providerStatuses: { finnhub: { id: "finnhub", configured: false } } },
+    uiState: "NO_DATA"
+  });
+
+  assert.equal(empty.visible, true);
+  assert.equal(empty.mode, "no-data");
+  assert.equal(empty.primaryAction.href, "#imports");
+  assert.equal(empty.sampleAction.label, "Try sample data");
+  assert.ok(empty.secondaryActions.some((action) => action.href === "#data-sources"));
+  assert.ok(empty.secondaryActions.some((action) => action.href === "#settings"));
+  assert.ok(empty.steps.some((step) => /Confirm preview/.test(step.title)));
+  assert.equal(empty.statusRows[0].value, "No portfolio loaded");
+
+  const sample = buildFirstRunOnboardingModel({
+    portfolioStatus: {
+      uiState: "SAMPLE_MODE",
+      label: "Sample portfolio loaded",
+      detail: "Sample holdings are active for workflow testing.",
+      activePortfolio: true,
+      samplePortfolio: true
+    },
+    marketDataStatus: { status: "mock/sample mode", label: "Sample market data" },
+    providerReadiness: { providerStatuses: { finnhub: { id: "finnhub", configured: true } } },
+    uiState: "SAMPLE_MODE"
+  });
+
+  assert.equal(sample.visible, true);
+  assert.equal(sample.mode, "sample");
+  assert.equal(sample.sampleAction, null);
+  assert.match(sample.summary, /not Tucker's real money/i);
+
+  const imported = buildFirstRunOnboardingModel({
+    portfolioStatus: { uiState: "IMPORTED_CLEAN", activePortfolio: true, realPortfolio: true },
+    uiState: "IMPORTED_CLEAN"
+  });
+  assert.equal(imported.visible, false);
 });
 
 test("data sources health screen renders standardized source labels and freshness metadata", () => {

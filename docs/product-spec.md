@@ -208,6 +208,8 @@ The local backup layer serializes dashboard state to JSON. It deliberately exclu
 
 Settings mirrors the Data Sources truth model for provider setup. It shows whether market data, OpenAI explanations, Plaid/Fidelity, Reddit, X/social, federal disclosures, and Seeking Alpha imports are Live, Imported, Cached, Stale, Error, or Not configured; it also shows key-presence state, last successful use, last visible error, and setup-document links without exposing secret values.
 
+When no active imported portfolio exists, Overview shows a first-run guide instead of an empty-looking dashboard. The guide routes Tucker to local Fidelity CSV/JSON/paste import, Sample mode, Data Sources, and Settings, and it keeps Portfolio, Market data, and Provider setup labels visible so Sample or Not configured states cannot be mistaken for real imported/live data.
+
 Canonical schemas are documented in `docs/schemas.md`. Safety rules are documented in `docs/safety-model.md`.
 
 ## Non-Goals
