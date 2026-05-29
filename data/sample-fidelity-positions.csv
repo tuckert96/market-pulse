@@ -1,0 +1,6 @@
+Account Name,Symbol,Security Description,Quantity,Last Price,Current Value,Total Cost Basis,Average Cost Basis,Sector
+Brokerage TOD,NVDA,NVIDIA Corp,18,1014.00,18252.00,12366.00,687.00,Semiconductors
+Brokerage TOD,CRWD,CrowdStrike Holdings Inc Class A,7,356.00,2492.00,2037.00,291.00,Cybersecurity
+Brokerage TOD,NET,Cloudflare Inc Class A,22,91.00,2002.00,1694.00,77.00,Software
+Roth IRA,CELH,Celsius Holdings Inc,40,71.00,2840.00,2560.00,64.00,Consumer Staples
+Roth IRA,ANET,Arista Networks Inc,12,92.00,1104.00,852.00,71.00,Networking

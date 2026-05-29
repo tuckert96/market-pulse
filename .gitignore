@@ -21,5 +21,8 @@ growth-signal-picks*.csv
 Portfolio_Positions_*.csv
 *Positions*.csv
 brokerage-*.csv
+!data/sample-fidelity-positions.csv
+!data/sample-messy-brokerage-positions.csv
+!data/torture-brokerage-positions.csv
 private-portfolio-*.json
 portfolio-backup-*.json

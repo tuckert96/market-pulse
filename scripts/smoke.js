@@ -10,6 +10,7 @@ import { normalizePlaidHoldings, normalizeSnapTradeHoldings } from "../src/fidel
 import { applyMarketDataToHoldings, buildMarketDataProviderConfig, buildMarketDataProviderStatuses, buildMockMarketDataSnapshot, createFinancialModelingPrepProvider, createFinnhubProvider, createMarketDataCache, createMockMarketDataProvider, marketDataCacheTtlConfig, marketDataFallbackProviderIds } from "../src/marketDataProvider.js";
 import { buildDemoMarketEventDataset } from "../src/marketEventProviders.js";
 import { buildMarketDriverReport, MARKET_DRIVER_DEFAULT_TICKERS } from "../src/marketDrivers.js";
+import { applyPortfolioImportPreview, buildPortfolioImportPreview, cancelPortfolioImportPreview } from "../src/importPreviewWorkflow.js";
 import { buildTickerMovementExplainer } from "../src/movementExplainer.js";
 import { parseLocalDataFixtureJson, validateLocalDataBundle } from "../src/localDataContracts.js";
 import { buildPoliticianTradeProviderConfig, createPoliticianTradeProvider, demoPoliticianTrades, importPoliticianTradeFile, politicianTradeProviderStatuses } from "../src/politicianTrades.js";
@@ -351,6 +352,16 @@ const exposureSummary = buildAffectedExposureSummary({
 const indexHtml = readFileSync("index.html", "utf8");
 const appJs = readFileSync("src/app.js", "utf8");
 const portfolioViewJs = readFileSync("src/portfolioView.js", "utf8");
+const fidelityImportBranchStart = appJs.indexOf('if (provider === "fidelity")');
+const fidelityImportBranchEnd = appJs.indexOf("if (!result.validation.ok)", fidelityImportBranchStart);
+const fidelityImportBranch = fidelityImportBranchStart >= 0 && fidelityImportBranchEnd > fidelityImportBranchStart
+  ? appJs.slice(fidelityImportBranchStart, fidelityImportBranchEnd)
+  : "";
+const cancelImportStart = appJs.indexOf("function cancelPendingPortfolioImport");
+const cancelImportEnd = appJs.indexOf("function parsePastedFidelityHoldings", cancelImportStart);
+const cancelImportFunction = cancelImportStart >= 0 && cancelImportEnd > cancelImportStart
+  ? appJs.slice(cancelImportStart, cancelImportEnd)
+  : "";
 const accountScopeJs = readFileSync("src/accountScope.js", "utf8");
 const routerJs = readFileSync("src/router.js", "utf8");
 const politicianTradesJs = readFileSync("src/politicianTrades.js", "utf8");
@@ -423,6 +434,14 @@ const fidelityCusipCsv = adapters.buildImportResult({
   fidelityFileName: "fidelity-cusip-export.csv",
   fidelityCsv: `Account,Security ID / CUSIP,Security Description,Units Held,Current Price USD,Current Value Dollars,Total Basis
 Taxable,595112103,MICRON TECHNOLOGY INC (MU),10,$100.00,$1000.00,$750.00`
+});
+const csvImportPreview = buildPortfolioImportPreview(csvResult, {
+  fileName: "sample-fidelity-positions.csv",
+  createdAt: "2026-05-28T12:00:00.000Z"
+});
+const canceledCsvImportPreview = cancelPortfolioImportPreview(csvImportPreview);
+const appliedCsvImportPreview = applyPortfolioImportPreview(csvImportPreview, {
+  importedAt: "2026-05-28T12:05:00.000Z"
 });
 const plaidRows = normalizePlaidHoldings({
   accounts: [{ account_id: "a1", name: "Fidelity Brokerage", subtype: "individual" }],
@@ -1052,6 +1071,12 @@ assert(appJs.includes("handleFidelityDrop"), "app.js should wire drag-and-drop F
 assert(appJs.includes("Map columns"), "manual Fidelity mapping should use human-readable copy");
 assert(appJs.includes("Rows needing review"), "app.js should show row-review diagnostics for partial imports");
 assert(appJs.includes("cancelPendingPortfolioImport"), "app.js should allow canceling a portfolio import preview");
+assert(fidelityImportBranch.includes("buildPortfolioImportPreview") && fidelityImportBranch.includes("pendingCsvImport =") && fidelityImportBranch.includes("preview") && fidelityImportBranch.includes("persist: false") && fidelityImportBranch.includes("return;"), "Fidelity file uploads should stage a preview and return before mutating holdings");
+assert(!fidelityImportBranch.includes("mergeImportedRecords"), "Fidelity file uploads should not merge holdings before preview confirmation");
+assert(cancelImportFunction.includes("cancelPortfolioImportPreview") && !cancelImportFunction.includes("mergeImportedRecords") && !cancelImportFunction.includes("saveHoldings") && !cancelImportFunction.includes("saveLatestImportReport") && !cancelImportFunction.includes("saveFidelityStatus"), "canceling a portfolio import preview should not mutate or persist holdings");
+assert(csvImportPreview.canApply && csvImportPreview.acceptedRows === csvResult.records.length, "portfolio import preview should stage all accepted CSV rows");
+assert(canceledCsvImportPreview.changed === false && canceledCsvImportPreview.clearPendingPreview === true, "portfolio import preview cancel should clear pending state without applying holdings");
+assert(appliedCsvImportPreview.changed && appliedCsvImportPreview.holdings.length === csvResult.records.length && appliedCsvImportPreview.fidelityStatus.mode === "csv-imported", "portfolio import preview confirm should produce applied holdings and CSV-imported status");
 assert(marketDataSelectionJs.includes("!holding.cash && holding.assetClass !== \"Cash\"") && marketDataSelectionJs.includes("holding.marketDataEligible !== false"), "market data requests should skip cash-like and local-identifier holdings before calling live quote providers");
 assert(portfolioViewJs.includes("Market data diagnostics"), "Data Sources should expose safe market-data provider diagnostics");
 assert(indexHtml.includes('accept=".csv,.json,text/csv,application/json"'), "portfolio import should accept CSV and holdings JSON");

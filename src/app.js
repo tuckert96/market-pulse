@@ -54,6 +54,13 @@ import {
   unlinkFidelityConnection
 } from "./fidelityConnector.js";
 import {
+  applyPortfolioImportPreview,
+  buildPortfolioImportPreview,
+  canApplyPortfolioImportResult,
+  cancelPortfolioImportPreview,
+  isPortfolioImportResult
+} from "./importPreviewWorkflow.js";
+import {
   buildPoliticianTradeProviderConfig,
   importPoliticianTradeFile,
   loadPoliticianTrades,
@@ -1303,18 +1310,11 @@ function showImportStatus(result, options = {}) {
 }
 
 function isPortfolioImport(result) {
-  return (result.fidelityRecords || []).length > 0 ||
-    (result.importReport?.providerReports || []).some((report) => report.provider === "fidelity" && report.holdingsImported > 0);
+  return isPortfolioImportResult(result);
 }
 
 function canApplyPortfolioImport(result) {
-  const blockedStatuses = new Set(["Failed", "Needs manual mapping"]);
-  return Boolean(
-    result?.validation?.ok &&
-    isPortfolioImport(result) &&
-    (result.records || []).length > 0 &&
-    !blockedStatuses.has(result.importReport?.health?.status)
-  );
+  return canApplyPortfolioImportResult(result);
 }
 
 function friendlyImportHealth(report, options = {}) {
@@ -1577,7 +1577,12 @@ function applyManualImportMapping() {
   });
 
   if (result.validation.ok) {
+    const preview = buildPortfolioImportPreview(result, {
+      provider: pendingCsvImport.provider,
+      fileName: pendingCsvImport.fileName
+    });
     pendingCsvImport.result = result;
+    pendingCsvImport.preview = preview;
     showImportStatus(result, { preview: pendingCsvImport.provider === "fidelity" && canApplyPortfolioImport(result), persist: false });
     if (pendingCsvImport.provider !== "fidelity") {
       mergeSeekingAlphaRecords(result.records, "csv-import");
@@ -1594,37 +1599,33 @@ async function applyPendingPortfolioImport() {
     return;
   }
   const result = pendingCsvImport.result;
-  if (!canApplyPortfolioImport(result)) {
+  const preview = pendingCsvImport.preview || buildPortfolioImportPreview(result, {
+    provider: pendingCsvImport.provider,
+    fileName: pendingCsvImport.fileName
+  });
+  const applied = applyPortfolioImportPreview(preview);
+  if (!applied.changed) {
     showImportStatus(result, { persist: false });
     return;
   }
-  mergeImportedRecords(result.records, { replace: true, render: false });
-  state.fidelityStatus = {
-    connected: false,
-    provider: "csv-import",
-    lastSync: result.importReport?.importedAt || new Date().toISOString(),
-    mode: "csv-imported",
-    holdings: result.importReport?.holdingsImported || result.records.length,
-    accounts: result.importReport?.accountsDetected?.length || 0,
-    totalMarketValue: result.importReport?.totalMarketValue || 0,
-    fileName: result.importReport?.fileName || pendingCsvImport.fileName,
-    skippedNonHoldingRows: skippedNonHoldingRows(result.importReport).length,
-    rowsNeedingReview: countHoldingRowsNeedingReview(result.importReport),
-    message: `Fidelity import applied: ${result.importReport?.holdingsImported || result.records.length} holding${(result.importReport?.holdingsImported || result.records.length) === 1 ? "" : "s"} loaded locally.`
-  };
+  mergeImportedRecords(applied.holdings, { replace: true, render: false });
+  state.latestImportReport = applied.importReport;
+  state.fidelityStatus = applied.fidelityStatus;
+  saveLatestImportReport();
   saveFidelityStatus();
   renderFidelityStatus();
   pendingCsvImport = null;
-  showImportStatus(result, { persist: true, render: false, applied: true });
+  showImportStatus({ ...result, importReport: applied.importReport }, { persist: false, render: false, applied: true });
   await refreshMarketDataSnapshot({ renderAfter: false });
   render();
 }
 
 function cancelPendingPortfolioImport() {
+  const canceled = cancelPortfolioImportPreview(pendingCsvImport?.preview || null);
   pendingCsvImport = null;
   const status = $("importStatus");
   if (status) {
-    status.textContent = "Import preview canceled. No holdings were changed.";
+    status.textContent = canceled.message;
     status.className = "import-status pending";
   }
   const panel = $("importDebugPanel");
@@ -1667,7 +1668,11 @@ function parsePastedFidelityHoldings() {
     fileName: "pasted-fidelity-table.csv",
     csv: value,
     isJson: false,
-    result
+    result,
+    preview: buildPortfolioImportPreview(result, {
+      provider: "fidelity",
+      fileName: "pasted-fidelity-table.csv"
+    })
   };
   showImportStatus(result, { preview: canApplyPortfolioImport(result), persist: false });
 }
@@ -2653,12 +2658,17 @@ function importFile(file, provider) {
         ? buildSeekingAlphaWorkbookImportResult(await normalizeSeekingAlphaWorkbook(reader.result))
         : buildCsvImportResult(provider, String(reader.result || ""), adapters, { fileName: file.name, isJson: isJsonFile(file) });
       if (provider === "fidelity") {
+        const preview = buildPortfolioImportPreview(result, {
+          provider,
+          fileName: file.name
+        });
         pendingCsvImport = {
           provider,
           fileName: file.name,
           csv: String(reader.result || ""),
           isJson: isJsonFile(file),
-          result
+          result,
+          preview
         };
         showImportStatus(result, { preview: canApplyPortfolioImport(result), persist: false });
         return;
