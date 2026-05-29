@@ -476,6 +476,7 @@ assert(existsSync("src/marketEventProviders.js"), "market event/news provider mo
 assert(existsSync("src/marketDrivers.js"), "Market Drivers explainer module should exist");
 assert(marketDriversJs.includes("BROAD_MARKET_DRIVER_TICKERS"), "Market Drivers should define broad-market proxy tickers");
 assert(marketDriversJs.includes("AI_TECH_DRIVER_TICKERS"), "Market Drivers should define AI/tech proxy tickers");
+assert(marketDriversJs.includes("MARKET_REGIME_TICKERS"), "Market Drivers should define market-regime proxy tickers");
 assert(marketDriversJs.includes("source-labeled explanation, not a confirmed cause"), "Market Drivers should avoid fake-causality language");
 assert(marketDriversJs.includes("socialEvidenceForScope"), "Market Drivers should consume social evidence when available");
 assert(marketDriversJs.includes("newsReadThroughDriver"), "Market Drivers should consume news/event read-throughs when available");
@@ -806,6 +807,7 @@ assert(appJs.includes("buildMarketDriverReport"), "app.js should build the Marke
 assert(appJs.includes("marketDrivers,"), "app.js should pass Market Drivers into render and Daily Brief");
 assert(portfolioViewJs.includes("renderMarketDrivers"), "Portfolio view should render the Market Drivers screen");
 assert(portfolioViewJs.includes("renderOverviewMarketDriversSnapshot"), "Overview should show a compact Market Drivers snapshot");
+assert(portfolioViewJs.includes("renderMarketRegimeCard"), "Market Drivers screen should render a market regime panel");
 assert(marketDataSelectionJs.includes('"market-driver-proxy"'), "market data selection should request market-driver proxies separately from default research tickers");
 assert(!indexHtml.includes("https://cdn.plaid.com/link/v2/stable/link-initialize.js"), "Plaid CDN script should lazy-load only after Tucker starts the Plaid connector flow");
 assert(appJs.includes("function loadPlaidLinkScript"), "app.js should lazy-load Plaid Link only when the connector flow starts");
@@ -1156,6 +1158,8 @@ assert(marketDataSnapshot.quotesByTicker.SMH && marketDataSnapshot.quotesByTicke
 assert(holdingsWithMarketData.some((holding) => holding.ticker === "MU" && holding.marketDataIsMock), "mock market data should enrich holdings");
 assert(["up", "down", "mixed", "unknown"].includes(marketDriverReport.broadMarket.direction), "Market Drivers should return a broad-market direction");
 assert(["up", "down", "mixed", "unknown"].includes(marketDriverReport.aiTech.direction), "Market Drivers should return an AI/tech direction");
+assert(["risk-on", "risk-off", "mixed", "overbought", "oversold", "defensive"].includes(marketDriverReport.marketRegime.regime), "Market Drivers should include a deterministic market regime classification");
+assert(marketDriverReport.marketRegime.signals.length >= 6, "Market regime should expose contributing signals");
 assert(marketDriverReport.broadMarket.drivers.length > 0, "Market Drivers should generate broad-market driver rows");
 assert(marketDriverReport.aiTech.drivers.length > 0, "Market Drivers should generate AI/tech driver rows");
 assert(marketDriverReport.aiTech.drivers.some((row) => row.href === "#risk" || row.href === "#market-intelligence"), "AI/tech drivers should link to relevant deep screens");
