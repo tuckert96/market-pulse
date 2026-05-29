@@ -5,6 +5,7 @@ import { analyzePortfolio } from "../src/portfolioAnalytics.js";
 import { normalizeHoldings } from "../src/portfolioSchema.js";
 import {
   buildCashDeploymentPlan,
+  buildRebalancingSimulator,
   buildLeveragedGuardrails,
   buildTargetAllocationPlan,
   buildTargetAllocationRows,
@@ -78,6 +79,36 @@ test("rebalance modes produce review suggestions without trade commands", () => 
   assert.ok(plan.suggestions.every((item) => /^Review|^Hold/i.test(item.action)));
   assert.ok(plan.suggestions.some((item) => item.action === "Review leverage cap"));
   assert.ok(plan.suggestions.some((item) => item.action === "Hold / review taxable impact"));
+});
+
+test("rebalancing simulator models new-contribution and sell-and-rebalance modes", () => {
+  const holdings = normalizeHoldings([
+    { ticker: "MU", account: "Taxable Brokerage", accountType: "Taxable", marketValue: 7000, assetClass: "Equity" },
+    { ticker: "NVDA", account: "Roth IRA", accountType: "Retirement", marketValue: 1000, assetClass: "Equity" },
+    { ticker: "SPAXX", account: "Taxable Brokerage", accountType: "Taxable", name: "Money Market", marketValue: 2000, assetClass: "Cash" }
+  ]);
+  const targets = normalizeTargetAllocations([
+    { scope: "ticker", key: "MU", targetWeight: 0.4, minWeight: 0.3, maxWeight: 0.45 },
+    { scope: "ticker", key: "NVDA", targetWeight: 0.3, minWeight: 0.2, maxWeight: 0.35 },
+    { scope: "assetClass", key: "Cash", targetWeight: 0.1, minWeight: 0.05, maxWeight: 0.2 }
+  ]);
+  const contributionPlan = buildTargetAllocationPlan(holdings, targets, { mode: "new-contribution" });
+  const sellPlan = buildTargetAllocationPlan(holdings, targets, { mode: "sell-and-rebalance" });
+  const directSimulator = buildRebalancingSimulator(holdings, targets, contributionPlan.rows, contributionPlan.cashPlan, { mode: "new-contribution" });
+
+  assert.equal(contributionPlan.simulator.mode, "new-contribution");
+  assert.equal(contributionPlan.simulator.readOnly, true);
+  assert.ok(contributionPlan.simulator.estimatedTrades.some((trade) => trade.ticker === "NVDA" && trade.direction === "add"));
+  assert.equal(contributionPlan.simulator.estimatedTrades.some((trade) => trade.valueDelta < 0), false);
+  assert.equal(directSimulator.estimatedTrades.some((trade) => trade.ticker === "NVDA"), true);
+
+  assert.equal(sellPlan.simulator.mode, "sell-and-rebalance");
+  assert.ok(sellPlan.simulator.estimatedTrades.some((trade) => trade.ticker === "MU" && trade.direction === "reduce"));
+  assert.ok(sellPlan.simulator.estimatedTrades.some((trade) => trade.ticker === "NVDA" && trade.direction === "add"));
+  assert.ok(sellPlan.simulator.beforeAfterRows.some((row) => row.ticker === "MU" && row.afterWeight < row.currentWeight));
+  assert.ok(sellPlan.simulator.categoryAdjustments.some((row) => row.scope === "assetClass" && row.key === "Cash"));
+  assert.equal(sellPlan.simulator.taxWarnings.some((warning) => /taxable accounts/i.test(warning)), true);
+  assert.doesNotMatch(JSON.stringify(sellPlan.simulator), /\b(place order|execute|trade ticket|buy now|sell now)\b/i);
 });
 
 test("leveraged ETF guardrails flag holdings above target cap", () => {

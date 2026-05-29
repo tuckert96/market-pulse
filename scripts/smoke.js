@@ -1010,6 +1010,7 @@ assert(!indexHtml.includes("Advanced dashboard filters"), "stale advanced dashbo
 assert(indexHtml.includes('id="importSummaryPanel"'), "index.html should include import summary panel");
 assert(indexHtml.includes('id="importDebugPanel"'), "index.html should include import debug panel");
 assert(indexHtml.includes('id="targetAllocationsPanel"'), "index.html should include target allocations panel");
+assert(indexHtml.includes('value="sell-and-rebalance"'), "Targets screen should expose a sell-and-rebalance simulator mode");
 assert(indexHtml.includes('href="#what-if"'), "sidebar should include What-If simulator route");
 assert(indexHtml.includes('id="what-if" data-screen="what-if"'), "index.html should include What-If screen");
 assert(indexHtml.includes('id="whatIfAction"'), "What-If screen should include scenario action control");
@@ -1165,6 +1166,11 @@ assert(targetPlan.rows.some((row) => row.scope === "ticker" && row.key === "MU")
 assert(targetPlan.cashPlan.availableCash >= 0, "target allocation plan should include a cash deployment planner");
 assert(targetPlan.leveragedGuardrails.some((item) => item.ticker === "UPRO" || item.ticker === "SOXL"), "target allocation plan should include leveraged ETF guardrails");
 assert(targetPlan.suggestions.every((item) => /^Review|^Hold/i.test(item.action)), "rebalance suggestions should be review prompts, not trade commands");
+assert(targetPlan.simulator?.readOnly === true, "target allocation plan should include a read-only rebalancing simulator");
+assert(Array.isArray(targetPlan.simulator.beforeAfterRows), "rebalancing simulator should expose before/after allocation rows");
+assert(Array.isArray(targetPlan.simulator.estimatedTrades), "rebalancing simulator should expose estimated ticker adjustments");
+assert(portfolioViewJs.includes("renderRebalanceSimulator"), "Targets view should render the rebalancing simulator");
+assert(portfolioViewJs.includes("No brokerage order, trade ticket, or execution step exists here."), "rebalancing simulator UI should explicitly avoid execution");
 assert(whatIfResult.status === "ready", "What-If simulator should return a ready result for a valid scenario");
 assert(whatIfResult.readOnly === true, "What-If simulator should explicitly be read-only");
 assert(whatIfResult.deltas.totalValue.delta > 0, "external add scenario should show total value delta");
