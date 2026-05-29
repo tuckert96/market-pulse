@@ -6793,9 +6793,17 @@
                 <div class="editor-actions">
                   <button class="primary" id="saveThesisBtn" type="button">Save thesis</button>
                   <button id="markReviewedBtn" type="button">Mark reviewed today</button>
+                  <label class="control compact-control" for="thesisSnapshotSourceType"><span>Snapshot type</span>
+                    <select id="thesisSnapshotSourceType">
+                      <option value="user-written">User-written</option>
+                      <option value="generated">Generated summary</option>
+                    </select>
+                  </label>
+                  <button id="saveThesisSnapshotBtn" type="button">Save snapshot</button>
                   <p id="thesisEditorStatus" class="disclaimer" aria-live="polite">Thesis notes stay in localStorage on this machine.</p>
                 </div>
               </div>
+              <div class="body-pad" id="thesisSnapshotPanel"></div>
             </div>
           </section>
 
