@@ -1,5 +1,6 @@
+import { isLeveragedEtfTicker } from "./portfolioSchema.js";
+
 const TARGET_SCOPES = new Set(["ticker", "assetClass", "strategySleeve", "account"]);
-const LEVERAGED_TICKERS = new Set(["UPRO", "SOXL", "TQQQ", "SPXL", "TECL", "FNGU"]);
 
 export function defaultTargetAllocations() {
   return [
@@ -359,7 +360,7 @@ function aggregateByTicker(holdings = []) {
 
 function isLeveragedHolding(holding = {}) {
   const ticker = normalizeKey("ticker", holding.ticker);
-  return Boolean(holding.isLeveragedEtf) || LEVERAGED_TICKERS.has(ticker);
+  return Boolean(holding.isLeveragedEtf) || isLeveragedEtfTicker(ticker, holding);
 }
 
 function isCashHolding(holding = {}) {

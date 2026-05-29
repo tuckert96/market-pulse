@@ -20,6 +20,7 @@ import {
   portfolioImportSourceStatus,
   providerStatusDisplay,
   renderAffectedExposureSummary,
+  renderLeveragedDrawdownScenarios,
   renderDataSourceHealth,
   renderTickerLink,
   safeExternalHref,
@@ -76,6 +77,28 @@ test("affected exposure chips preserve value-sorted ticker order", () => {
 
   assert.ok(html.indexOf("SOXL") < html.indexOf("MU"));
   assert.ok(html.indexOf("MU") < html.indexOf("AMD"));
+});
+
+test("leveraged ETF drawdown scenario renderer stays compact and educational", () => {
+  const html = renderLeveragedDrawdownScenarios({
+    dailyResetExplanation: "Daily-reset leveraged ETFs target their stated multiple for one trading day.",
+    volatilityDragExplanation: "Volatility drag can make multi-day returns diverge from simple index leverage.",
+    scenarios: [
+      { underlyingMoveLabel: "-10%", estimatedProductMove: -0.3, estimatedPortfolioImpact: -4500, estimatedPortfolioImpactPct: -0.045 },
+      { underlyingMoveLabel: "-20%", estimatedProductMove: -0.6, estimatedPortfolioImpact: -9000, estimatedPortfolioImpactPct: -0.09 },
+      { underlyingMoveLabel: "-30%", estimatedProductMove: -0.9, estimatedPortfolioImpact: -13500, estimatedPortfolioImpactPct: -0.135 },
+      { underlyingMoveLabel: "-50%", estimatedProductMove: -1, estimatedPortfolioImpact: -15000, estimatedPortfolioImpactPct: -0.15 }
+    ]
+  });
+
+  assert.match(html, /riskLeveragedVolatilityDragModule/);
+  assert.match(html, /riskLeveragedDrawdownScenarios/);
+  assert.match(html, /Volatility Drag \+ Drawdown Scenarios/);
+  assert.match(html, /Daily-reset leveraged ETFs target their stated multiple for one trading day/);
+  assert.match(html, /Volatility drag can make multi-day returns diverge/);
+  assert.match(html, /Underlying -10%/);
+  assert.match(html, /Underlying -50%/);
+  assert.doesNotMatch(html, /buy|sell|execute/i);
 });
 
 test("external source links reject unsafe URL schemes", () => {

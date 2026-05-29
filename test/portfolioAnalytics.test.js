@@ -4,10 +4,12 @@ import {
   POSITION_CONCENTRATION_THRESHOLDS,
   analyzePortfolio,
   buildDecisionRiskDashboard,
+  buildLeveragedEtfDrawdownScenarios,
   concentrationThresholdFlags,
   riskStatusForWeight
 } from "../src/portfolioAnalytics.js";
 import { tuckerDemoHoldings } from "../src/portfolioDemoData.js";
+import { normalizeHoldings } from "../src/portfolioSchema.js";
 
 test("portfolio overview includes value, risk, alerts, and breakdowns", () => {
   const analysis = analyzePortfolio(tuckerDemoHoldings());
@@ -27,6 +29,36 @@ test("leveraged ETF exposure is detected", () => {
   assert.ok(leveraged.some((holding) => holding.ticker === "UPRO"));
   assert.ok(leveraged.some((holding) => holding.ticker === "SOXL"));
   assert.ok(analysis.overview.leveragedNotionalExposure > analysis.overview.leveragedEtfExposure);
+});
+
+test("known leveraged ETFs are normalized even from messy symbols or stale flags", () => {
+  const rows = normalizeHoldings([
+    { ticker: "$upro", name: "ProShares UltraPro S&P500", marketValue: 1000, isLeveragedEtf: false },
+    { ticker: "tecl", name: "Direxion Daily Technology Bull 3X", marketValue: 1000 },
+    { ticker: "QLD", name: "ProShares Ultra QQQ", marketValue: 1000 },
+    { ticker: "VTI", name: "Vanguard Total Stock Market ETF", marketValue: 1000 }
+  ]);
+
+  assert.deepEqual(rows.map((row) => [row.ticker, row.isLeveragedEtf, row.leveragedMultiple, row.assetClass]), [
+    ["UPRO", true, 3, "ETF"],
+    ["TECL", true, 3, "ETF"],
+    ["QLD", true, 2, "ETF"],
+    ["VTI", false, 1, "ETF"]
+  ]);
+});
+
+test("inverse leveraged ETFs use absolute leverage for risk and notional exposure", () => {
+  const analysis = analyzePortfolio([
+    { ticker: "SQQQ", name: "ProShares UltraPro Short QQQ", account: "Taxable", marketValue: 10000, costBasis: 8000, assetClass: "ETF" },
+    { ticker: "SPAXX", name: "Money Market", account: "Taxable", marketValue: 90000, assetClass: "Cash", sector: "Cash", strategySleeve: "Cash" }
+  ]);
+  const sqqq = analysis.holdings.find((holding) => holding.ticker === "SQQQ");
+
+  assert.equal(sqqq.isLeveragedEtf, true);
+  assert.equal(sqqq.leveragedMultiple, -3);
+  assert.ok(sqqq.riskScore > 20);
+  assert.equal(analysis.overview.leveragedNotionalExposure, 30000);
+  assert.ok(analysis.alerts.some((alert) => alert.type === "leverage" && alert.detail.includes("$30,000")));
 });
 
 test("persisted false cash classifications are repaired during portfolio analysis", () => {
@@ -180,6 +212,35 @@ test("decision risk dashboard treats inverse leveraged ETFs as exposure magnitud
   assert.equal(dashboard.leveragedEtfExposure.notionalValue, 3000);
   assert.equal(dashboard.leveragedEtfExposure.rows[0].value, 3000);
   assert.ok(dashboard.leveragedEtfExposure.rows[0].explanation.includes("30% estimated notional"));
+});
+
+test("leveraged ETF dashboard includes daily-reset education and drawdown scenarios", () => {
+  const dashboard = buildDecisionRiskDashboard([
+    { ticker: "UPRO", name: "ProShares UltraPro S&P500", account: "Taxable", marketValue: 10000, assetClass: "ETF", sector: "Leveraged growth", isLeveragedEtf: true, leveragedMultiple: 3 },
+    { ticker: "SOXL", name: "Direxion Daily Semiconductor Bull 3X", account: "Roth", marketValue: 5000, assetClass: "ETF", sector: "Semiconductors", isLeveragedEtf: true, leveragedMultiple: 3 },
+    { ticker: "VTI", name: "Vanguard Total Stock Market ETF", account: "Taxable", marketValue: 85000, assetClass: "ETF", sector: "Broad market" }
+  ], 100000);
+
+  assert.equal(dashboard.leveragedEtfExposure.directWeight, 0.15);
+  assert.equal(dashboard.leveragedEtfExposure.notionalWeight, 0.45);
+  assert.equal(dashboard.leveragedEtfExposure.scenarios.length, 4);
+  assert.deepEqual(dashboard.leveragedEtfExposure.scenarios.map((row) => row.underlyingMoveLabel), ["-10%", "-20%", "-30%", "-50%"]);
+  assert.equal(dashboard.leveragedEtfExposure.scenarios[0].estimatedProductMove, -0.3);
+  assert.equal(dashboard.leveragedEtfExposure.scenarios[0].estimatedPortfolioImpact, -4500);
+  assert.equal(dashboard.leveragedEtfExposure.scenarios[3].estimatedProductMove, -1);
+  assert.ok(dashboard.leveragedEtfExposure.dailyResetExplanation.includes("one trading day"));
+  assert.ok(dashboard.leveragedEtfExposure.volatilityDragExplanation.includes("Volatility drag"));
+});
+
+test("leveraged ETF scenario builder handles missing leveraged holdings safely", () => {
+  const scenarios = buildLeveragedEtfDrawdownScenarios([
+    { ticker: "VTI", name: "Total market ETF", marketValue: 100000, assetClass: "ETF", leveragedMultiple: 1 }
+  ], 100000);
+
+  assert.equal(scenarios.length, 4);
+  assert.equal(scenarios[0].estimatedProductMove, 0);
+  assert.equal(scenarios[0].estimatedPortfolioImpact, 0);
+  assert.ok(scenarios[0].explanation.includes("No leveraged ETFs"));
 });
 
 test("cash-heavy portfolios keep cash out of equity concentration risk", () => {

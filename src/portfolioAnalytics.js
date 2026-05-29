@@ -1,4 +1,4 @@
-import { decimalPercent, normalizeHoldings, numericFromGrade } from "./portfolioSchema.js";
+import { decimalPercent, inferLeveragedEtfMultiple, normalizeHoldings, numericFromGrade } from "./portfolioSchema.js";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -20,6 +20,8 @@ export const POSITION_CONCENTRATION_THRESHOLDS = Object.freeze([
   { threshold: 0.2, label: "Above 20%", status: "extreme", interpretation: "dominant position risk" },
   { threshold: 0.3, label: "Above 30%", status: "extreme", interpretation: "single-position outcome risk" }
 ]);
+
+export const LEVERAGED_ETF_UNDERLYING_DRAWDOWNS = Object.freeze([-0.1, -0.2, -0.3, -0.5]);
 
 export function analyzePortfolio(rawHoldings = [], options = {}) {
   const holdings = normalizeHoldings(rawHoldings);
@@ -52,7 +54,7 @@ export function enrichHolding(holding, totalValue = 0) {
   const gainLossPercent = holding.costBasis > 0 ? gainLoss / holding.costBasis : 0;
   const ratingRisk = ratingRiskScore(holding);
   const concentrationRisk = Math.min(100, weight * 420);
-  const leverageRisk = holding.isLeveragedEtf ? Math.min(100, weight * holding.leveragedMultiple * 350) : 0;
+  const leverageRisk = holding.isLeveragedEtf ? Math.min(100, weight * Math.abs(leverageMultipleFor(holding)) * 350) : 0;
   const volatilityRisk = Math.min(100, (holding.beta || 1) * 22);
   const riskScore = Math.round(Math.min(100, ratingRisk * 0.25 + concentrationRisk * 0.3 + leverageRisk * 0.25 + volatilityRisk * 0.2));
 
@@ -89,7 +91,7 @@ export function buildAttentionAlerts(holdings, totalValue, breakdowns, options =
       alerts.push(alert("underweight", "medium", `${label} is below target`, `${formatPct(holding.portfolioWeight)} current vs ${formatPct(holding.targetWeight)} target.`, holding));
     }
     if (!options.skipPortfolioThresholdAlerts && holding.isLeveragedEtf && holding.portfolioWeight > 0.04) {
-      alerts.push(alert("leverage", "high", `${label} adds leveraged exposure`, `Notional exposure is about ${formatCurrency(holding.marketValue * holding.leveragedMultiple)}.`, holding));
+      alerts.push(alert("leverage", "high", `${label} adds leveraged exposure`, `Notional exposure is about ${formatCurrency(holding.marketValue * Math.abs(leverageMultipleFor(holding)))}.`, holding));
     }
     if (!options.skipPortfolioThresholdAlerts && !holding.isLeveragedEtf && holding.assetClass === "Equity" && holding.portfolioWeight > thresholds.maxPositionWeight) {
       alerts.push(alert("single-stock", "high", `${label} is a large single-stock position`, `${formatPct(holding.portfolioWeight)} of portfolio.`, holding));
@@ -159,7 +161,7 @@ function buildOverview(holdings, totalValue) {
     unrealizedGainPercent: totalCostBasis ? unrealizedGain / totalCostBasis : 0,
     cashBalance: cash,
     leveragedEtfExposure: sum(leveraged, "marketValue"),
-    leveragedNotionalExposure: leveraged.reduce((total, holding) => total + holding.marketValue * Math.abs(holding.leveragedMultiple), 0),
+    leveragedNotionalExposure: leveraged.reduce((total, holding) => total + holding.marketValue * Math.abs(leverageMultipleFor(holding)), 0),
     singleStockExposure: sum(singleStocks, "marketValue"),
     semiconductorAiExposure: sum(semiAi, "marketValue"),
     megaCapTechExposure: sum(megaCapTech, "marketValue")
@@ -214,7 +216,7 @@ export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakd
   const cashRows = holdings.filter((holding) => holding.assetClass === "Cash");
   const leveragedRows = holdings.filter((holding) => holding.isLeveragedEtf);
   const leveragedDirectValue = sum(leveragedRows, "marketValue");
-  const leveragedNotionalValue = leveragedRows.reduce((total, holding) => total + holding.marketValue * Math.abs(Number(holding.leveragedMultiple) || 1), 0);
+  const leveragedNotionalValue = leveragedRows.reduce((total, holding) => total + holding.marketValue * Math.abs(leverageMultipleFor(holding)), 0);
   const cashValue = sum(cashRows, "marketValue");
   const stockValue = sum(stockRows, "marketValue");
   const normalEtfValue = sum(normalEtfRows, "marketValue");
@@ -272,16 +274,19 @@ export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakd
       explanation: leveragedRows.length
         ? `Leveraged ETFs are ${formatPct(divide(leveragedDirectValue, normalizedTotal))} direct weight and about ${formatPct(divide(leveragedNotionalValue, normalizedTotal))} estimated notional exposure.`
         : "No UPRO, SOXL, TQQQ-style leveraged ETFs are detected in current holdings.",
+      dailyResetExplanation: "Daily-reset leveraged ETFs target their stated multiple for one trading day. Multi-day returns can diverge from simple index leverage because compounding and volatility drag depend on the path of daily moves.",
+      volatilityDragExplanation: "Volatility drag is highest when the underlying index swings up and down without a sustained trend; the fund can lose value even if the index finishes near where it started.",
+      scenarios: buildLeveragedEtfDrawdownScenarios(leveragedRows, normalizedTotal),
       rows: leveragedRows
-        .sort((a, b) => b.marketValue * Math.abs(b.leveragedMultiple || 1) - a.marketValue * Math.abs(a.leveragedMultiple || 1))
+        .sort((a, b) => b.marketValue * Math.abs(leverageMultipleFor(b)) - a.marketValue * Math.abs(leverageMultipleFor(a)))
         .map((holding) => riskRow({
           id: `leveraged:${holding.ticker}`,
           name: holding.ticker,
-          label: `${holding.leveragedMultiple || 1}x ${holding.name}`,
-          value: holding.marketValue * Math.abs(holding.leveragedMultiple || 1),
-          weight: divide(holding.marketValue * Math.abs(holding.leveragedMultiple || 1), normalizedTotal),
+          label: `${leverageMultipleFor(holding)}x ${holding.name}`,
+          value: holding.marketValue * Math.abs(leverageMultipleFor(holding)),
+          weight: divide(holding.marketValue * Math.abs(leverageMultipleFor(holding)), normalizedTotal),
           statusType: "leveragedNotional",
-          explanation: `${holding.ticker} is ${formatPct(divide(holding.marketValue, normalizedTotal))} direct weight and ${formatPct(divide(holding.marketValue * Math.abs(holding.leveragedMultiple || 1), normalizedTotal))} estimated notional exposure.`,
+          explanation: `${holding.ticker} is ${formatPct(divide(holding.marketValue, normalizedTotal))} direct weight and ${formatPct(divide(holding.marketValue * Math.abs(leverageMultipleFor(holding)), normalizedTotal))} estimated notional exposure.`,
           tickers: [holding.ticker],
           href: `#/ticker/${holding.ticker}`
         }))
@@ -336,6 +341,31 @@ export function buildDecisionRiskDashboard(holdings = [], totalValue = 0, breakd
     correlationRisk,
     correlationPlaceholder: correlationRisk
   };
+}
+
+export function buildLeveragedEtfDrawdownScenarios(holdings = [], totalValue = 0, underlyingDrawdowns = LEVERAGED_ETF_UNDERLYING_DRAWDOWNS) {
+  const leveragedRows = holdings.filter((holding) => holding.isLeveragedEtf || Math.abs(leverageMultipleFor(holding)) > 1);
+  const directValue = sum(leveragedRows, "marketValue");
+  return underlyingDrawdowns.map((underlyingMove) => {
+    const scenarioValueChange = roundCurrency(leveragedRows.reduce((total, holding) => {
+      const multiple = leverageMultipleFor(holding);
+      const estimatedMove = clamp(underlyingMove * multiple, -1, 1);
+      return total + (Number(holding.marketValue) || 0) * estimatedMove;
+    }, 0));
+    const estimatedProductMove = roundRatio(divide(scenarioValueChange, directValue));
+    const tickers = leveragedRows.map((holding) => holding.ticker).filter(Boolean);
+    return {
+      underlyingMove,
+      underlyingMoveLabel: formatPct(underlyingMove),
+      estimatedProductMove,
+      estimatedPortfolioImpact: scenarioValueChange,
+      estimatedPortfolioImpactPct: roundRatio(divide(scenarioValueChange, totalValue)),
+      tickers: unique(tickers),
+      explanation: leveragedRows.length
+        ? `${tickers.join(", ")} would have an estimated same-day move of ${formatPct(estimatedProductMove)} across current leveraged ETF exposure before fees, tracking error, and path effects.`
+        : "No leveraged ETFs are available for this scenario."
+    };
+  });
 }
 
 function buildTopPositionWeightRows(holdings = [], totalValue = 0) {
@@ -830,6 +860,23 @@ function sum(rows, field) {
 
 function divide(a, b) {
   return b ? a / b : 0;
+}
+
+function leverageMultipleFor(holding = {}) {
+  return Number(holding.leveragedMultiple) || inferLeveragedEtfMultiple(holding.ticker, holding) || 1;
+}
+
+function clamp(value, min, max) {
+  const numeric = Number(value) || 0;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function roundRatio(value) {
+  return Math.round((Number(value) || 0) * 1000000) / 1000000;
+}
+
+function roundCurrency(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
 }
 
 function unique(values = []) {

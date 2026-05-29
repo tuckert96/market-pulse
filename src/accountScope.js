@@ -1,3 +1,5 @@
+import { inferLeveragedEtfMultiple, isLeveragedEtfTicker } from "./portfolioSchema.js";
+
 export const ACCOUNT_SCOPE_ALL = "all";
 
 export function buildAccountScopeModel(holdings = [], selectedAccount = ACCOUNT_SCOPE_ALL) {
@@ -140,15 +142,12 @@ function isCashLikeHolding(holding = {}) {
 }
 
 function isLeveragedHolding(holding = {}) {
-  if (holding.isLeveragedEtf || Number(holding.leveragedMultiple) > 1) return true;
-  return /^(UPRO|SOXL|TQQQ|SPXL|TECL|UDOW|QLD|SSO|FNGU)$/i.test(String(holding.ticker || ""));
+  if (holding.isLeveragedEtf || Math.abs(Number(holding.leveragedMultiple)) > 1) return true;
+  return isLeveragedEtfTicker(holding.ticker, holding);
 }
 
 function inferredLeverageMultiple(holding = {}) {
-  const text = `${holding.ticker || ""} ${holding.name || ""}`.toUpperCase();
-  if (/^(UPRO|SOXL|TQQQ|SPXL|TECL|UDOW|FNGU)\b/.test(text) || /3X|ULTRAPRO/.test(text)) return 3;
-  if (/^(QLD|SSO)\b/.test(text) || /2X|ULTRA\b/.test(text)) return 2;
-  return 1;
+  return inferLeveragedEtfMultiple(holding.ticker, holding) || 1;
 }
 
 function isMissingCostBasis(holding = {}) {
