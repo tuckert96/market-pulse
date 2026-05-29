@@ -2366,6 +2366,8 @@ function renderRebalancePlan(plan, uiState = "SAMPLE_MODE") {
         </div>
       </section>
 
+      ${renderRebalanceSimulator(plan.simulator)}
+
       <section class="rebalance-section">
         <h3>Cash deployment planner</h3>
         <div class="cash-plan">
@@ -2430,6 +2432,87 @@ function renderRebalancePlan(plan, uiState = "SAMPLE_MODE") {
           <small>${item.estimatedShares ? `${item.estimatedShares} sh` : ""} ${escapeHtml(item.rationale)}</small>
         </div>
       `).join("") : '<div><span>No rebalance suggestions from current settings.</span><b>OK</b><small>Targets are close enough or no cash is available.</small></div>'}
+    </div>
+  `;
+}
+
+function renderRebalanceSimulator(simulator = {}) {
+  if (!simulator || !simulator.readOnly) return "";
+  const trades = simulator.estimatedTrades || [];
+  const categories = simulator.categoryAdjustments || [];
+  const beforeAfter = simulator.beforeAfterRows || [];
+  const warnings = simulator.taxWarnings || [];
+  const mode = modeLabel(simulator.mode);
+  return `
+    <section class="rebalance-section" data-rebalance-simulator>
+      <h3>Rebalancing simulator</h3>
+      <div class="target-summary-grid">
+        ${targetMetric("Simulator mode", mode)}
+        ${targetMetric("Modeled sale proceeds", formatCurrency(simulator.saleProceedsModeled || 0))}
+        ${targetMetric("Cash available for adds", formatCurrency(simulator.deployableCash || 0))}
+        ${targetMetric("Portfolio after model", formatCurrency(simulator.totalAfter || simulator.totalValue || 0))}
+      </div>
+      <div class="what-if-callout">
+        <div class="badge-row"><span class="status-badge safe">Read-only</span><span class="status-badge">${escapeHtml(mode)}</span></div>
+        <b>${escapeHtml(simulator.note || "Local rebalance model.")}</b>
+        <span>Estimated adjustments are review prompts only. No brokerage order, trade ticket, or execution step exists here.</span>
+        ${warnings.length ? `<ul class="what-if-warning-list">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : ""}
+      </div>
+      <div class="grid-two">
+        <div>
+          <h3>Estimated ticker adjustments</h3>
+          <div class="mini-list">
+            ${trades.length ? trades.map(renderSimulatorTrade).join("") : '<div><span>No ticker adjustments from this mode.</span><b>Hold</b><small>Current targets are close enough, or no deployable cash/proceeds are available.</small></div>'}
+          </div>
+        </div>
+        <div>
+          <h3>Category context</h3>
+          <div class="mini-list">
+            ${categories.length ? categories.map(renderSimulatorCategory).join("") : '<div><span>No category-level drift above the review threshold.</span><b>Balanced</b><small>Asset class, sleeve, and account targets are close enough for this model.</small></div>'}
+          </div>
+        </div>
+      </div>
+      <div class="target-table-wrap">
+        <table class="target-table compact-table">
+          <thead>
+            <tr><th>Ticker</th><th>Current</th><th>Modeled after</th><th>Target</th><th>Drift after</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            ${beforeAfter.length ? beforeAfter.map((row) => `
+              <tr>
+                <td><b>${renderTickerLink(row.ticker || row.key)}</b><small>Before drift ${formatSignedPct(row.driftBefore)}</small></td>
+                <td class="number-cell">${formatPct(row.currentWeight)}<small>${formatCurrency(row.currentValue)}</small></td>
+                <td class="number-cell">${formatPct(row.afterWeight)}<small>${formatCurrency(row.simulatedValue)}</small></td>
+                <td class="number-cell">${formatPct(row.targetWeight)}</td>
+                <td class="number-cell ${row.driftAfter >= 0 ? "negative" : "positive"}">${formatSignedPct(row.driftAfter)}<small>${formatSignedCurrency(row.driftValueAfter)}</small></td>
+                <td><span class="pill ${targetStatusClass(row.statusAfter)}">${escapeHtml(row.statusAfter)}</span></td>
+              </tr>
+            `).join("") : '<tr><td colspan="6">No before/after rows available yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderSimulatorTrade(trade = {}) {
+  const amount = trade.amount ? formatCurrency(trade.amount) : "Review";
+  const delta = trade.valueDelta ? formatSignedCurrency(trade.valueDelta) : "No modeled change";
+  return `
+    <div>
+      <span>${escapeHtml(trade.action || "Review")} · ${trade.ticker ? renderTickerLink(trade.ticker) : escapeHtml(trade.key || "Target")}</span>
+      <b>${amount}</b>
+      <small>${delta} · ${escapeHtml(trade.rationale || "Review this adjustment in context.")}${trade.taxableWarning ? ` ${escapeHtml(trade.taxableWarning)}` : ""}</small>
+    </div>
+  `;
+}
+
+function renderSimulatorCategory(row = {}) {
+  return `
+    <div>
+      <span>${escapeHtml(scopeLabel(row.scope))} · ${escapeHtml(row.key || "Category")}</span>
+      <b>${escapeHtml(row.reviewAction || row.status || "Review")}</b>
+      <small>${formatSignedPct(row.driftWeight)} · ${formatSignedCurrency(row.driftValue)} · ${escapeHtml(row.rationale || "Review category drift before changing holdings.")}</small>
     </div>
   `;
 }
@@ -5953,6 +6036,7 @@ function scopeLabel(scope = "") {
 function modeLabel(mode = "") {
   return ({
     "new-contribution": "New contributions only",
+    "sell-and-rebalance": "Sell and rebalance model",
     "taxable-safe": "Taxable caution",
     "retirement-only": "Retirement/HSA only",
     full: "Full portfolio view"

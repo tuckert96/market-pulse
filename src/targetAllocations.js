@@ -60,19 +60,25 @@ export function buildTargetAllocationPlan(holdings = [], targetAllocations = def
   const rows = buildTargetAllocationRows(holdings, targets, options);
   const cashPlan = buildCashDeploymentPlan(holdings, targets, rows, options);
   const leveragedGuardrails = buildLeveragedGuardrails(holdings, targets, options);
+  const mode = normalizeRebalanceMode(options.mode || "new-contribution");
   const suggestions = buildRebalanceSuggestions(rows, cashPlan, leveragedGuardrails, {
-    mode: options.mode || "new-contribution",
+    mode,
     totalValue
+  });
+  const simulator = buildRebalancingSimulator(holdings, targets, rows, cashPlan, {
+    ...options,
+    mode
   });
 
   return {
-    mode: options.mode || "new-contribution",
+    mode,
     totalValue,
     targetCount: targets.length,
     rows,
     cashPlan,
     leveragedGuardrails,
-    suggestions
+    suggestions,
+    simulator
   };
 }
 
@@ -180,6 +186,94 @@ export function buildLeveragedGuardrails(holdings = [], targetAllocations = defa
   }).sort((a, b) => b.effectiveExposure - a.effectiveExposure);
 }
 
+export function buildRebalancingSimulator(
+  holdings = [],
+  targetAllocations = defaultTargetAllocations(),
+  rows = buildTargetAllocationRows(holdings, targetAllocations),
+  cashPlan = buildCashDeploymentPlan(holdings, targetAllocations, rows),
+  options = {}
+) {
+  const mode = normalizeRebalanceMode(options.mode || "new-contribution");
+  const totalValue = totalMarketValue(holdings);
+  const tickerRows = rows.filter((row) => row.scope === "ticker" && row.targetWeight > 0 && row.currentValue > 0);
+  const categoryRows = rows.filter((row) => row.scope !== "ticker" && row.targetWeight > 0);
+  const taxableByTicker = taxableExposureByTicker(holdings);
+  const estimatedTrades = mode === "new-contribution"
+    ? buildContributionOnlyTrades(tickerRows, cashPlan)
+    : buildSellAndRebalanceTrades(tickerRows, cashPlan, taxableByTicker, mode);
+  const simulatedTickerValues = new Map(tickerRows.map((row) => [row.key, row.currentValue]));
+
+  for (const trade of estimatedTrades) {
+    if (!trade.ticker || trade.type === "note") continue;
+    const current = simulatedTickerValues.get(trade.ticker) || 0;
+    simulatedTickerValues.set(trade.ticker, Math.max(0, current + trade.valueDelta));
+  }
+
+  const totalAfter = mode === "new-contribution" && (options.treatContributionAsExternal === true)
+    ? totalValue + estimatedTrades.reduce((sum, trade) => sum + Math.max(0, trade.valueDelta), 0)
+    : totalValue;
+  const beforeAfterRows = tickerRows
+    .map((row) => {
+      const simulatedValue = simulatedTickerValues.get(row.key) ?? row.currentValue;
+      const afterWeight = totalAfter ? simulatedValue / totalAfter : 0;
+      const driftAfter = afterWeight - row.targetWeight;
+      return {
+        scope: row.scope,
+        key: row.key,
+        ticker: row.key,
+        currentValue: row.currentValue,
+        simulatedValue,
+        currentWeight: row.currentWeight,
+        targetWeight: row.targetWeight,
+        afterWeight,
+        driftBefore: row.driftWeight,
+        driftAfter,
+        driftValueBefore: row.driftValue,
+        driftValueAfter: simulatedValue - (totalAfter * row.targetWeight),
+        statusBefore: row.status,
+        statusAfter: classifySimulatedDrift(afterWeight, row)
+      };
+    })
+    .sort((a, b) => Math.abs(b.driftValueBefore) - Math.abs(a.driftValueBefore))
+    .slice(0, 16);
+  const categoryAdjustments = categoryRows
+    .filter((row) => Math.abs(row.driftValue) >= 100 || row.status !== "within range")
+    .sort((a, b) => Math.abs(b.driftValue) - Math.abs(a.driftValue))
+    .slice(0, 12)
+    .map((row) => ({
+      scope: row.scope,
+      key: row.key,
+      status: row.status,
+      currentWeight: row.currentWeight,
+      targetWeight: row.targetWeight,
+      driftWeight: row.driftWeight,
+      driftValue: row.driftValue,
+      reviewAction: row.suggestedAction,
+      rationale: `${row.key} is ${row.status} by ${formatPct(Math.abs(row.driftWeight))}; use this as category context before adjusting individual holdings.`
+    }));
+  const taxWarnings = estimatedTrades
+    .filter((trade) => trade.taxableWarning)
+    .map((trade) => trade.taxableWarning);
+
+  return {
+    mode,
+    readOnly: true,
+    totalValue,
+    totalAfter,
+    deployableCash: cashPlan.deployableCash || 0,
+    saleProceedsModeled: estimatedTrades
+      .filter((trade) => trade.valueDelta < 0)
+      .reduce((sum, trade) => sum + Math.abs(trade.valueDelta), 0),
+    estimatedTrades,
+    categoryAdjustments,
+    beforeAfterRows,
+    taxWarnings,
+    note: mode === "new-contribution"
+      ? "Models target drift using cash/new contribution only; no existing holdings are reduced."
+      : "Models review adjustments that could move holdings closer to target weights. It is not an order ticket."
+  };
+}
+
 export function targetId(scope, key) {
   return `${normalizeScope(scope) || "ticker"}:${normalizeKey(scope, key)}`;
 }
@@ -201,7 +295,7 @@ export function targetRecordFromFormRow(row = {}) {
 }
 
 function buildRebalanceSuggestions(rows, cashPlan, guardrails, options = {}) {
-  const mode = options.mode || "new-contribution";
+  const mode = normalizeRebalanceMode(options.mode || "new-contribution");
   const tickerRows = rows.filter((row) => row.scope === "ticker" && row.currentValue > 0);
   const suggestions = [];
 
@@ -251,6 +345,134 @@ function buildRebalanceSuggestions(rows, cashPlan, guardrails, options = {}) {
   }
 
   return suggestions.slice(0, 12);
+}
+
+function buildContributionOnlyTrades(tickerRows, cashPlan) {
+  const suggestions = cashPlan.suggestions || [];
+  return suggestions.map((item) => {
+    const row = tickerRows.find((targetRow) => targetRow.key === item.ticker);
+    return simulatorTrade({
+      action: "Review add with cash",
+      direction: "add",
+      row,
+      ticker: item.ticker,
+      amount: item.amount,
+      rationale: item.rationale || `${item.ticker} is under target; model using available cash before considering sales.`
+    });
+  }).filter((trade) => trade.amount >= 25);
+}
+
+function buildSellAndRebalanceTrades(tickerRows, cashPlan, taxableByTicker, mode) {
+  const overweight = tickerRows
+    .filter((row) => row.status === "overweight" && row.driftValue > 100)
+    .sort((a, b) => b.driftValue - a.driftValue);
+  const underweight = tickerRows
+    .filter((row) => row.status === "underweight" && row.driftValue < -100)
+    .sort((a, b) => a.driftValue - b.driftValue);
+  const reduceTrades = [];
+
+  for (const row of overweight) {
+    const taxable = taxableByTicker.get(row.key);
+    if (mode === "taxable-safe" && taxable?.value > 0) {
+      reduceTrades.push(simulatorTrade({
+        action: "Review taxable impact",
+        direction: "hold",
+        row,
+        ticker: row.key,
+        amount: 0,
+        rationale: `${row.key} is overweight, but taxable caution mode avoids modeling a sale before tax review.`,
+        taxable
+      }));
+      continue;
+    }
+    reduceTrades.push(simulatorTrade({
+      action: row.isLeveraged ? "Review reduce leveraged exposure" : "Review reduce overweight",
+      direction: "reduce",
+      row,
+      ticker: row.key,
+      amount: Math.abs(row.driftValue),
+      rationale: `${row.key} is above target by ${formatPct(Math.abs(row.driftWeight))}; model reducing toward target weight before deciding.`,
+      taxable
+    }));
+  }
+
+  const saleProceeds = reduceTrades.reduce((sum, trade) => sum + Math.abs(Math.min(0, trade.valueDelta)), 0);
+  const availableForAdds = saleProceeds + (cashPlan.excessCash || 0);
+  const totalNeed = underweight.reduce((sum, row) => sum + Math.abs(row.driftValue), 0);
+  const addTrades = underweight.map((row) => {
+    const amount = totalNeed ? Math.min(Math.abs(row.driftValue), availableForAdds * (Math.abs(row.driftValue) / totalNeed)) : 0;
+    return simulatorTrade({
+      action: "Review add underweight",
+      direction: "add",
+      row,
+      ticker: row.key,
+      amount,
+      rationale: `${row.key} is below target by ${formatPct(Math.abs(row.driftWeight))}; model adding only after reviewing funding source.`
+    });
+  }).filter((trade) => trade.amount >= 25);
+
+  return [...reduceTrades, ...addTrades].slice(0, 18);
+}
+
+function simulatorTrade({ action, direction, row = {}, ticker = "", amount = 0, rationale = "", taxable = null }) {
+  const valueDelta = direction === "reduce" ? -Math.abs(amount) : direction === "add" ? Math.abs(amount) : 0;
+  const taxableWarning = taxable?.value > 0 && direction === "reduce"
+    ? `${ticker} has ${formatCurrency(taxable.value)} in taxable accounts (${taxable.accounts.join(", ")}); review tax impact before reducing.`
+    : "";
+  return {
+    type: valueDelta === 0 ? "note" : "review-adjustment",
+    action,
+    direction,
+    ticker,
+    scope: row.scope || "ticker",
+    key: row.key || ticker,
+    amount: Math.round(Math.abs(amount) || 0),
+    valueDelta: Math.round(valueDelta || 0),
+    currentWeight: row.currentWeight || 0,
+    targetWeight: row.targetWeight || 0,
+    driftWeight: row.driftWeight || 0,
+    driftValue: row.driftValue || 0,
+    rationale,
+    taxableWarning
+  };
+}
+
+function taxableExposureByTicker(holdings = []) {
+  const rows = new Map();
+  for (const holding of holdings) {
+    const ticker = normalizeKey("ticker", holding.ticker);
+    if (!ticker || !isTaxableHolding(holding)) continue;
+    const row = rows.get(ticker) || { ticker, value: 0, accounts: new Set() };
+    row.value += Number(holding.marketValue) || 0;
+    row.accounts.add(holding.account || "Taxable account");
+    rows.set(ticker, row);
+  }
+  return new Map([...rows.entries()].map(([ticker, row]) => [ticker, {
+    ticker,
+    value: row.value,
+    accounts: [...row.accounts].sort()
+  }]));
+}
+
+function isTaxableHolding(holding = {}) {
+  return /taxable|brokerage|individual|joint/i.test(`${holding.accountType || ""} ${holding.account || ""}`);
+}
+
+function classifySimulatedDrift(afterWeight, row = {}) {
+  if (!row.targetWeight && !row.minWeight && !row.maxWeight) return "no target";
+  if (row.maxWeight && afterWeight > row.maxWeight + 0.002) return "overweight";
+  if (row.minWeight && afterWeight < row.minWeight - 0.002) return "underweight";
+  if (!row.minWeight && afterWeight < row.targetWeight - 0.005) return "underweight";
+  if (!row.maxWeight && afterWeight > row.targetWeight + 0.005) return "overweight";
+  return "within range";
+}
+
+function normalizeRebalanceMode(mode = "new-contribution") {
+  const value = String(mode || "new-contribution").trim().toLowerCase();
+  if (["sell-and-rebalance", "full", "full-rebalance", "sell-rebalance"].includes(value)) return "sell-and-rebalance";
+  if (["taxable-safe", "tax-aware", "taxable-caution"].includes(value)) return "taxable-safe";
+  if (["retirement-only", "retirement", "hsa-only"].includes(value)) return "retirement-only";
+  return "new-contribution";
 }
 
 function rowFromGroup(group, allocation, totalValue) {
@@ -417,4 +639,12 @@ function scopeRank(scope) {
 
 function formatPct(value) {
   return `${((Number(value) || 0) * 100).toFixed(1)}%`;
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0
+  }).format(Number(value) || 0);
 }
