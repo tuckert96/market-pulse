@@ -31,6 +31,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderOverviewMarketDriversSnapshot(options.marketDrivers);
   renderOverviewConnectionStatus(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.marketDataStatus);
   renderBreakdowns(analysis.breakdowns, options.uiState, analysis.holdings);
+  renderAccountAllocationPanel(options.accountScope, options.uiState);
   renderAttentionAlerts(analysis.alerts, options.alertLifecycle, options.uiState);
   renderDecisionBrief(options.decisionBrief, options.uiState);
   renderAlphaRecommendations(
@@ -795,6 +796,59 @@ function renderBreakdowns(breakdowns, uiState = "SAMPLE_MODE", holdings = []) {
   renderBreakdownList("sectorBreakdown", breakdowns.sector, uiState, { cashNote: true });
   renderBreakdownList("sleeveBreakdown", breakdowns.sleeve, uiState);
   renderClassificationNote(holdings, uiState);
+}
+
+function renderAccountAllocationPanel(accountScope = null, uiState = "SAMPLE_MODE") {
+  const target = byId("accountAllocationPanel");
+  if (!target) return;
+  const accounts = Array.isArray(accountScope?.accounts) ? accountScope.accounts : [];
+  if (!isImportedState(uiState)) {
+    target.innerHTML = '<div class="empty">Import a Fidelity CSV or sync provider holdings to view account allocation by tax bucket.</div>';
+    return;
+  }
+  if (!accounts.length) {
+    target.innerHTML = '<div class="empty">No account rows are available for the active portfolio.</div>';
+    return;
+  }
+  target.innerHTML = accounts.map((account) => renderAccountAllocationRow(account)).join("");
+}
+
+function renderAccountAllocationRow(account = {}) {
+  const bucket = account.taxBucket || {};
+  const mixRows = (account.assetMix || []).slice(0, 4).map((row) => `
+    <div>
+      <span>${escapeHtml(row.name)} · ${formatPct(row.weight)} · ${formatCompact(row.value)}</span>
+      <i style="width:${Math.min(100, Math.max(0, Number(row.weight || 0) * 100))}%"></i>
+    </div>
+  `).join("");
+  const topRows = (account.topPositions || []).map((position) => `
+    <li>
+      <span>${renderTickerLink(position.ticker)} · ${formatPct(position.weight)}</span>
+      <span>${formatCompact(position.value)}</span>
+    </li>
+  `).join("");
+  return `
+    <article class="account-allocation-row" data-tax-bucket="${escapeHtml(bucket.key || "other")}">
+      <div class="account-allocation-main">
+        <span class="tax-bucket-pill ${escapeHtml(bucket.className || "tax-bucket-other")}">${escapeHtml(bucket.label || "Other")}</span>
+        <h3>${escapeHtml(account.account || account.label || "Account")}</h3>
+        <p>${formatCurrency(account.value)} · ${formatPct(account.portfolioWeight)} of portfolio · ${account.holdingCount || 0} holding${account.holdingCount === 1 ? "" : "s"}</p>
+        <div class="account-allocation-bar" aria-label="${escapeHtml(`${account.account || "Account"} is ${formatPct(account.portfolioWeight)} of portfolio`)}"><i style="width:${Math.min(100, Math.max(0, Number(account.portfolioWeight || 0) * 100))}%"></i></div>
+        <div class="account-allocation-meta">
+          <span>${escapeHtml(account.accountTypeLabel || bucket.detail || "Account type unknown")}</span>
+          <span>Cash ${formatPct(account.cashWeight)} · daily move ${formatCurrency(account.dailyChange || 0)}</span>
+        </div>
+      </div>
+      <div class="account-allocation-mix">
+        <b>Asset mix</b>
+        <div class="account-mix-bars">${mixRows || "<span>No mix available.</span>"}</div>
+      </div>
+      <div class="account-allocation-top">
+        <b>Top positions</b>
+        <ul>${topRows || "<li><span>No positions available.</span><span></span></li>"}</ul>
+      </div>
+    </article>
+  `;
 }
 
 function renderBreakdownList(id, rows = [], uiState = "SAMPLE_MODE", options = {}) {

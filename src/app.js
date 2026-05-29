@@ -1206,7 +1206,8 @@ function renderAccountScopePanel(model = {}) {
         label: account.account,
         value: account.value,
         detail: `${formatPercent(account.portfolioWeight)} of portfolio · ${account.holdingCount} holding${account.holdingCount === 1 ? "" : "s"} · cash ${formatPercent(account.cashWeight)}`,
-        subdetail: `${account.accountTypeLabel} · largest ${account.largestHoldingLabel} ${formatPercent(account.largestHoldingWeight)}`,
+        subdetail: `${account.taxBucket?.label || account.accountTypeLabel} · ${account.accountTypeLabel} · largest ${account.largestHoldingLabel} ${formatPercent(account.largestHoldingWeight)}`,
+        taxBucket: account.taxBucket,
         warning: accountScopeWarning(account),
         selected: selected === account.accountKey
       })).join("")}
@@ -1215,10 +1216,10 @@ function renderAccountScopePanel(model = {}) {
   `;
 }
 
-function renderAccountScopeButton({ account, label, value, detail, subdetail = "", warning = "", selected }) {
+function renderAccountScopeButton({ account, label, value, detail, subdetail = "", taxBucket = null, warning = "", selected }) {
   const ariaLabel = `${label}. ${formatCurrency(value)}. ${detail}${subdetail ? `. ${subdetail}` : ""}${warning ? `. ${warning}` : ""}${selected ? ". Selected." : ""}`;
   return `
-    <button class="account-scope-button ${selected ? "active" : ""}" type="button" data-account-scope="${escapeHtml(account)}" data-account-label="${escapeHtml(label)}" data-account-value="${escapeHtml(value)}" data-account-holdings="${escapeHtml(label === "All accounts" ? "" : detail)}" aria-label="${escapeHtml(ariaLabel)}" title="${escapeHtml(ariaLabel)}" aria-pressed="${selected ? "true" : "false"}">
+    <button class="account-scope-button ${selected ? "active" : ""}" type="button" data-account-scope="${escapeHtml(account)}" data-account-label="${escapeHtml(label)}" data-tax-bucket="${escapeHtml(taxBucket?.key || "combined")}" data-account-value="${escapeHtml(value)}" data-account-holdings="${escapeHtml(label === "All accounts" ? "" : detail)}" aria-label="${escapeHtml(ariaLabel)}" title="${escapeHtml(ariaLabel)}" aria-pressed="${selected ? "true" : "false"}">
       <span>${escapeHtml(label)}${selected ? ' <em class="selected-marker">Selected</em>' : ""}</span>
       <b>${formatCurrency(value)}</b>
       <small>${escapeHtml(detail)}</small>

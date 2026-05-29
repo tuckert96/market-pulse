@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { buildAccountScopeModel } from "../src/accountScope.js";
 import { buildAlphaSignals, demoAlphaEvents, demoThesisProfiles } from "../src/alphaEngine.js";
 import { analyzePortfolio } from "../src/portfolioAnalytics.js";
 import { normalizeHoldings, sanitizeAccountLabel } from "../src/portfolioSchema.js";
@@ -1020,6 +1021,7 @@ Taxable,SOXL,Direxion Semiconductor Bull 3X,20,45.00,900.00,700.00,Semiconductor
   const result = adapters.buildImportResult({ fidelityCsv: csv });
   const holdings = normalizeHoldings(result.records);
   const analysis = analyzePortfolio(holdings);
+  const accountScope = buildAccountScopeModel(holdings);
   const samsung = buildAlphaSignals(demoAlphaEvents(), analysis.holdings, demoThesisProfiles())
     .find((signal) => signal.id === "alpha-samsung-strike-mu");
   const statePayload = {
@@ -1034,6 +1036,9 @@ Taxable,SOXL,Direxion Semiconductor Bull 3X,20,45.00,900.00,700.00,Semiconductor
   assert.equal(analysis.overview.totalValue, 4576.5);
   assert.equal(analysis.risk.topHoldings[0].ticker, "NVDA");
   assert.deepEqual(analysis.breakdowns.account.map((account) => account.name).sort(), ["HSA", "Roth IRA", "Taxable"]);
+  assert.deepEqual(accountScope.accounts.map((account) => account.taxBucket.key).sort(), ["hsa", "roth", "taxable"]);
+  assert.equal(accountScope.accounts.find((account) => account.account === "Taxable").portfolioWeight > 0.45, true);
+  assert.equal(accountScope.accounts.find((account) => account.account === "HSA").topPositions[0].ticker, "NVDA");
   assert.ok(analysis.alerts.length > 0);
   assert.equal(Math.round(samsung.affectedWeight * 1000) / 1000, Math.round((4576.5 / 4576.5) * 1000) / 1000);
   assert.match(samsung.affectedWeightLabel, /100/);
