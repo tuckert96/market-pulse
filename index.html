@@ -6698,13 +6698,45 @@
                     <span class="status-badge badge-source-not-configured">No browser API secret</span>
                   </div>
                 </section>
-                <div class="import-secondary">
-                  <label class="button-label">
-                    <span>Import Seeking Alpha CSV/XLSX</span>
-                    <input id="alphaFile" type="file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Import Seeking Alpha export file" />
-                  </label>
-                  <small class="disclaimer">Use authorized exports only. The app never asks for Seeking Alpha credentials.</small>
-                </div>
+                <section class="fidelity-assistant" aria-label="Seeking Alpha Premium import assistant">
+                  <div class="fidelity-assistant-head">
+                    <div class="fidelity-assistant-copy">
+                      <span class="status-badge badge-source-imported">Seeking Alpha Premium</span>
+                      <h3>Bring in your Premium ratings safely.</h3>
+                      <small>Import CSV, JSON, XLSX, or paste an authorized table. Market Pulse previews every row before applying and never asks for your Seeking Alpha password.</small>
+                    </div>
+                    <div class="fidelity-assistant-actions">
+                      <a class="button-link" href="#data-sources">Review source status</a>
+                    </div>
+                  </div>
+                  <div class="fidelity-step-row" aria-label="Seeking Alpha import steps">
+                    <div class="fidelity-step"><b>1. Export or copy</b><small>Use your own Premium-visible table/export. Saved rows stay local.</small></div>
+                    <div class="fidelity-step"><b>2. Preview ratings</b><small>Detected columns, duplicate tickers, stale dates, and rejected rows are shown before anything changes.</small></div>
+                    <div class="fidelity-step"><b>3. Apply locally</b><small>Only matching holdings receive rating fields, labeled Imported or Pasted rather than Live.</small></div>
+                  </div>
+                  <div class="fidelity-import-grid">
+                    <label id="seekingAlphaFileZone" class="fidelity-drop-zone" tabindex="0" role="button" for="alphaFile">
+                      <span class="fidelity-drop-icon" aria-hidden="true">SA</span>
+                      <b>Choose Seeking Alpha file</b>
+                      <small>CSV, JSON, or XLSX Premium rating export</small>
+                      <input id="alphaFile" type="file" accept=".csv,.json,.xlsx,text/csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Import Seeking Alpha Premium CSV, JSON, or XLSX export file" />
+                    </label>
+                    <div class="fidelity-paste-card">
+                      <b>Paste Seeking Alpha table text</b>
+                      <small>Copy a ratings table you are allowed to view and paste it here. Tab-delimited spreadsheet text works best.</small>
+                      <textarea id="seekingAlphaPasteInput" placeholder="Paste rows with Ticker, Quant Rating, Valuation Grade, Growth Grade, Profitability Grade, Momentum Grade, EPS Revisions Grade, Rating Date..."></textarea>
+                      <div class="connector-actions">
+                        <button id="parseSeekingAlphaPasteBtn" type="button" class="primary">Preview pasted ratings</button>
+                        <button id="clearSeekingAlphaPasteBtn" type="button">Clear paste</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="fidelity-safety-row" aria-label="Seeking Alpha safety notes">
+                    <span class="status-badge badge-source-imported">Manual import</span>
+                    <span class="status-badge badge-source-not-configured">No credentials stored</span>
+                    <span class="status-badge badge-source-stale">Stale dates flagged</span>
+                  </div>
+                </section>
                 <div id="importSummaryPanel"></div>
                 <p id="importStatus" class="import-status" aria-live="polite">No imports yet.</p>
                 <div id="importDebugPanel" class="import-debug" hidden></div>
@@ -7723,7 +7755,10 @@
                 <div class="connector-zone">
                   <strong>Seeking Alpha Premium ratings</strong>
                   <small class="disclaimer">Import a Premium CSV/XLSX/JSON export or use sample records. The dashboard does not ask for a Seeking Alpha password or scrape premium pages.</small>
-                  <button id="demoSeekingAlphaBtn" type="button" title="Load sample Premium ratings and insights">Sample Premium insights</button>
+                  <div class="connector-actions">
+                    <a class="button-link primary" href="#imports">Import or paste ratings</a>
+                    <button id="demoSeekingAlphaBtn" type="button" title="Load sample Premium ratings and insights">Sample Premium insights</button>
+                  </div>
                   <p id="seekingAlphaStatus" class="connector-status" aria-live="polite">Not configured.</p>
                   <ul id="seekingAlphaInsights" class="insight-list" aria-live="polite"></ul>
                 </div>

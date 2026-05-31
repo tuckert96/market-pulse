@@ -16,7 +16,19 @@ Seeking Alpha's help center documents portfolio export/download as an Excel file
 
 ## Current Frontend Contract
 
-The local dashboard accepts Tucker-controlled Seeking Alpha `.csv` files and `.xlsx` portfolio/ratings exports. The workbook parser reads the first worksheet and normalizes common Premium columns into the same canonical records used by connector data.
+The local dashboard accepts Tucker-controlled Seeking Alpha `.csv`, `.json`, and `.xlsx` portfolio/ratings exports. It also supports paste-from-table text for rows copied from a table Tucker is allowed to view. Every file or paste goes through a preview step before rating fields are applied to holdings.
+
+The import flow shows:
+
+- detected columns
+- mapped fields
+- accepted rating rows
+- rejected rows with row-level reasons
+- duplicate tickers, with deterministic latest-row replacement
+- stale rating dates older than the local freshness threshold
+- source mode: `Sample`, `Imported`, `Pasted`, `Stale`, `Error`, or `Not configured`
+
+Imported or pasted Seeking Alpha data is never labeled `Live`. It is local decision-support context until a compliant licensed provider is approved later.
 
 Supported workbook fields include:
 
@@ -25,17 +37,30 @@ Supported workbook fields include:
 - Quant Rating
 - SA Author Rating
 - Wall Street Rating
+- SA Analysts Rating
 - Valuation Grade
 - Growth Grade
 - Profitability Grade
 - Momentum Grade
 - EPS Revisions Grade
+- Dividend Grade
 - dividend yield
 - earnings date
 - price target
 - rating changes
+- rating date / updated at / as of
 
 No Seeking Alpha credentials are requested, stored, or inferred from the workbook.
+
+## Manual Import Instructions
+
+1. Open `Imports`.
+2. Choose a Seeking Alpha CSV/JSON/XLSX file, or paste a Premium-visible ratings table into the Seeking Alpha paste box.
+3. Review the preview. Check accepted rows, rejected rows, duplicate ticker warnings, and stale rating dates.
+4. Choose `Apply ratings` only when the preview looks right.
+5. Open `Data Sources` to confirm the status says `Imported`, `Pasted`, or `Stale`, never `Live`.
+
+If the parser cannot map a ticker column, open `Map columns` and manually select the matching Symbol/Ticker field before previewing again.
 
 ## Future Backend Contract
 
@@ -50,6 +75,7 @@ Content-Type: application/json
     "quant",
     "authorRating",
     "wallStreetRating",
+    "saAnalystsRating",
     "value",
     "growth",
     "profitability",
@@ -93,6 +119,7 @@ Expected response:
       "quant": 4.86,
       "authorRating": "Buy",
       "wallStreetRating": "Buy",
+      "saAnalystsRating": "Buy",
       "value": "B",
       "growth": "A",
       "profitability": "A+",
@@ -117,11 +144,11 @@ The frontend normalizes this through `src/seekingAlphaConnector.js`.
 
 ### Path 1: Export Upload
 
-1. Tucker exports/downloads a Seeking Alpha portfolio or ratings workbook.
-2. Dashboard accepts `.xlsx` or `.csv` locally today; a backend can accept the same upload later.
-3. Parser reads workbook rows and maps export headers into canonical fields.
-4. Backend normalizes supported Premium fields.
-5. Dashboard syncs normalized rows.
+1. Tucker exports/downloads a Seeking Alpha portfolio or ratings workbook, JSON, or table copy.
+2. Dashboard accepts `.xlsx`, `.csv`, `.json`, and pasted table text locally today; a backend can accept the same upload later.
+3. Parser reads rows and maps export headers into canonical fields.
+4. Preview validates rows before applying any changes.
+5. Dashboard enriches matching holdings with normalized local Premium fields.
 
 This is the safest near-term path because Tucker controls the export and no credentials are stored.
 
@@ -143,3 +170,7 @@ The dashboard now turns imported Premium-style records into:
 - Valuation risk count.
 
 Next step: add per-ticker detail drawers showing factor grades, rating disagreements, stale-data warnings, and "why this pick" reasoning.
+
+## Browser-Assisted Recommendation
+
+The safest practical "browser-assisted" workflow is still copy/paste or saved-file import. Bookmarklets and extensions are possible later, but they increase terms, maintenance, and credential-safety risk. Do not build unattended scraping, cookie reuse, or session-token storage. A future helper should only transform user-provided table text or a user-saved file into the same preview/apply workflow above.

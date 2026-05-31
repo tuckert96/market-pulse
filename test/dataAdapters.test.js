@@ -76,6 +76,111 @@ MU,Micron Technology,4.43,A-,A,B+,B,A-,48%,17%,18,6,"$3,200,000,000","$12,000,00
   assert.equal(records[0].nextEarnings, "2026-06-26");
 });
 
+test("Seeking Alpha pasted table import previews duplicate and stale rating diagnostics", () => {
+  const pasted = [
+    "Ticker\tCompany\tQuant Rating\tValuation Grade\tGrowth Grade\tProfitability Grade\tMomentum Grade\tEPS Revisions Grade\tWall Street Rating\tSA Analysts Rating\tRating Date",
+    "MU\tMicron Technology\t4.43\tB\tA-\tB+\tA\tB+\tBuy\tBuy\t2026-01-01",
+    "MU\tMicron Technology\t4.60\tB+\tA\tA-\tA+\tA-\tStrong Buy\tBuy\t2026-05-21",
+    "NVDA\tNVIDIA\t4.92\tC\tA+\tA+\tA\tA+\tBuy\tStrong Buy\t2026-05-21"
+  ].join("\n");
+  const result = adapters.buildImportResult({
+    seekingAlphaFileName: "pasted-seeking-alpha-table.csv",
+    seekingAlphaCsv: pasted
+  });
+  const mu = result.records.find((record) => record.ticker === "MU");
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.seekingAlphaRecords.length, 2);
+  assert.equal(result.importReport.providerReports[0].ratingsImported, 2);
+  assert.equal(result.importReport.providerReports[0].duplicateRows.length, 1);
+  assert.equal(result.importReport.providerReports[0].duplicateRows[0].ticker, "MU");
+  assert.equal(result.importReport.providerReports[0].staleRows.length, 0);
+  assert.equal(mu.quant, 4.6);
+  assert.equal(mu.saAnalystsRating, "Buy");
+  assert.equal(mu.saUpdatedAt, "2026-05-21");
+});
+
+test("Seeking Alpha import preserves human Quant Rating labels when score is separate", () => {
+  const pasted = [
+    "Ticker\tCompany\tQuant Rating\tQuant Score\tValuation Grade\tGrowth Grade\tRating Date",
+    "MU\tMicron Technology\tBuy\t4.21\tB\tA-\t2026-05-29",
+    "NVDA\tNVIDIA\tHold\t3.45\tC\tA\t2026-05-29"
+  ].join("\n");
+  const result = adapters.buildImportResult({
+    seekingAlphaFileName: "pasted-premium-ratings.csv",
+    seekingAlphaCsv: pasted
+  });
+  const mu = result.records.find((record) => record.ticker === "MU");
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(mu.quant, 4.21);
+  assert.equal(mu.quantRating, "Buy");
+});
+
+test("Seeking Alpha JSON import normalizes supported payload shapes", () => {
+  const result = adapters.buildImportResult({
+    seekingAlphaFileName: "premium-ratings.json",
+    seekingAlphaJson: JSON.stringify({
+      ratings: [
+        {
+          symbol: "AMD",
+          companyName: "Advanced Micro Devices",
+          quantScore: "4.2",
+          valuationGrade: "C+",
+          growthGrade: "A-",
+          momentumGrade: "B+",
+          epsRevisionsGrade: "A",
+          ratingDate: "2026-05-20"
+        }
+      ]
+    })
+  });
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].ticker, "AMD");
+  assert.equal(result.records[0].quant, 4.2);
+  assert.equal(result.records[0].value, 3.3);
+  assert.equal(result.records[0].growth, 4.6);
+  assert.equal(result.records[0].revisions, 96);
+  assert.equal(result.records[0].saUpdatedAt, "2026-05-20");
+  assert.equal(result.importReport.providerReports[0].health.status, "Success");
+});
+
+test("Seeking Alpha old rating dates are flagged as stale", () => {
+  const result = adapters.buildImportResult({
+    seekingAlphaFileName: "stale-premium-ratings.csv",
+    seekingAlphaCsv: [
+      "Ticker,Company,Quant Rating,Growth Grade,Rating Date",
+      "CRDO,Credo Technology,4.12,A,2025-01-10"
+    ].join("\n")
+  });
+
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.importReport.providerReports[0].staleRows.length, 1);
+  assert.equal(result.importReport.providerReports[0].staleRows[0].ticker, "CRDO");
+  assert.equal(result.importReport.providerReports[0].health.status, "Imported with stale rating rows");
+});
+
+test("Seeking Alpha malformed rows reject without blocking valid ratings", () => {
+  const result = adapters.buildImportResult({
+    seekingAlphaFileName: "bad-premium-ratings.csv",
+    seekingAlphaCsv: [
+      "Ticker,Company,Quant Rating,Growth Grade,Rating Date",
+      "MU,Micron Technology,4.43,A-,2026-05-20",
+      ",Missing Ticker,4.00,B,2026-05-20",
+      "BAD,Invalid Grade,not-a-rating,A,2026-05-20"
+    ].join("\n")
+  });
+
+  assert.equal(result.validation.ok, true);
+  assert.deepEqual(result.records.map((record) => record.ticker), ["MU"]);
+  assert.equal(result.importReport.providerReports[0].rejectedRows.length, 2);
+  assert.match(result.importReport.providerReports[0].rejectedRows[0].reasons.join(" "), /missing ticker/);
+  assert.match(result.importReport.providerReports[0].rejectedRows[1].reasons.join(" "), /unrecognized Seeking Alpha rating/);
+  assert.equal(result.importReport.providerReports[0].health.status, "Partial success");
+});
+
 test("portfolio analytics calculates ticker weights from imported values", () => {
   const records = adapters.normalizeFidelityPositions(`Account,Symbol,Security Description,Quantity,Last Price,Current Value,Total Cost Basis
 Taxable,MU,Micron Technology,10,100,1000,750

@@ -1,7 +1,9 @@
 export const SEEKING_ALPHA_DATA_FIELDS = Object.freeze([
   "quant",
+  "quantRating",
   "authorRating",
   "wallStreetRating",
+  "saAnalystsRating",
   "value",
   "growth",
   "profitability",
@@ -74,8 +76,10 @@ export function normalizeSeekingAlphaRecord(record = {}) {
     company: textFrom(record, ["company", "companyName", "name"], ticker),
     sector: textFrom(record, ["sector", "sectorName"], "Imported"),
     quant,
+    quantRating: readableRatingText(textFrom(record, ["quantRating", "quantRatingLabel", "quantRecommendation"])) || readableRatingText(textFrom(record, ["quant"])),
     authorRating: textFrom(record, ["authorRating", "saAuthorRating", "authorsRating"]),
     wallStreetRating: textFrom(record, ["wallStreetRating", "sellSideRating", "analystRating"]),
+    saAnalystsRating: textFrom(record, ["saAnalystsRating", "saAnalysts", "seekingAlphaAnalystsRating"]),
     value: ratingToScore(textFrom(record, ["value", "valueGrade", "valuation", "valuationGrade"])),
     growth: ratingToScore(textFrom(record, ["growth", "growthGrade"])),
     profitability: ratingToScore(textFrom(record, ["profitability", "profitabilityGrade"])),
@@ -98,7 +102,7 @@ export function normalizeSeekingAlphaRecord(record = {}) {
     priceTarget: numberFrom(record, ["priceTarget", "targetPrice", "wallStreetPriceTarget"]),
     ratingChanges: textFrom(record, ["ratingChanges", "ratingChange", "gradeChanges"]),
     nextEarnings: textFrom(record, ["nextEarnings", "earningsDate"]),
-    saUpdatedAt: textFrom(record, ["updatedAt", "asOf", "date"]),
+    saUpdatedAt: textFrom(record, ["updatedAt", "saUpdatedAt", "asOf", "date", "ratingDate", "importedAt"]),
     source: "seeking-alpha-premium",
     sources: ["seeking-alpha-premium"],
     thesis: insightSummary(record)
@@ -251,6 +255,21 @@ function ratingToScore(value) {
     f: 1
   };
   return map[lower];
+}
+
+function readableRatingText(value) {
+  const text = String(value || "").trim();
+  return [
+    "strong buy",
+    "buy",
+    "bullish",
+    "outperform",
+    "hold",
+    "neutral",
+    "sell",
+    "bearish",
+    "strong sell"
+  ].includes(text.toLowerCase()) ? text : "";
 }
 
 function ratingToPercent(value) {

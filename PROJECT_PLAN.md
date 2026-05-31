@@ -1,6 +1,6 @@
 # Project Plan
 
-Last updated: 2026-05-28
+Last updated: 2026-05-30
 Lead: Codie
 Human owner: Tucker
 Team name: Dream Team
@@ -39,10 +39,11 @@ The product should cut through internet noise by connecting holdings, target all
 
 ## Priority Order
 
-1. Review and merge PRs for Fidelity CSV import verification, CI checks, provider diagnostics/source labels, and AI explanation/thesis summary work.
-2. Keep P1 Market Drivers explainer current as new live/source data paths mature.
-3. Broader automated UI/browser smoke coverage once browser automation is available.
-4. Continue improving active-portfolio consistency and real-data diagnostics as Tucker tests real CSVs and provider keys.
+1. P0: Make Seeking Alpha Premium personal-data connection seamless without credentials, cookies, scraping, or paywall bypass. Manual CSV/JSON/XLSX/paste import must preview before applying, show row-level diagnostics, and stay labeled Imported/Pasted/Sample/Stale rather than Live.
+2. Review and merge PRs for Fidelity CSV import verification, CI checks, provider diagnostics/source labels, and AI explanation/thesis summary work.
+3. Keep P1 Market Drivers explainer current as new live/source data paths mature.
+4. Broader automated UI/browser smoke coverage once browser automation is available.
+5. Continue improving active-portfolio consistency and real-data diagnostics as Tucker tests real CSVs and provider keys.
 
 ## Active Phase
 
@@ -55,6 +56,8 @@ Active priority:
 - Keep the Daily Command Brief organized as a ranked attention feed first, with grouped queues available as supporting context.
 - Keep primary navigation focused on the daily portfolio workflow, with secondary/advanced tools tucked into a quieter “More tools” area.
 - Keep technical/provider details collapsed by default unless Tucker is actively diagnosing a connection or import issue.
+- Seeking Alpha Premium sprint: prefer authorized manual export, paste-from-table, saved file, and local JSON/XLSX import flows. Reject unattended scraping, stored credentials, cookies, session tokens, or anything that makes imported Premium data look Live.
+- Seeking Alpha import preview should show detected columns, mapped fields, accepted rows, rejected rows, duplicate ticker handling, stale rating dates, source timestamp/mode, and a clear Apply ratings step before holdings are enriched.
 - Make imports feel decisive: after accepted holdings apply, refresh market data for the active portfolio and preserve row-level diagnostics for anything that needs review.
 - Keep import previews focused on validation; ticker links should activate after holdings are applied, not while Tucker is still deciding whether the file mapped correctly.
 - Keep copy honest and source-aware: Imported, Live, Cached, Stale, Sample, Error, and Not configured should remain visually and textually distinct.

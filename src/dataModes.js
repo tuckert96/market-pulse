@@ -55,7 +55,7 @@ export function normalizeDataMode(value = "") {
   if (/cached|cache/.test(text)) return DATA_MODES.CACHED;
   if (/not configured|not connected|missing key|setup|required|disabled|future source|configurable/.test(text)) return DATA_MODES.NOT_CONFIGURED;
   if (/live|connected|provider data synced|public provider|server-side live/.test(text)) return DATA_MODES.LIVE;
-  if (/import|csv|xlsx|manual|local[-\s]?file|local data|persisted local|authorized export/.test(text)) return DATA_MODES.IMPORTED;
+  if (/import|csv|xlsx|pasted|paste|manual|local[-\s]?file|local data|persisted local|authorized export/.test(text)) return DATA_MODES.IMPORTED;
   if (/sample|demo|mock/.test(text)) return DATA_MODES.SAMPLE;
   return DATA_MODES.NOT_CONFIGURED;
 }

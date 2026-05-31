@@ -3798,7 +3798,8 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .filter((row) => normalizeTickerSymbol(row.ticker) === ticker)
     .sort((a, b) => timestampSortValue(b.dateTime) - timestampSortValue(a.dateTime))
     .slice(0, 6);
-  const redditSummary = summarizeRedditMentions(options.redditMentions || [])
+  const redditAsOf = options.asOf || latestTimestampIso(options.redditMentions || [], ["createdAt", "detectedAt", "sourceAsOf"]);
+  const redditSummary = summarizeRedditMentions(options.redditMentions || [], { asOf: redditAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const redditMentions = (options.redditMentions || [])
     .filter((record) => redditMentionTickers(record).includes(ticker))
@@ -5117,6 +5118,14 @@ function timestampSortValue(value) {
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
+function latestTimestampIso(records = [], fields = []) {
+  const latest = records.reduce((max, record) => {
+    const value = fields.map((field) => record?.[field]).find(Boolean);
+    return Math.max(max, timestampSortValue(value));
+  }, 0);
+  return latest ? new Date(latest).toISOString() : undefined;
+}
+
 function tickerSignalSummary(model) {
   const signal = model.tickerSignal;
   if (!signal) return '<div><span>Ticker signal</span><b>No confluence row</b><small>Future watchlist/data signals will populate this row.</small></div>';
@@ -6237,6 +6246,9 @@ export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seek
   const politicianError = politicianSource.limitedOrError;
   const fidelityOverview = connectorOverviewStatus("Fidelity", fidelityStatus, "CSV import works. Plaid account linking runs through the local backend when configured.");
   const seekingAlphaOverview = connectorOverviewStatus("Seeking Alpha", seekingAlphaStatus, "Use authorized CSV/XLSX exports or a future licensed API.");
+  const seekingAlphaImported = isSeekingAlphaImportedStatus(seekingAlphaStatus);
+  const seekingAlphaSample = /demo|sample/i.test(String(seekingAlphaStatus.mode || seekingAlphaStatus.sourceMode || ""));
+  const seekingAlphaStale = /stale/i.test(String(seekingAlphaStatus.dataFreshness || ""));
   const fidelityImported = /csv|import|local-file/i.test(String(fidelityStatus.mode || ""));
   const plaidReadiness = readiness.connectors?.plaid || {};
   const plaidLinked = Boolean(plaidReadiness.linked);
@@ -6370,15 +6382,16 @@ export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seek
       label: "Seeking Alpha",
       status: seekingAlphaOverview.value,
       detail: seekingAlphaOverview.detail,
-      configured: Boolean(seekingAlphaStatus.connected),
-      demoReady: /demo/i.test(String(seekingAlphaStatus.mode || "")),
-      availabilityLabel: seekingAlphaStatus.connected ? dataModeLabel(DATA_MODES.IMPORTED) : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
-      guidance: seekingAlphaStatus.connected ? "Authorized export/import data is available locally." : "Use authorized exports or a licensed API later; no scraping or password collection.",
-      className: seekingAlphaStatus.connected && /csv|xlsx|import/i.test(String(seekingAlphaStatus.mode || "")) ? "imported-local" : undefined,
+      configured: seekingAlphaImported,
+      configuredPending: seekingAlphaStale,
+      demoReady: seekingAlphaSample,
+      availabilityLabel: seekingAlphaStale ? dataModeLabel(DATA_MODES.STALE) : seekingAlphaImported ? dataModeLabel(DATA_MODES.IMPORTED) : seekingAlphaSample ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
+      guidance: seekingAlphaStale ? "Imported Premium ratings are stale by rating date. Refresh the manual export before relying on them." : seekingAlphaImported ? "Authorized export/import data is available locally. This is not a live Seeking Alpha connection." : "Use authorized exports or a licensed API later; no scraping or password collection.",
+      className: seekingAlphaImported ? "imported-local" : seekingAlphaStale ? "configured-pending" : undefined,
       providerBacked: false,
       sourceType: "Manual premium-rating import",
       lastSuccessfulAt: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt,
-      fallbackReason: seekingAlphaStatus.connected ? "" : "No authorized Seeking Alpha import is loaded."
+      fallbackReason: seekingAlphaImported ? "Manual Premium ratings are local decision-support data, not live." : "No authorized Seeking Alpha import is loaded."
     },
     {
       label: "Fidelity",
@@ -6671,6 +6684,9 @@ export function buildSettingsProviderStatusRows(readiness = {}, context = {}) {
   const redditReport = context.redditImportReport || {};
   const xReport = context.xUpdateImportReport || {};
   const politicianReport = context.politicianTradeImportReport || {};
+  const seekingAlphaImported = isSeekingAlphaImportedStatus(seekingAlphaStatus);
+  const seekingAlphaSample = /demo|sample/i.test(String(seekingAlphaStatus.mode || seekingAlphaStatus.sourceMode || ""));
+  const seekingAlphaStale = /stale/i.test(String(seekingAlphaStatus.dataFreshness || ""));
 
   return [
     settingsProviderRow({
@@ -6754,8 +6770,8 @@ export function buildSettingsProviderStatusRows(readiness = {}, context = {}) {
     settingsProviderRow({
       id: "seeking-alpha-import",
       title: "Seeking Alpha ratings",
-      statusMode: seekingAlphaStatus.connected ? DATA_MODES.IMPORTED : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? DATA_MODES.SAMPLE : DATA_MODES.NOT_CONFIGURED,
-      credentialState: seekingAlphaStatus.connected ? "Imported data loaded" : "No credentials stored",
+      statusMode: seekingAlphaStale ? DATA_MODES.STALE : seekingAlphaImported ? DATA_MODES.IMPORTED : seekingAlphaSample ? DATA_MODES.SAMPLE : DATA_MODES.NOT_CONFIGURED,
+      credentialState: seekingAlphaImported ? "Imported data loaded" : "No credentials stored",
       detail: seekingAlphaStatus.message || seekingAlphaStatus.mode || "Use authorized manual exports. The dashboard does not store Seeking Alpha passwords.",
       lastSuccess: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt,
       lastError: providerVisibleError(seekingAlphaStatus),
@@ -7081,7 +7097,8 @@ function connectorOverviewStatus(label, status = {}, fallbackDetail = "") {
   const mode = String(status.mode || "").trim();
   const restored = Boolean(status.restoredFromBackup);
   const demo = /demo/i.test(mode);
-  const imported = /csv|xlsx|import/i.test(mode);
+  const imported = isSeekingAlphaImportedStatus(status) || /csv|xlsx|json|import|pasted/i.test(mode);
+  const stale = /stale/i.test(String(status.dataFreshness || ""));
   if (restored) {
     return {
       value: dataModeLabel(DATA_MODES.NOT_CONFIGURED),
@@ -7090,8 +7107,8 @@ function connectorOverviewStatus(label, status = {}, fallbackDetail = "") {
   }
   if (imported) {
     return {
-      value: dataModeLabel(DATA_MODES.IMPORTED),
-      detail: mode || status.provider || "Local provider state loaded."
+      value: dataModeLabel(stale ? DATA_MODES.STALE : DATA_MODES.IMPORTED),
+      detail: status.message || mode || status.provider || "Local provider state loaded."
     };
   }
   if (status.connected) {
@@ -7110,6 +7127,11 @@ function connectorOverviewStatus(label, status = {}, fallbackDetail = "") {
     value: dataModeLabel(DATA_MODES.NOT_CONFIGURED),
     detail: fallbackDetail || "No live provider connection is active."
   };
+}
+
+function isSeekingAlphaImportedStatus(status = {}) {
+  const text = `${status.mode || ""} ${status.sourceMode || ""} ${status.dataFreshness || ""}`.toLowerCase();
+  return /csv|xlsx|json|import|pasted/.test(text) || (Number(status.records) > 0 && !/demo|sample/.test(text));
 }
 
 function dailyMoveSourceLabel(holding = {}) {

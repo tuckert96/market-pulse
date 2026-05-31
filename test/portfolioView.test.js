@@ -381,6 +381,35 @@ test("settings provider status rows expose setup state without secret values", (
   assert.match(text, /Setup notes|docs\/market-data-provider-config\.md/);
 });
 
+test("Seeking Alpha imported and pasted statuses never appear as live connections", () => {
+  const importedRows = buildSettingsProviderStatusRows({}, {
+    seekingAlphaStatus: {
+      connected: false,
+      mode: "pasted",
+      sourceMode: "pasted",
+      records: 4,
+      matchedHoldings: 2,
+      lastSync: "2026-05-29T08:00:00.000Z",
+      message: "Pasted Seeking Alpha Premium ratings loaded: 4 records; 2 matched active holdings."
+    }
+  });
+  const staleRows = buildSettingsProviderStatusRows({}, {
+    seekingAlphaStatus: {
+      connected: false,
+      mode: "csv-import",
+      sourceMode: "imported",
+      dataFreshness: "stale",
+      records: 4,
+      staleRows: 2,
+      lastSync: "2026-05-01T08:00:00.000Z"
+    }
+  });
+
+  assert.ok(importedRows.some((row) => row.title === "Seeking Alpha ratings" && row.statusMode === "imported"));
+  assert.ok(staleRows.some((row) => row.title === "Seeking Alpha ratings" && row.statusMode === "stale"));
+  assert.equal(JSON.stringify(importedRows).includes("Live"), false);
+});
+
 test("portfolio import status distinguishes clean, skipped, partial, and failed imports", () => {
   assert.deepEqual(portfolioImportSourceStatus(null), {
     status: "Sample/local only",
