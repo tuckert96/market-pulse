@@ -29,6 +29,19 @@ const baseState = {
   decisionJournal: [{ ticker: "MU", decisionType: "hold", dateTime: exportedAt, thesisNote: "Still valid" }],
   eventCalendar: [{ id: "event-cal:mu", ticker: "MU", eventType: "earnings", date: "2026-06-20", sourceMode: "imported" }],
   quantScoreHistory: [{ ticker: "MU", score: 82, asOf: exportedAt, portfolioMode: "imported" }],
+  sourceHistory: [{
+    type: "portfolio_import",
+    label: "Portfolio import",
+    fileName: "Fidelity_Positions_123456789.csv",
+    timestamp: exportedAt,
+    status: "success",
+    rowsParsed: 42,
+    acceptedRows: 40,
+    holdingsCount: 40,
+    detail: "Imported safely. api_key=should-redact",
+    rawRows: [{ accountNumber: "123456789" }],
+    activePortfolioSource: true
+  }],
   latestImportReport: { fileName: "fidelity-positions.csv", apiKey: "should-redact" },
   accountScope: "account:roth",
   marketDataLiveMode: { enabled: true, intervalSeconds: 300, lastError: "Bearer abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" },
@@ -48,6 +61,10 @@ test("dashboard backup export creates a valid sanitized JSON-ready payload", () 
   assert.equal(payload.marketDataLiveMode.enabled, true);
   assert.equal(payload.holdings[0].accountNumber, "masked-6789");
   assert.equal(payload.latestImportReport.apiKey, undefined);
+  assert.equal(payload.sourceHistory.length, 1);
+  assert.equal(payload.sourceHistory[0].rawRows, undefined);
+  assert.equal(payload.sourceHistory[0].fileName, "Fidelity_Positions_masked-6789.csv");
+  assert.equal(payload.sourceHistory[0].activePortfolioSource, true);
   assert.equal(payload.apiKey, undefined);
   assert.doesNotMatch(JSON.stringify(payload), /sk-|Bearer abcdefghijklmnopqrstuvwxyz|123456789\b/);
 });
@@ -66,6 +83,7 @@ test("restore preview summarizes changes before anything is applied", () => {
   assert.equal(preview.exportedAt, exportedAt);
   assert.ok(preview.warnings.some((warning) => /marked disconnected/i.test(warning)));
   assert.ok(preview.changes.some((row) => row.label === "Holdings" && row.current === 1 && row.restored === 2 && row.changes));
+  assert.ok(preview.changes.some((row) => row.label === "Source history" && row.restored === 1));
   assert.ok(preview.changes.some((row) => row.label === "Local settings" && row.restored === 2));
 });
 

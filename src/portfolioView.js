@@ -11,6 +11,7 @@ import { buildThesisRiskSummary } from "./thesisTracker.js";
 import { compareThesisSnapshotToProfile, thesisSnapshotsForTicker } from "./thesisSnapshots.js";
 import { buildTickerResearchLens } from "./tickerResearch.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
+import { normalizeSourceHistory, sourceHistorySummary } from "./sourceHistory.js";
 
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
@@ -25,7 +26,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderOverviewHealthSnapshot(options.portfolioHealth, options.uiState);
   renderPortfolioHealthPanel(options.portfolioHealth, options.uiState);
   renderOverviewCalendarSnapshot(options.allCalendarEvents || [], options.uiState);
-  renderImportSnapshot(options.latestImportReport, options.portfolioDataQuality);
+  renderImportSnapshot(options.latestImportReport, options.portfolioDataQuality, options.sourceHistory || []);
   renderOverviewTopMovers(analysis.holdings, options.uiState, options.marketDataStatus);
   renderOverviewConcentrationWarnings(analysis.risk, analysis.overview, options.uiState);
   renderOverviewRiskGuardrails(options.equityRiskGuardrails, options.uiState);
@@ -82,7 +83,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
     redditMentions: options.redditMentions || [],
     xUpdates: options.xUpdates || []
   });
-  renderDataSourceHealth(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.latestImportReport, options.marketDataStatus, options.politicianTradeImportReport, options.politicianTrades || [], options.redditImportReport, options.redditMentions || [], options.portfolioStatus, options.accountScope, options.xUpdateImportReport, options.xUpdates || []);
+  renderDataSourceHealth(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.latestImportReport, options.marketDataStatus, options.politicianTradeImportReport, options.politicianTrades || [], options.redditImportReport, options.redditMentions || [], options.portfolioStatus, options.accountScope, options.xUpdateImportReport, options.xUpdates || [], options.sourceHistory || []);
   renderRedditSourceStatus(options.redditMentions || [], options.redditImportReport, options.redditSettings, options.providerReadiness);
   renderXSourceStatus(options.xUpdates || [], options.xUpdateImportReport, options.xSettings, options.providerReadiness);
   renderPoliticianTrades(options.politicianTrades || [], options.politicianTradeImportReport);
@@ -674,15 +675,21 @@ function renderKeyTakeaways(analysis, options = {}) {
   `;
 }
 
-function renderImportSnapshot(report, quality = {}) {
+function renderImportSnapshot(report, quality = {}, sourceHistory = []) {
   const target = byId("importSummaryPanel");
   if (!target) return;
+  const historyHtml = renderSourceHistoryTimeline(sourceHistory, {
+    title: "Recent import and source history",
+    limit: 5,
+    compact: true
+  });
   if (!report?.realPortfolioImport) {
     target.innerHTML = `
       <div class="empty import-empty">
         <strong>No Fidelity portfolio loaded yet.</strong>
         <span>Drop a Fidelity CSV, choose a holdings JSON file, or paste copied position rows. Nothing changes until you review and apply the preview.</span>
       </div>
+      ${historyHtml}
     `;
     return;
   }
@@ -715,6 +722,7 @@ function renderImportSnapshot(report, quality = {}) {
         <a class="button-link" href="#holdings">View Holdings</a>
       </div>
     </div>
+    ${historyHtml}
   `;
 }
 
@@ -6207,7 +6215,7 @@ function renderProviderReadiness(readiness = {}) {
   `;
 }
 
-export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = []) {
+export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = [], sourceHistory = []) {
   const target = byId("dataSourceHealthPanel");
   if (!target) return;
   const providerStatuses = Object.values(readiness.providerStatuses || {});
@@ -6426,14 +6434,16 @@ export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seek
     }
   ];
   const summary = buildDataSourceHealthSummary(rows);
+  const history = sourceHistorySummary(sourceHistory);
   target.innerHTML = `
     <div class="source-health-summary" aria-label="Data source health summary">
       <div><b>${escapeHtml(summary.usableCount)}</b><span>usable now</span></div>
       <div><b>${escapeHtml(summary.reviewCount)}</b><span>needs review</span></div>
       <div><b>${escapeHtml(summary.providerBackedCount)}</b><span>provider-backed</span></div>
       <div><b>${escapeHtml(summary.localOnlyCount)}</b><span>local/sample</span></div>
-      <p>Provider-backed sources are separated from local imports, sample rows, and deterministic calculations so source labels stay honest.</p>
+      <p>Provider-backed sources are separated from local imports, sample rows, and deterministic calculations so source labels stay honest.${history.latest ? ` Latest source event: ${escapeHtml(history.latest.label)}.` : ""}</p>
     </div>
+    ${renderSourceHistoryTimeline(sourceHistory, { title: "Recent source history", limit: 8 })}
     ${rows.map((row) => `
     <div class="provider-status-card ${escapeHtml(row.className || (row.configured ? "configured" : row.configuredPending ? "configured-pending" : "missing"))}">
       <div>
@@ -6593,6 +6603,86 @@ function qualityMetric(label, value) {
 
 function summaryMetric(label, value) {
   return `<div><b>${escapeHtml(label)}</b><span>${escapeHtml(value)}</span></div>`;
+}
+
+export function renderSourceHistoryTimeline(sourceHistory = [], options = {}) {
+  const rows = normalizeSourceHistory(sourceHistory).slice(0, Number(options.limit || 8));
+  const title = options.title || "Recent source history";
+  if (!rows.length) {
+    return `
+      <div class="source-history-card">
+        <div class="panel-mini-head">
+          <h3>${escapeHtml(title)}</h3>
+          <span class="status-badge badge-source-empty">No history yet</span>
+        </div>
+        <p class="source-meta">Imports, syncs, refreshes, restores, sample loads, and resets will appear here after they run.</p>
+      </div>
+    `;
+  }
+  return `
+    <div class="source-history-card" aria-label="${escapeHtml(title)}">
+      <div class="panel-mini-head">
+        <h3>${escapeHtml(title)}</h3>
+        <span class="status-badge ${escapeHtml(sourceHistoryStatusBadgeClass(rows[0]))}">${escapeHtml(sourceHistoryStatusLabel(rows[0]))}</span>
+      </div>
+      <div class="source-history-list ${options.compact ? "compact" : ""}">
+        ${rows.map((event) => renderSourceHistoryRow(event)).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderSourceHistoryRow(event = {}) {
+  const counts = sourceHistoryCountParts(event);
+  const primaryLabel = event.fileName || event.provider || event.sourceType || event.label;
+  const secondary = [
+    event.sourceMode || event.dataMode,
+    event.providerStatus,
+    event.timestamp ? shortDateTime(event.timestamp) : ""
+  ].filter(Boolean).join(" · ");
+  return `
+    <article class="source-history-row ${event.activePortfolioSource ? "active" : ""}">
+      <div>
+        <b>${escapeHtml(event.label || "Source event")}</b>
+        <span>${escapeHtml(primaryLabel || "Local source")}${event.activePortfolioSource ? ' <em>Current active source</em>' : ""}</span>
+        ${event.detail ? `<small>${escapeHtml(event.detail)}</small>` : ""}
+      </div>
+      <div class="source-history-meta">
+        <span class="status-badge ${escapeHtml(sourceHistoryStatusBadgeClass(event))}">${escapeHtml(sourceHistoryStatusLabel(event))}</span>
+        <small>${escapeHtml(secondary)}</small>
+        ${counts.length ? `<p>${counts.map((part) => `<span>${escapeHtml(part)}</span>`).join("")}</p>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function sourceHistoryCountParts(event = {}) {
+  const parts = [];
+  if (event.rowsParsed) parts.push(`${formatNumber(event.rowsParsed)} parsed`);
+  if (event.acceptedRows) parts.push(`${formatNumber(event.acceptedRows)} accepted`);
+  if (event.reviewRows) parts.push(`${formatNumber(event.reviewRows)} review`);
+  if (event.skippedRows) parts.push(`${formatNumber(event.skippedRows)} skipped`);
+  if (event.holdingsCount) parts.push(`${formatNumber(event.holdingsCount)} holdings`);
+  if (event.accountsCount) parts.push(`${formatNumber(event.accountsCount)} accounts`);
+  if (event.tickersCount && event.type === "market_data_refresh") parts.push(`${formatNumber(event.tickersCount)} tickers`);
+  if (event.totalMarketValue) parts.push(`${formatCurrency(event.totalMarketValue)}`);
+  return parts;
+}
+
+function sourceHistoryStatusLabel(event = {}) {
+  if (event.activePortfolioSource) return "Current";
+  if (event.status === "success") return "Success";
+  if (event.status === "warning") return "Needs review";
+  if (event.status === "error") return "Error";
+  return "Logged";
+}
+
+function sourceHistoryStatusBadgeClass(event = {}) {
+  if (event.activePortfolioSource) return "badge-source-imported";
+  if (event.status === "success") return "badge-source-live";
+  if (event.status === "warning") return "badge-source-stale";
+  if (event.status === "error") return "badge-source-error";
+  return "badge-source-cached";
 }
 
 function formatTradeRange(trade = {}) {

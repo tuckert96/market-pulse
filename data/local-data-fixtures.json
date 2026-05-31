@@ -409,5 +409,29 @@
       "credentialLocation": "none",
       "warnings": ["Local disclosure file only. Do not infer motive or trade commands from disclosure rows."]
     }
+  ],
+  "sourceHistory": [
+    {
+      "id": "source-history:portfolio_import:2026-05-23T10:00:00.000Z:sample-fidelity-import",
+      "type": "portfolio_import",
+      "label": "Portfolio import",
+      "sourceType": "fidelity",
+      "sourceMode": "Imported",
+      "dataMode": "Imported",
+      "timestamp": "2026-05-23T10:00:00.000Z",
+      "status": "success",
+      "provider": "Fidelity",
+      "providerStatus": "CSV import",
+      "fileName": "sample-fidelity-positions.csv",
+      "rowsParsed": 7,
+      "acceptedRows": 5,
+      "reviewRows": 0,
+      "skippedRows": 2,
+      "holdingsCount": 5,
+      "accountsCount": 2,
+      "totalMarketValue": 120500,
+      "tickersCount": 5,
+      "activePortfolioSource": true
+    }
   ]
 }

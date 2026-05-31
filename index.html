@@ -4416,6 +4416,92 @@
         grid-column: 1 / -1;
       }
 
+      .source-history-card {
+        display: grid;
+        gap: 10px;
+        border: 1px solid rgba(0, 122, 255, 0.12);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+      }
+
+      .source-history-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .source-history-list.compact {
+        gap: 6px;
+      }
+
+      .source-history-row {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) minmax(190px, auto);
+        gap: 12px;
+        align-items: start;
+        min-width: 0;
+        border: 1px solid rgba(0, 0, 0, 0.055);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(250, 250, 252, 0.82);
+      }
+
+      .source-history-row.active {
+        border-color: rgba(0, 122, 255, 0.28);
+        background: rgba(239, 246, 255, 0.86);
+      }
+
+      .source-history-row b,
+      .source-history-row span,
+      .source-history-row small,
+      .source-history-row p {
+        overflow-wrap: normal;
+        word-break: normal;
+      }
+
+      .source-history-row b {
+        display: block;
+        color: var(--text);
+      }
+
+      .source-history-row span,
+      .source-history-row small,
+      .source-history-row p {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .source-history-row em {
+        display: inline-flex;
+        margin-left: 6px;
+        color: var(--accent);
+        font-style: normal;
+        font-weight: 750;
+      }
+
+      .source-history-meta {
+        display: grid;
+        justify-items: end;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .source-history-meta p {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 5px;
+        margin: 0;
+      }
+
+      .source-history-meta p span {
+        border-radius: 999px;
+        padding: 2px 7px;
+        background: rgba(118, 118, 128, 0.1);
+      }
+
       .provider-status-card.configured {
         border-color: #b7dfbf;
         background: var(--good-bg);
@@ -6238,6 +6324,7 @@
         .source-health-summary,
         .provider-setup-grid,
         .provider-status-card,
+        .source-history-row,
         .alert-item,
         .risk-row,
         .account-allocation-row,
@@ -6245,6 +6332,14 @@
         .mini-list > div,
         .stress-row {
           grid-template-columns: 1fr;
+        }
+
+        .source-history-meta {
+          justify-items: start;
+        }
+
+        .source-history-meta p {
+          justify-content: flex-start;
         }
 
         .risk-row,

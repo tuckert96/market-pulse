@@ -3,6 +3,7 @@ import { normalizeCalendarEvents } from "./eventCalendar.js";
 import { normalizeJournalEntries } from "./decisionJournal.js";
 import { normalizeHoldings } from "./portfolioSchema.js";
 import { normalizeQuantScoreHistory } from "./quantLensContext.js";
+import { normalizeSourceHistory } from "./sourceHistory.js";
 import { normalizeTargetAllocations } from "./targetAllocations.js";
 import { normalizeThesisSnapshots } from "./thesisSnapshots.js";
 import { normalizeWatchlistIdeas } from "./watchlistIdeas.js";
@@ -22,7 +23,8 @@ const ARRAY_FIELDS = Object.freeze([
   "watchlistIdeas",
   "decisionJournal",
   "eventCalendar",
-  "quantScoreHistory"
+  "quantScoreHistory",
+  "sourceHistory"
 ]);
 
 const OBJECT_FIELDS = Object.freeze([
@@ -119,6 +121,9 @@ export function validateDashboardStateBackupPayload(input) {
       warnings.push(`${field} is not an object and will fall back to the current/default value.`);
     }
   });
+  if (Array.isArray(payload.sourceHistory)) {
+    payload.sourceHistory = normalizeSourceHistory(payload.sourceHistory);
+  }
 
   return {
     ok: errors.length === 0,
@@ -155,6 +160,7 @@ export function buildDashboardStateRestorePreview(input, currentState = {}) {
     previewRow("Decision journal", current.decisionJournal, restored.decisionJournal, "Decision journal entries will be restored."),
     previewRow("Calendar events", current.eventCalendar, restored.eventCalendar, "Local event calendar rows will be restored."),
     previewRow("Quant score history", current.quantScoreHistory, restored.quantScoreHistory, "Compact Quant Lens score history will be restored."),
+    previewRow("Source history", current.sourceHistory, restored.sourceHistory, "Safe import, sync, refresh, restore, sample, and reset metadata will be restored."),
     previewRow("Local settings", current.localSettings, restored.localSettings, "Account scope and market-data live-mode preferences will be restored.")
   ];
 
@@ -187,6 +193,7 @@ function normalizedRestoreCounts(source = {}) {
     decisionJournal: normalizeJournalEntries(Array.isArray(source.decisionJournal) ? source.decisionJournal : []).length,
     eventCalendar: normalizeCalendarEvents(Array.isArray(source.eventCalendar) ? source.eventCalendar : []).length,
     quantScoreHistory: normalizeQuantScoreHistory(Array.isArray(source.quantScoreHistory) ? source.quantScoreHistory : []).length,
+    sourceHistory: normalizeSourceHistory(Array.isArray(source.sourceHistory) ? source.sourceHistory : []).length,
     localSettings: [source.accountScope, source.marketDataLiveMode && typeof source.marketDataLiveMode === "object" ? "marketDataLiveMode" : ""]
       .filter(Boolean)
       .length

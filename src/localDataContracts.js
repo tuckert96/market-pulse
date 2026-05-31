@@ -34,6 +34,8 @@ const CALENDAR_IMPORTANCE = new Set(["low", "medium", "high"]);
 const CALENDAR_SOURCE_MODES = new Set(["mock", "imported", "manual", "live", "stale", "error"]);
 const QUANT_HISTORY_PORTFOLIO_MODES = new Set(["sample", "imported", "local", "no-data"]);
 const QUANT_SECURITY_KINDS = new Set(["operating-company", "fund-or-etf"]);
+const SOURCE_HISTORY_TYPES = new Set(["portfolio_import", "provider_sync", "market_data_refresh", "backup_restore", "sample_load", "portfolio_reset"]);
+const SOURCE_HISTORY_STATUSES = new Set(["success", "warning", "error", "info"]);
 
 export function parseLocalDataFixtureJson(text = "", fileName = "local-data-fixtures.json") {
   try {
@@ -319,11 +321,36 @@ export function validateLocalDataBundle(bundle = {}) {
     requireArray(source.warnings, `dataSources[${index}].warnings`, errors);
   });
 
+  if (bundle.sourceHistory !== undefined) {
+    if (!Array.isArray(bundle.sourceHistory)) {
+      errors.push("sourceHistory must be an array when present");
+    } else {
+      bundle.sourceHistory.forEach((event, index) => {
+        requireString(event.id, `sourceHistory[${index}].id`, errors);
+        requireKnown(event.type, SOURCE_HISTORY_TYPES, `sourceHistory[${index}].type`, errors);
+        requireString(event.label, `sourceHistory[${index}].label`, errors);
+        requireString(event.sourceType, `sourceHistory[${index}].sourceType`, errors);
+        requireString(event.timestamp, `sourceHistory[${index}].timestamp`, errors);
+        requireKnown(event.status, SOURCE_HISTORY_STATUSES, `sourceHistory[${index}].status`, errors);
+        ["rowsParsed", "acceptedRows", "reviewRows", "skippedRows", "holdingsCount", "accountsCount", "tickersCount", "totalMarketValue"].forEach((field) => {
+          if (event[field] !== undefined) requireNonNegativeNumber(event[field], `sourceHistory[${index}].${field}`, errors);
+        });
+        if (event.activePortfolioSource !== undefined) requireBoolean(event.activePortfolioSource, `sourceHistory[${index}].activePortfolioSource`, errors);
+        if (JSON.stringify(event).match(/\d{5,}|sk-[A-Za-z0-9_-]{16,}|access_token|refresh_token|client_secret|api_key|cookie/i)) {
+          warnings.push(`sourceHistory[${index}] may contain raw account or secret-like metadata; source history should store redacted labels and counts only`);
+        }
+      });
+    }
+  }
+
   return {
     ok: errors.length === 0,
     errors,
     warnings,
-    counts: Object.fromEntries(REQUIRED_ARRAYS.map((field) => [field, bundle[field]?.length || 0]))
+    counts: {
+      ...Object.fromEntries(REQUIRED_ARRAYS.map((field) => [field, bundle[field]?.length || 0])),
+      sourceHistory: Array.isArray(bundle.sourceHistory) ? bundle.sourceHistory.length : 0
+    }
   };
 }
 
