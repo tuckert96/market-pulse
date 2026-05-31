@@ -48,6 +48,7 @@ assert(fixtureValidation.counts.decisionJournal >= 1, "expected local data fixtu
 assert(fixtureValidation.counts.eventCalendar >= 1, "expected local data fixture event calendar example");
 assert(fixtureValidation.counts.redditMentions >= 1, "expected local data fixture Reddit mention example");
 assert(fixtureValidation.counts.politicianTrades >= 1, "expected local data fixture politician trade example");
+assert(fixtureValidation.counts.sourceHistory >= 1, "expected local data fixture source history example");
 
 console.log(`Data validation passed: ${result.records.length} portfolio tickers, ${result.seekingAlphaRecords.length} Seeking Alpha rating rows, ${messyResult.records.length} messy brokerage holdings, ${jsonHoldingsResult.records.length} JSON holdings, ${tortureCsvResult.records.length} torture CSV holdings, ${tortureJsonResult.records.length} torture JSON holdings, and ${fixtureValidation.counts.dataSources} local data source contracts.`);
 

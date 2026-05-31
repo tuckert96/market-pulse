@@ -13,6 +13,7 @@ Date: 2026-05-24
 ## What Is Ready
 
 - GitHub ticket sweep: Fidelity CSV verification, CI checks, provider diagnostics/source labels, and OpenAI/thesis summary work are split into reviewable PRs tied to the open issues.
+- Imports and Data Sources now show a safe recent source history for portfolio imports, Plaid/provider syncs, market-data refreshes, backup restores, sample loads, and resets. It stores counts, status, timestamps, and redacted labels only, then marks the current active portfolio source separately from older events.
 - Optional OpenAI portfolio explanations are now backend-only, disabled by default, redacted, source-labeled, and fall back to deterministic local explanations when no key is configured or the provider errors.
 - Ticker pages now include a clearer local deterministic thesis/risk summary with review flags, source label, key risks, invalidation criteria, add/trim/review conditions, and guardrail gaps.
 - Portfolio Health Score: Overview and Daily Command Brief now include a compact 0-100 local workflow score that combines import trust, concentration, thesis coverage, target drift, alert load, and market-data freshness. It links directly to the next screen to inspect and stays disabled/honest when only sample or no portfolio data is loaded.

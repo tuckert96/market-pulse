@@ -24,6 +24,7 @@ import {
   renderAffectedExposureSummary,
   renderLeveragedDrawdownScenarios,
   renderDataSourceHealth,
+  renderSourceHistoryTimeline,
   renderTickerLink,
   safeExternalHref,
   sortHoldingsForView,
@@ -282,11 +283,27 @@ test("data sources health screen renders standardized source labels and freshnes
         fetchedAt: "2026-05-28T12:20:00.000Z",
         detail: "X provider refresh failed; using stale cache."
       },
-      [{ ticker: "NVDA", providerId: "x-api" }]
+      [{ ticker: "NVDA", providerId: "x-api" }],
+      [{
+        type: "portfolio_import",
+        label: "Portfolio import",
+        fileName: "positions-123456789.csv",
+        timestamp: "2026-05-28T12:00:00.000Z",
+        status: "success",
+        rowsParsed: 42,
+        acceptedRows: 40,
+        skippedRows: 1,
+        holdingsCount: 40,
+        activePortfolioSource: true
+      }]
     );
 
     const html = elements.get("dataSourceHealthPanel").innerHTML;
     assert.match(html, /Data source health summary/);
+    assert.match(html, /Recent source history/);
+    assert.match(html, /Current active source/);
+    assert.match(html, /40 accepted/);
+    assert.doesNotMatch(html, /123456789/);
     assert.match(html, /provider-backed/);
     assert.match(html, /Manual\/imported holdings/);
     assert.match(html, /positions\.csv/);
@@ -308,6 +325,34 @@ test("data sources health screen renders standardized source labels and freshnes
   } finally {
     globalThis.document = previousDocument;
   }
+});
+
+test("source history timeline renders active source and row-count metadata without raw account-like values", () => {
+  const html = renderSourceHistoryTimeline([
+    {
+      type: "portfolio_import",
+      label: "Portfolio import",
+      fileName: "Fidelity_Positions_123456789.csv",
+      timestamp: "2026-05-31T12:00:00.000Z",
+      status: "success",
+      rowsParsed: 45,
+      acceptedRows: 41,
+      reviewRows: 2,
+      skippedRows: 2,
+      holdingsCount: 41,
+      accountsCount: 4,
+      totalMarketValue: 486416,
+      activePortfolioSource: true
+    }
+  ], { title: "Recent source history" });
+
+  assert.match(html, /Recent source history/);
+  assert.match(html, /Current active source/);
+  assert.match(html, /45 parsed/);
+  assert.match(html, /41 accepted/);
+  assert.match(html, /2 review/);
+  assert.match(html, /\$486,416/);
+  assert.doesNotMatch(html, /123456789/);
 });
 
 test("settings provider status rows expose setup state without secret values", () => {
@@ -892,8 +937,8 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
       { ticker: "NQTE", status: "watching", conviction: "Low", thesis: "Derived signal without quote", catalyst: "Signal context", sector: "Unknown", signalSource: "ticker-signal", saved: false, derived: true }
     ],
     redditMentions: [
-      { id: "r1", ticker: "MU", extractedTickers: ["MU"], subreddit: "stocks", title: "MU HBM demand discussion", createdAt: "2026-05-23T12:00:00Z", detectedAt: "2026-05-23T12:00:00Z", engagementScore: 10, score: 42, sentiment: "bullish", sourceMode: "mock" },
-      { id: "r2", ticker: "PLTR", extractedTickers: ["PLTR"], subreddit: "investing", title: "PLTR watchlist thread", createdAt: "2026-05-23T10:00:00Z", detectedAt: "2026-05-23T10:00:00Z", engagementScore: 6, score: 11, sentiment: "neutral", sourceMode: "local-file" }
+      { id: "r1", ticker: "MU", extractedTickers: ["MU"], subreddit: "stocks", title: "MU HBM demand discussion", createdAt: "2026-05-30T12:00:00Z", detectedAt: "2026-05-30T12:00:00Z", engagementScore: 10, score: 42, sentiment: "bullish", sourceMode: "mock" },
+      { id: "r2", ticker: "PLTR", extractedTickers: ["PLTR"], subreddit: "investing", title: "PLTR watchlist thread", createdAt: "2026-05-30T10:00:00Z", detectedAt: "2026-05-30T10:00:00Z", engagementScore: 6, score: 11, sentiment: "neutral", sourceMode: "local-file" }
     ],
     politicianTrades: [
       { ticker: "MU", politicianName: "Older Member", transactionType: "sale", transactionDate: "2026-05-18", disclosureDate: "2026-05-20", amountRangeLow: 1000, amountRangeHigh: 15000, sourceMode: "mock" },

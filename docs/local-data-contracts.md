@@ -28,6 +28,7 @@ Runtime code still uses lightweight JavaScript normalizers. TypeScript contracts
 - alerts
 - data source statuses
 - optional compact Quant Lens score history
+- optional safe source history metadata
 
 Validate it with:
 
@@ -484,6 +485,36 @@ Rules:
 - API keys belong in local `.env` and server-side config only.
 - Browser JavaScript must not expose provider keys.
 - Future sources should show `setup-required` or `demo` until approved.
+
+### SourceHistoryEvent
+
+Safe local audit metadata for recent source actions. Source history is shown on Imports and Data Sources, is stored in localStorage, and is included in dashboard backup/export only after normalization and redaction.
+
+Event types:
+
+- `portfolio_import`
+- `provider_sync`
+- `market_data_refresh`
+- `backup_restore`
+- `sample_load`
+- `portfolio_reset`
+
+Allowed metadata:
+
+- source type/mode/data mode
+- timestamp
+- status: `success`, `warning`, `error`, or `info`
+- redacted file/provider labels
+- accepted/review/skipped/parsed counts
+- holdings/accounts/tickers counts
+- total market value
+- current-active-source marker
+
+Rules:
+
+- Never store raw imported rows, account numbers, API keys, access tokens, cookies, provider payloads, or brokerage credentials in source history.
+- Reset/clear events remain in history while clearing current portfolio-derived state.
+- The active source marker is a UI hint only; historical source events are not proof that a provider is still live or connected.
 
 ## Minimal Database Path
 

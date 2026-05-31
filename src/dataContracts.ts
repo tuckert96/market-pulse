@@ -4,6 +4,8 @@ export type DataSourceType = "csv" | "xlsx" | "provider" | "demo" | "manual" | "
 export type DataSourceStatusValue = "demo" | "imported" | "configured" | "setup-required" | "missing-key" | "error" | "disabled" | "stale" | "stale-data";
 export type MarketDataStatusValue = "not configured" | "configured-not-connected" | "live-ready" | "mock/sample mode" | "connected" | "cached" | "partial data" | "rate limited" | "error" | "stale data" | "disabled";
 export type DataModeLabel = "Sample" | "Imported" | "Live" | "Cached" | "Stale" | "Error" | "Not configured" | "No data loaded";
+export type SourceHistoryEventType = "portfolio_import" | "provider_sync" | "market_data_refresh" | "backup_restore" | "sample_load" | "portfolio_reset";
+export type SourceHistoryStatus = "success" | "warning" | "error" | "info";
 export type EvidenceGrade = "A" | "B" | "C" | "D" | "F";
 export type AlertSeverity = "info" | "watch" | "warning" | "critical" | "low" | "medium" | "high" | "positive";
 export type ActionCategory = "Critical Review" | "Review" | "Monitor" | "Positive Signal" | "Log Only" | "Ignore";
@@ -888,6 +890,30 @@ export interface DataSourceStatus {
   warnings: string[];
 }
 
+export interface SourceHistoryEvent {
+  id: string;
+  type: SourceHistoryEventType;
+  label: string;
+  sourceType: string;
+  sourceMode?: string;
+  dataMode?: string;
+  timestamp: string;
+  status: SourceHistoryStatus;
+  detail?: string;
+  provider?: string;
+  providerStatus?: string;
+  fileName?: string;
+  rowsParsed?: number;
+  acceptedRows?: number;
+  reviewRows?: number;
+  skippedRows?: number;
+  holdingsCount?: number;
+  accountsCount?: number;
+  totalMarketValue?: number;
+  tickersCount?: number;
+  activePortfolioSource?: boolean;
+}
+
 export interface LocalDataBundle {
   schemaVersion: number;
   generatedAt: string;
@@ -903,4 +929,5 @@ export interface LocalDataBundle {
   externalSignals?: ExternalSignal[];
   alerts: Alert[];
   dataSources: DataSourceStatus[];
+  sourceHistory?: SourceHistoryEvent[];
 }

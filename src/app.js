@@ -96,6 +96,15 @@ import { APP_ROUTES as routes, ROUTE_ALIASES as routeAliases, routeFromHashValue
 import { normalizeSeekingAlphaWorkbook } from "./seekingAlphaWorkbook.js";
 import { buildSignalReviewRows, filterSignalReviewRows } from "./signalReview.js";
 import {
+  SOURCE_HISTORY_EVENT_TYPES,
+  appendSourceHistoryEvent,
+  buildSourceHistoryEvent,
+  normalizeSourceHistory,
+  sourceHistoryEventFromImportReport,
+  sourceHistoryEventFromMarketDataStatus,
+  sourceHistoryEventFromProviderSync
+} from "./sourceHistory.js";
+import {
   buildDashboardStateBackupPayload,
   buildDashboardStateRestorePreview,
   parseDashboardStateBackupJson,
@@ -139,6 +148,7 @@ const targetAllocationsKey = "growthDashboardTargetAllocations";
 const alertStateKey = "growthDashboardAlertState";
 const alertThresholdsKey = "growthDashboardAlertThresholds";
 const latestImportReportKey = "growthDashboardLatestImportReport";
+const sourceHistoryKey = "growthDashboardSourceHistory";
 const politicianTradesKey = "growthDashboardPoliticianTrades";
 const politicianTradeImportReportKey = "growthDashboardPoliticianTradeImportReport";
 const redditMentionsKey = "growthDashboardRedditMentions";
@@ -240,6 +250,7 @@ const state = {
   alertState: loadAlertState(),
   alertThresholds: loadAlertThresholds(),
   latestImportReport: loadLatestImportReport(),
+  sourceHistory: loadSourceHistory(),
   politicianTrades: loadPoliticianTrades(localStorage, politicianTradesKey),
   politicianTradeImportReport: loadPoliticianTradeImportReport(),
   redditMentions: loadRedditMentions(localStorage, redditMentionsKey),
@@ -576,6 +587,24 @@ function saveLatestImportReport() {
   } else {
     safeRemoveLocalStorage(latestImportReportKey);
   }
+}
+
+function loadSourceHistory() {
+  try {
+    return normalizeSourceHistory(JSON.parse(localStorage.getItem(sourceHistoryKey)) || []);
+  } catch {
+    return [];
+  }
+}
+
+function saveSourceHistory() {
+  state.sourceHistory = normalizeSourceHistory(state.sourceHistory);
+  safeSetLocalStorage(sourceHistoryKey, JSON.stringify(state.sourceHistory));
+}
+
+function recordSourceHistoryEvent(event) {
+  state.sourceHistory = appendSourceHistoryEvent(state.sourceHistory, event);
+  saveSourceHistory();
 }
 
 function loadPoliticianTradeImportReport() {
@@ -962,6 +991,7 @@ function render() {
     portfolioStatus,
     portfolioDataQuality,
     latestImportReport: state.latestImportReport,
+    sourceHistory: state.sourceHistory,
     fidelityStatus: state.fidelityStatus,
     seekingAlphaStatus: state.seekingAlphaStatus,
     providerReadiness: state.providerReadiness,
@@ -1781,6 +1811,14 @@ async function applyPendingPortfolioImport() {
   state.fidelityStatus = applied.fidelityStatus;
   saveLatestImportReport();
   saveFidelityStatus();
+  recordSourceHistoryEvent(sourceHistoryEventFromImportReport(applied.importReport, {
+    provider: "Fidelity",
+    sourceType: pendingCsvImport.provider || "local-file",
+    sourceMode: "imported",
+    dataMode: "Imported",
+    fileName: pendingCsvImport.fileName,
+    activePortfolioSource: true
+  }));
   renderFidelityStatus();
   pendingCsvImport = null;
   showImportStatus({ ...result, importReport: applied.importReport }, { persist: false, render: false, applied: true });
@@ -1982,6 +2020,7 @@ function dashboardStateBackupSlice() {
     eventCalendarImportReport: state.eventCalendarImportReport,
     quantScoreHistory: state.quantScoreHistory,
     latestImportReport: state.latestImportReport,
+    sourceHistory: state.sourceHistory,
     accountScope: state.accountScope,
     marketDataLiveMode: state.marketDataLiveMode
   };
@@ -2044,6 +2083,20 @@ function applyPendingStateRestore() {
   }
   try {
     applyImportedState(pendingStateRestore.payload);
+    recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.BACKUP_RESTORE, {
+      label: "Dashboard backup restored",
+      sourceType: "local-backup",
+      sourceMode: "Imported",
+      dataMode: "Imported",
+      status: "success",
+      detail: "Local dashboard backup restored. Provider connections must be revalidated before treating them as live.",
+      acceptedRows: state.holdings.length,
+      holdingsCount: state.holdings.length,
+      accountsCount: new Set(state.holdings.map((holding) => holding.account).filter(Boolean)).size,
+      totalMarketValue: state.holdings.reduce((sum, holding) => sum + (Number(holding.marketValue) || 0), 0),
+      tickersCount: new Set(state.holdings.map((holding) => holding.ticker).filter(Boolean)).size,
+      activePortfolioSource: state.holdings.length > 0
+    }));
     pendingStateRestore = null;
     renderStateRestorePreview(null);
     showStateStatus("State JSON restored and saved locally. Provider statuses are disconnected until revalidated.", "success");
@@ -2128,6 +2181,15 @@ function clearPortfolioData() {
   saveFidelityStatus();
   saveQuantScoreHistory();
   saveAccountScope();
+  recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PORTFOLIO_RESET, {
+    label: "Portfolio reset",
+    sourceType: "local-reset",
+    sourceMode: "No data loaded",
+    dataMode: "No data loaded",
+    status: "info",
+    detail: "Active portfolio holdings, import report, alerts, and market-data snapshot were cleared locally.",
+    activePortfolioSource: false
+  }));
   showStateStatus("Portfolio holdings cleared locally. Watchlist, journal, settings, and provider placeholders were kept.", "success");
   renderFidelityStatus();
   render();
@@ -2168,6 +2230,7 @@ function applyImportedState(payload) {
   state.eventCalendar = Array.isArray(payload.eventCalendar) ? normalizeCalendarEvents(payload.eventCalendar) : loadEventCalendar();
   state.eventCalendarImportReport = safeObject(payload.eventCalendarImportReport, null);
   state.quantScoreHistory = normalizeQuantScoreHistory(payload.quantScoreHistory || []);
+  state.sourceHistory = normalizeSourceHistory(Array.isArray(payload.sourceHistory) ? payload.sourceHistory : state.sourceHistory || []);
   state.marketDataLiveMode = normalizeMarketDataLiveMode(payload.marketDataLiveMode || state.marketDataLiveMode || {});
   state.marketDataSnapshot = null;
   latestTickerSignals = [];
@@ -2196,6 +2259,7 @@ function applyImportedState(payload) {
   saveEventCalendar();
   saveEventCalendarImportReport();
   saveQuantScoreHistory();
+  saveSourceHistory();
   saveAccountScope();
   saveMarketDataLiveMode();
 }
@@ -2251,6 +2315,21 @@ function importPoliticianTradeFileFromInput(file) {
       : result.partial
       ? `Imported ${result.tradesImported} rows, rejected ${result.rejectedRows.length}. Review rejected rows below.`
       : `Politician trade import failed: ${result.validation.errors[0] || "No valid rows found."}`;
+    recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+      label: "Federal disclosure import",
+      sourceType: "politician-trades",
+      sourceMode: "Imported",
+      dataMode: "Imported",
+      status: result.ok ? "success" : result.partial ? "warning" : "error",
+      provider: "Federal disclosures",
+      providerStatus: result.mode || "local-file",
+      fileName: result.fileName || file.name,
+      detail: message,
+      rowsParsed: result.rowsParsed,
+      acceptedRows: result.tradesImported,
+      reviewRows: result.rejectedRows?.length || 0,
+      tickersCount: result.tickersDetected?.length || 0
+    }));
     showPoliticianTradeStatus(message, tone);
     render();
   };
@@ -2308,6 +2387,20 @@ async function refreshPoliticianTradesFromProvider({ force = false, renderAfter 
     };
     savePoliticianTrades(localStorage, state.politicianTrades, politicianTradesKey);
     savePoliticianTradeImportReport();
+    recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+      label: "Federal disclosure provider sync",
+      sourceType: "politician-trades",
+      sourceMode: payload.liveProviderCalls ? "Live" : payload.dataFreshness || "Cached",
+      dataMode: payload.dataFreshness || (payload.liveProviderCalls ? "Live" : "Cached"),
+      status: payload.partial ? "warning" : "success",
+      provider: payload.providerLabel || "Federal disclosure provider",
+      providerStatus: payload.dataFreshness || payload.status || "synced",
+      detail: payload.warnings?.[0] || "Public disclosure rows synced through the local backend.",
+      rowsParsed: state.politicianTradeImportReport.rowsParsed,
+      acceptedRows: state.politicianTradeImportReport.tradesImported,
+      reviewRows: state.politicianTradeImportReport.rejectedRows.length,
+      tickersCount: state.politicianTradeImportReport.tickersDetected.length
+    }));
     showPoliticianTradeStatus(`Synced ${payload.records.length} public politician trade disclosure row${payload.records.length === 1 ? "" : "s"}.`, "success");
     if (renderAfter) render();
     return payload;
@@ -2666,6 +2759,21 @@ function importCalendarEventFileFromInput(file) {
       : result.partial
       ? `Imported ${result.eventsImported} calendar event${result.eventsImported === 1 ? "" : "s"}; ${result.rejectedRows.length} row${result.rejectedRows.length === 1 ? "" : "s"} need review.`
       : `Calendar import failed: ${result.validation?.errors?.[0] || result.rejectedRows?.[0]?.reasons?.[0] || "No valid rows found."}`;
+    recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+      label: "Calendar event import",
+      sourceType: "event-calendar",
+      sourceMode: "Imported",
+      dataMode: "Imported",
+      status: result.ok ? "success" : result.partial ? "warning" : "error",
+      provider: "Event calendar",
+      providerStatus: result.mode || "local-file",
+      fileName: result.fileName || file.name,
+      detail: message,
+      rowsParsed: result.rowsParsed,
+      acceptedRows: result.eventsImported,
+      reviewRows: result.rejectedRows?.length || 0,
+      tickersCount: result.tickersDetected?.length || 0
+    }));
     showCalendarStatus(message, tone);
     render();
   };
@@ -2942,6 +3050,23 @@ function mergeSeekingAlphaRecords(records, mode) {
     insights
   };
   saveSeekingAlphaStatus();
+  recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+    label: mode === "demo" ? "Seeking Alpha sample loaded" : "Seeking Alpha ratings imported",
+    sourceType: "seeking-alpha",
+    sourceMode: mode === "demo" ? "Sample" : "Imported",
+    dataMode: mode === "demo" ? "Sample" : "Imported",
+    status: "success",
+    provider: "Seeking Alpha",
+    providerStatus: mode,
+    detail: mode === "demo"
+      ? "Sample Premium ratings loaded locally."
+      : "Authorized Premium ratings import enriched matching holdings locally.",
+    acceptedRows: records.length,
+    holdingsCount: matchedTickers.length,
+    skippedRows: unmatchedTickers.length,
+    tickersCount: enrichment.size,
+    activePortfolioSource: false
+  }));
   renderSeekingAlphaInsights(insights);
   render();
 }
@@ -3035,6 +3160,21 @@ function importRedditMentionFileFromInput(file) {
       } else {
         showRedditImportStatus(`Reddit JSON import failed: ${report.rejectedRows[0]?.reason || "No usable mentions found."}`, "error");
       }
+      recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+        label: "Reddit JSON import",
+        sourceType: "reddit",
+        sourceMode: "Imported",
+        dataMode: "Imported",
+        status: report.ok ? "success" : report.partial ? "warning" : "error",
+        provider: "Reddit",
+        providerStatus: report.mode || "local-json",
+        fileName: report.fileName || file.name,
+        detail: report.warnings?.[0] || report.rejectedRows?.[0]?.reason || "Local Reddit-like JSON imported.",
+        rowsParsed: report.rowsParsed,
+        acceptedRows: report.mentionsImported,
+        reviewRows: report.rejectedRows?.length || 0,
+        tickersCount: report.tickersDetected?.length || 0
+      }));
       render();
     } catch (error) {
       showRedditImportStatus(`Reddit JSON import failed: ${safeErrorMessage(error)}`, "error");
@@ -3091,6 +3231,20 @@ async function refreshRedditMentionsFromProvider({ force = false, renderAfter = 
       };
       saveRedditMentions(localStorage, state.redditMentions, redditMentionsKey);
       saveRedditImportReport();
+      recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+        label: "Reddit provider sync",
+        sourceType: "reddit",
+        sourceMode: "Live",
+        dataMode: state.redditImportReport.dataFreshness || "Live",
+        status: state.redditImportReport.partial ? "warning" : "success",
+        provider: state.redditImportReport.providerLabel,
+        providerStatus: state.redditImportReport.status,
+        detail: state.redditImportReport.warnings?.[0] || "Reddit mentions synced through the local backend.",
+        rowsParsed: state.redditImportReport.rowsParsed,
+        acceptedRows: state.redditImportReport.mentionsImported,
+        reviewRows: state.redditImportReport.rejectedRows.length,
+        tickersCount: state.redditImportReport.tickersDetected.length
+      }));
       showRedditImportStatus(`Synced ${state.redditMentions.length} Reddit mention row${state.redditMentions.length === 1 ? "" : "s"} from configured subreddits.`, "success");
     } else {
       state.redditImportReport = {
@@ -3113,6 +3267,18 @@ async function refreshRedditMentionsFromProvider({ force = false, renderAfter = 
         liveProviderCalls: Boolean(payload.liveProviderCalls)
       };
       saveRedditImportReport();
+      recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+        label: "Reddit provider sync",
+        sourceType: "reddit",
+        sourceMode: state.redditImportReport.dataFreshness || "Error",
+        dataMode: state.redditImportReport.dataFreshness || "Error",
+        status: "error",
+        provider: state.redditImportReport.providerLabel,
+        providerStatus: state.redditImportReport.status,
+        detail: state.redditImportReport.warnings?.[0] || "No whitelisted Reddit ticker mentions were returned.",
+        rowsParsed: state.redditImportReport.rowsParsed,
+        reviewRows: state.redditImportReport.rejectedRows.length
+      }));
       showRedditImportStatus(payload.warnings?.[0] || "No whitelisted Reddit ticker mentions were returned.", payload.liveProviderCalls ? "pending" : "error");
     }
   } catch (error) {
@@ -3167,6 +3333,20 @@ async function refreshXUpdatesFromProvider({ force = false, renderAfter = true }
       };
       saveXUpdates(localStorage, state.xUpdates, xUpdatesKey);
       saveXUpdateImportReport();
+      recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+        label: "X/social provider sync",
+        sourceType: "x-social",
+        sourceMode: "Live",
+        dataMode: state.xUpdateImportReport.dataFreshness || "Live",
+        status: state.xUpdateImportReport.partial ? "warning" : "success",
+        provider: state.xUpdateImportReport.providerLabel,
+        providerStatus: state.xUpdateImportReport.status,
+        detail: state.xUpdateImportReport.warnings?.[0] || "X/social updates synced through the local backend.",
+        rowsParsed: state.xUpdateImportReport.rowsParsed,
+        acceptedRows: state.xUpdateImportReport.updatesImported,
+        reviewRows: state.xUpdateImportReport.rejectedRows.length,
+        tickersCount: state.xUpdateImportReport.tickersDetected.length
+      }));
       showXUpdateStatus(`Synced ${state.xUpdates.length} X/social update row${state.xUpdates.length === 1 ? "" : "s"} from the configured recent-search query.`, "success");
     } else {
       state.xUpdateImportReport = {
@@ -3188,6 +3368,18 @@ async function refreshXUpdatesFromProvider({ force = false, renderAfter = true }
         liveProviderCalls: Boolean(payload.liveProviderCalls)
       };
       saveXUpdateImportReport();
+      recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.PROVIDER_SYNC, {
+        label: "X/social provider sync",
+        sourceType: "x-social",
+        sourceMode: state.xUpdateImportReport.dataFreshness || "Error",
+        dataMode: state.xUpdateImportReport.dataFreshness || "Error",
+        status: "error",
+        provider: state.xUpdateImportReport.providerLabel,
+        providerStatus: state.xUpdateImportReport.status,
+        detail: state.xUpdateImportReport.warnings?.[0] || "No whitelisted X/social ticker updates were returned.",
+        rowsParsed: state.xUpdateImportReport.rowsParsed,
+        reviewRows: state.xUpdateImportReport.rejectedRows.length
+      }));
       showXUpdateStatus(payload.warnings?.[0] || "No whitelisted X/social ticker updates were returned.", payload.liveProviderCalls ? "pending" : "error");
     }
   } catch (error) {
@@ -3700,6 +3892,23 @@ async function syncPlaidFidelityHoldings() {
     };
     saveFidelityStatus();
     saveLatestImportReport();
+    recordSourceHistoryEvent(sourceHistoryEventFromProviderSync({
+      provider: "Plaid Fidelity",
+      sourceType: "plaid",
+      sourceMode: "Live",
+      dataMode: "Live",
+      timestamp: state.fidelityStatus.lastSync,
+      status: "success",
+      providerStatus: state.fidelityStatus.mode,
+      detail: state.fidelityStatus.message,
+      rowsParsed: state.latestImportReport.rowsParsed,
+      acceptedRows: records.length,
+      holdingsCount: records.length,
+      accountsCount: accounts.size,
+      totalMarketValue,
+      tickersCount: state.latestImportReport.tickersDetected.length,
+      activePortfolioSource: true
+    }));
     if (canRunMarketDataLiveRefresh()) {
       await refreshMarketDataSnapshot({ renderAfter: false, reason: "live-mode" });
     }
@@ -3931,6 +4140,20 @@ function loadSampleData() {
   saveEventCalendarImportReport();
   saveQuantScoreHistory();
   saveAccountScope();
+  recordSourceHistoryEvent(buildSourceHistoryEvent(SOURCE_HISTORY_EVENT_TYPES.SAMPLE_LOAD, {
+    label: "Sample portfolio loaded",
+    sourceType: "sample-data",
+    sourceMode: "Sample",
+    dataMode: "Sample",
+    status: "info",
+    detail: "Sample portfolio loaded for workflow testing. Import a Fidelity CSV before relying on real totals.",
+    acceptedRows: state.holdings.length,
+    holdingsCount: state.holdings.length,
+    accountsCount: new Set(state.holdings.map((holding) => holding.account).filter(Boolean)).size,
+    totalMarketValue: state.holdings.reduce((sum, holding) => sum + (Number(holding.marketValue) || 0), 0),
+    tickersCount: new Set(state.holdings.map((holding) => holding.ticker).filter(Boolean)).size,
+    activePortfolioSource: true
+  }));
   showImportStatus({ validation: { ok: true }, summary: { message: "Sample data loaded. Import a Fidelity CSV to use Tucker’s real portfolio." } });
   render();
 }
@@ -4089,6 +4312,13 @@ async function refreshMarketDataSnapshot({ renderAfter = true, reason = "manual"
       });
       saveMarketDataLiveMode();
     }
+  }
+  if (reason !== "live-mode") {
+    recordSourceHistoryEvent(sourceHistoryEventFromMarketDataStatus(state.marketDataSnapshot?.status || state.marketDataSnapshot || {}, {
+      provider: state.marketDataSnapshot?.providerLabel || state.marketDataSnapshot?.providerId || state.providerReadiness?.marketDataConfig?.selectedLabel || "Market data",
+      tickers,
+      tickersCount: tickers.length
+    }));
   }
   if (renderAfter) render();
 }
