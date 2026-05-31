@@ -168,6 +168,7 @@ const seekingAlphaEnrichmentFields = [
   "quantRating",
   "authorRating",
   "wallStreetRating",
+  "saAnalystsRating",
   "value",
   "valueGrade",
   "valuationGrade",
@@ -1371,12 +1372,15 @@ function showImportStatus(result, options = {}) {
   }
   const health = result.importReport?.health;
   const portfolioImport = isPortfolioImport(result);
+  const seekingAlphaImport = isSeekingAlphaImport(result);
   const friendly = portfolioImport ? friendlyImportHealth(result.importReport) : null;
   const holdingRowsNeedingReview = countHoldingRowsNeedingReview(result?.importReport);
-  status.textContent = options.preview && canApplyPortfolioImport(result)
+  status.textContent = options.preview && portfolioImport && canApplyPortfolioImport(result)
     ? holdingRowsNeedingReview > 0
       ? `Import preview ready with row review. ${result.records?.length || 0} accepted holding${(result.records?.length || 0) === 1 ? "" : "s"} can be applied; ${holdingRowsNeedingReview} row${holdingRowsNeedingReview === 1 ? "" : "s"} will stay skipped until fixed.`
       : `Import preview ready. Review ${result.records?.length || 0} holding${(result.records?.length || 0) === 1 ? "" : "s"} below, then apply when it looks right.`
+    : options.preview && seekingAlphaImport && canApplySeekingAlphaImport(result)
+    ? `Seeking Alpha preview ready. Review ${result.records?.length || 0} Premium rating row${(result.records?.length || 0) === 1 ? "" : "s"} below, then apply ratings when they look right.`
     : friendly?.message || health?.message || result.summary?.message || "Import complete.";
   const tone = friendly?.tone || (health?.tone === "error" || result.validation?.ok === false ? "error" : "success");
   status.className = `import-status ${tone}`;
@@ -1389,8 +1393,19 @@ function isPortfolioImport(result) {
   return isPortfolioImportResult(result);
 }
 
+function isSeekingAlphaImport(result = {}) {
+  return Boolean(
+    result.importReport?.provider === "seekingAlpha" ||
+    (!result.fidelityRecords?.length && (result.seekingAlphaRecords?.length || result.importReport?.ratingsImported))
+  );
+}
+
 function canApplyPortfolioImport(result) {
   return canApplyPortfolioImportResult(result);
+}
+
+function canApplySeekingAlphaImport(result) {
+  return isSeekingAlphaImport(result) && result.validation?.ok && (result.records || []).length > 0;
 }
 
 function friendlyImportHealth(report, options = {}) {
@@ -1455,26 +1470,45 @@ function renderImportDebugPanel(result, options = {}) {
   const mappingRows = Object.entries(report.columnMapping || {})
     .map(([field, column]) => `<span><b>${escapeHtml(field)}</b> ${escapeHtml(column || "not mapped")}</span>`)
     .join("");
-  const canApply = options.preview && canApplyPortfolioImport(result);
+  const seekingAlphaImport = isSeekingAlphaImport(result);
+  const portfolioImport = isPortfolioImport(result);
+  const canApply = options.preview && (
+    seekingAlphaImport ? canApplySeekingAlphaImport(result) : canApplyPortfolioImport(result)
+  );
   const changeSummary = options.applied ? report.changeSummary : null;
   const holdingRowsNeedingReview = countHoldingRowsNeedingReview(report);
-  const successCta = isPortfolioImport(result) && !canApply
+  const successCta = portfolioImport && !canApply
     ? `
       <div class="connector-actions">
         <a class="button-link primary" href="#overview">Review Overview</a>
         <a class="button-link" href="#holdings">View Holdings</a>
       </div>
     `
+    : seekingAlphaImport && !canApply && options.applied
+    ? `
+      <div class="connector-actions">
+        <a class="button-link primary" href="#data-sources">Review Data Sources</a>
+        <a class="button-link" href="#market-intelligence">Open Market Intelligence</a>
+      </div>
+    `
     : "";
   const friendly = canApply
-    ? {
+    ? seekingAlphaImport
+      ? {
+          status: "Premium ratings preview ready",
+          tone: report.staleRows?.length ? "warning" : "success",
+          message: report.staleRows?.length
+            ? `${result.records?.length || 0} accepted rating row${(result.records?.length || 0) === 1 ? "" : "s"} can be applied. ${report.staleRows.length} row${report.staleRows.length === 1 ? "" : "s"} look stale by rating date.`
+            : "Review the normalized Premium ratings below. Nothing changes until you apply ratings."
+        }
+      : {
         status: holdingRowsNeedingReview > 0 ? "Preview ready with row review" : "Preview ready",
         tone: holdingRowsNeedingReview > 0 ? "warning" : "success",
         message: holdingRowsNeedingReview > 0
           ? `${result.records?.length || 0} accepted holding${(result.records?.length || 0) === 1 ? "" : "s"} can be applied now. ${holdingRowsNeedingReview} row${holdingRowsNeedingReview === 1 ? "" : "s"} will remain skipped for review.`
           : "Review the normalized holdings below. Nothing changes until you apply this import."
       }
-    : isPortfolioImport(result) ? friendlyImportHealth(report, { applied: options.applied }) : report.health;
+    : portfolioImport ? friendlyImportHealth(report, { applied: options.applied }) : report.health;
   const skippedRows = skippedNonHoldingRows(report);
   const reviewRows = (report.rejectedRows || []).filter((row) => row.classification !== "non-holding row");
   const rejectedRows = reviewRows.slice(0, 6)
@@ -1500,7 +1534,13 @@ function renderImportDebugPanel(result, options = {}) {
     .map((warning) => `<li>${escapeHtml(warning)}</li>`)
     .join("");
   const duplicates = (report.duplicateRows || [])
-    .map((row) => `<li>${escapeHtml(row.ticker || "Unknown")} in ${escapeHtml(row.account || "Unassigned")} merged from row${(row.rowNumbers || []).length === 1 ? "" : "s"} ${escapeHtml((row.rowNumbers || []).join(", ") || "unknown")}.</li>`)
+    .map((row) => seekingAlphaImport
+      ? `<li>${escapeHtml(row.ticker || "Unknown")}: ${escapeHtml(row.reason || "duplicate ticker merged")} from row${(row.rowNumbers || []).length === 1 ? "" : "s"} ${escapeHtml((row.rowNumbers || []).join(", ") || "unknown")}.</li>`
+      : `<li>${escapeHtml(row.ticker || "Unknown")} in ${escapeHtml(row.account || "Unassigned")} merged from row${(row.rowNumbers || []).length === 1 ? "" : "s"} ${escapeHtml((row.rowNumbers || []).join(", ") || "unknown")}.</li>`)
+    .join("");
+  const staleRows = (report.staleRows || [])
+    .slice(0, 8)
+    .map((row) => `<li>${escapeHtml(row.ticker || "Unknown")}: ${escapeHtml(row.date || "unknown date")} (${escapeHtml(row.daysOld || "?")} days old)</li>`)
     .join("");
   const expectedColumns = flattenExpectedColumns(report.expectedColumns)
     .filter((item) => item.required)
@@ -1520,7 +1560,7 @@ function renderImportDebugPanel(result, options = {}) {
       <div class="import-preview-card" role="${friendly?.tone === "error" ? "alert" : "region"}" aria-label="CSV import troubleshooting">
         <div>
           <b>${friendly?.tone === "error" ? "Import needs a fix" : "Rows need review before they can be imported"}</b>
-          <span>${missingHints ? "The parser could not confidently map every required Fidelity holdings column." : "Accepted holdings are safe to preview/apply; the rows below were left out for review."}</span>
+          <span>${missingHints ? `The parser could not confidently map every required ${seekingAlphaImport ? "Seeking Alpha" : "Fidelity holdings"} column.` : `Accepted ${seekingAlphaImport ? "ratings" : "holdings"} are safe to preview/apply; the rows below were left out for review.`}</span>
         </div>
         ${visibleReviewRows ? `<p><b>First rows needing review</b></p><ul>${visibleReviewRows}</ul>` : ""}
         ${missingHints ? `<p><b>Columns to check</b></p><ul>${missingHints}</ul>` : ""}
@@ -1538,11 +1578,11 @@ function renderImportDebugPanel(result, options = {}) {
     <div class="import-debug-grid">
       <div><b>File</b><span>${escapeHtml(report.fileName || "Local CSV")}</span></div>
       <div><b>Rows parsed</b><span>${escapeHtml(report.rowsParsed)}</span></div>
-      <div><b>Accepted rows</b><span>${escapeHtml((result.records || []).length)}</span></div>
-      <div><b>Holdings imported</b><span>${escapeHtml(report.holdingsImported)}</span></div>
+      <div><b>${seekingAlphaImport ? "Accepted ratings" : "Accepted rows"}</b><span>${escapeHtml((result.records || []).length)}</span></div>
+      <div><b>${seekingAlphaImport ? "Ratings imported" : "Holdings imported"}</b><span>${escapeHtml(seekingAlphaImport ? report.ratingsImported || report.holdingsImported : report.holdingsImported)}</span></div>
       <div><b>Rows needing review</b><span>${escapeHtml(holdingRowsNeedingReview)}</span></div>
-      <div><b>Skipped non-holding rows</b><span>${escapeHtml(skippedRows.length)}</span></div>
-      <div><b>Total market value</b><span>${formatCurrency(report.totalMarketValue)}</span></div>
+      <div><b>${seekingAlphaImport ? "Stale rows" : "Skipped non-holding rows"}</b><span>${escapeHtml(seekingAlphaImport ? report.staleRows?.length || 0 : skippedRows.length)}</span></div>
+      <div><b>${seekingAlphaImport ? "Source mode" : "Total market value"}</b><span>${seekingAlphaImport ? "Imported/Pasted" : formatCurrency(report.totalMarketValue)}</span></div>
     </div>
     ${changeSummary ? renderImportChangeSummary(changeSummary) : ""}
     ${troubleshooting}
@@ -1550,12 +1590,13 @@ function renderImportDebugPanel(result, options = {}) {
     <details>
       <summary>Technical import details</summary>
       <p><b>Detected columns:</b> ${escapeHtml((report.detectedColumns || []).join(", ") || "none")}</p>
-      ${expectedColumns ? `<p><b>Expected Fidelity holdings columns</b></p><ul>${expectedColumns}</ul>` : ""}
+      ${expectedColumns ? `<p><b>Expected ${seekingAlphaImport ? "Seeking Alpha" : "Fidelity holdings"} columns</b></p><ul>${expectedColumns}</ul>` : ""}
       <p><b>Tickers detected:</b> ${escapeHtml((report.tickersDetected || []).join(", ") || "none")}</p>
       <p><b>Accounts detected:</b> ${escapeHtml((report.accountsDetected || []).join(", ") || "none")}</p>
       <div class="import-mapping-used">${mappingRows || "<span>No automatic mapping detected.</span>"}</div>
       ${warnings ? `<p><b>Mapping warnings</b></p><ul>${warnings}</ul>` : ""}
-      ${duplicates ? `<p><b>Duplicate ticker/account rows merged</b></p><ul>${duplicates}</ul>` : ""}
+      ${duplicates ? `<p><b>${seekingAlphaImport ? "Duplicate ticker ratings merged" : "Duplicate ticker/account rows merged"}</b></p><ul>${duplicates}</ul>` : ""}
+      ${staleRows ? `<p><b>Stale Seeking Alpha rating dates</b></p><ul>${staleRows}</ul>` : ""}
       ${missing ? `<p><b>Missing required fields</b></p><ul>${missing}</ul>` : ""}
       ${skippedRowDetails ? `<p><b>Skipped non-holding rows</b> <span>Fidelity footer, disclaimer, and account-container rows are harmless when holdings imported successfully.</span></p><ul>${skippedRowDetails}${skippedRowsMore}</ul>` : ""}
       ${rejectedRows ? `<p><b>Rows needing review</b></p><ul>${rejectedRows}${reviewRowsMore}</ul>` : ""}
@@ -1618,6 +1659,7 @@ function renderImportChangeList(title, rows = [], emptyText = "No changes.") {
 }
 
 function renderImportPreview(result) {
+  if (isSeekingAlphaImport(result)) return renderSeekingAlphaImportPreview(result);
   const holdingRowsNeedingReview = countHoldingRowsNeedingReview(result.importReport);
   const accounts = result.importReport?.accountsDetected?.length || 0;
   const totalValue = result.importReport?.totalMarketValue || 0;
@@ -1669,6 +1711,59 @@ function renderImportPreview(result) {
   `;
 }
 
+function renderSeekingAlphaImportPreview(result) {
+  const report = result.importReport || {};
+  const rows = (result.records || []).slice(0, 10)
+    .map((record) => `
+      <tr>
+        <td>${escapeHtml(record.ticker || "UNKNOWN")}</td>
+        <td>${escapeHtml(record.company || "Unknown")}</td>
+        <td class="num">${formatNumber(record.quant)}</td>
+        <td>${escapeHtml(record.quantRating || record.wallStreetRating || record.authorRating || "Not provided")}</td>
+        <td>${escapeHtml(record.value ?? record.valuationGrade ?? "—")}</td>
+        <td>${escapeHtml(record.growth ?? record.growthGrade ?? "—")}</td>
+        <td>${escapeHtml(record.momentum ?? record.momentumGrade ?? "—")}</td>
+        <td>${escapeHtml(record.saUpdatedAt || "No date")}</td>
+      </tr>
+    `)
+    .join("");
+  const remaining = Math.max(0, (result.records || []).length - 10);
+  const stale = report.staleRows?.length || 0;
+
+  return `
+    <div class="import-preview-card" role="region" aria-label="Seeking Alpha import preview">
+      <div>
+        <b>Preview Premium ratings before applying</b>
+        <span>This updates local rating fields on matching holdings only after you choose Apply ratings. It never stores Seeking Alpha credentials or labels this data Live.</span>
+        <span>${result.records?.length || 0} rating row${(result.records?.length || 0) === 1 ? "" : "s"} · ${stale} stale row${stale === 1 ? "" : "s"} · source stays Imported/Pasted</span>
+      </div>
+      <div class="table-wrap preview-table-wrap">
+        <table class="preview-table">
+          <caption>First accepted rows from the Seeking Alpha Premium ratings preview</caption>
+          <thead>
+            <tr>
+              <th scope="col">Ticker</th>
+              <th scope="col">Company</th>
+              <th scope="col" class="num">Quant</th>
+              <th scope="col">Rating</th>
+              <th scope="col">Value</th>
+              <th scope="col">Growth</th>
+              <th scope="col">Momentum</th>
+              <th scope="col">Rating date</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="8">No previewable ratings found.</td></tr>'}</tbody>
+        </table>
+      </div>
+      ${remaining ? `<p class="section-note">${remaining} more rating row${remaining === 1 ? "" : "s"} will be imported.</p>` : ""}
+      <div class="connector-actions">
+        <button type="button" class="primary" data-import-action="apply-preview">Apply ratings</button>
+        <button type="button" data-import-action="cancel-preview">Cancel preview</button>
+      </div>
+    </div>
+  `;
+}
+
 function focusImportStatus() {
   const status = $("importStatus");
   if (!status) return;
@@ -1696,9 +1791,14 @@ function renderManualMappingControls(report) {
         ["ticker", "Ticker / Symbol"],
         ["company", "Company"],
         ["quant", "Quant rating"],
+        ["value", "Valuation grade"],
         ["growth", "Growth grade"],
+        ["profitability", "Profitability grade"],
         ["momentum", "Momentum grade"],
         ["revisions", "EPS revisions grade"],
+        ["wallStreetRating", "Wall Street rating"],
+        ["saAnalystsRating", "SA Analysts rating"],
+        ["updatedAt", "Rating date"],
         ["nextEarnings", "Next earnings"]
       ];
   const columns = report.detectedColumns || [];
@@ -1718,7 +1818,7 @@ function renderManualMappingControls(report) {
   return `
     <details class="manual-mapping">
       <summary>Map columns</summary>
-      <p>Use this when the automatic detector picked the wrong column or could not find your Fidelity headers.</p>
+      <p>Use this when the automatic detector picked the wrong column or could not find your ${pendingCsvImport?.provider === "seekingAlpha" ? "Seeking Alpha rating" : "Fidelity holdings"} headers.</p>
       <div class="manual-mapping-grid">${selects}</div>
       <button type="button" class="primary" data-import-action="apply-mapping">Apply mapping and import</button>
     </details>
@@ -1743,17 +1843,18 @@ function applyManualImportMapping() {
   });
 
   if (result.validation.ok) {
-    const preview = buildPortfolioImportPreview(result, {
-      provider: pendingCsvImport.provider,
-      fileName: pendingCsvImport.fileName
-    });
+    const preview = pendingCsvImport.provider === "fidelity"
+      ? buildPortfolioImportPreview(result, {
+          provider: pendingCsvImport.provider,
+          fileName: pendingCsvImport.fileName
+        })
+      : null;
     pendingCsvImport.result = result;
     pendingCsvImport.preview = preview;
-    showImportStatus(result, { preview: pendingCsvImport.provider === "fidelity" && canApplyPortfolioImport(result), persist: false });
-    if (pendingCsvImport.provider !== "fidelity") {
-      mergeSeekingAlphaRecords(result.records, "csv-import");
-      showImportStatus(result);
-    }
+    showImportStatus(result, {
+      preview: pendingCsvImport.provider === "fidelity" ? canApplyPortfolioImport(result) : canApplySeekingAlphaImport(result),
+      persist: false
+    });
     return;
   }
   showImportStatus(result, { persist: false });
@@ -1801,6 +1902,56 @@ function cancelPendingPortfolioImport() {
     panel.innerHTML = "";
     panel.hidden = true;
   }
+}
+
+function applyPendingSeekingAlphaImport() {
+  if (!pendingCsvImport?.result) {
+    showImportStatus({ validation: { ok: false }, summary: { message: "No Seeking Alpha ratings preview is waiting to be applied." } });
+    return;
+  }
+  const result = pendingCsvImport.result;
+  if (!canApplySeekingAlphaImport(result)) {
+    showImportStatus(result, { persist: false });
+    return;
+  }
+  const mode = pendingCsvImport.mode || "csv-import";
+  mergeSeekingAlphaRecords(result.records, mode, {
+    fileName: pendingCsvImport.fileName,
+    importReport: result.importReport
+  });
+  pendingCsvImport = null;
+  showImportStatus(result, { persist: false, render: false, applied: true });
+  render();
+}
+
+function cancelPendingSeekingAlphaImport() {
+  pendingCsvImport = null;
+  const status = $("importStatus");
+  if (status) {
+    status.textContent = "Seeking Alpha ratings preview canceled. No rating fields were changed.";
+    status.className = "import-status pending";
+  }
+  const panel = $("importDebugPanel");
+  if (panel) {
+    panel.innerHTML = "";
+    panel.hidden = true;
+  }
+}
+
+function applyPendingImportPreview() {
+  if (pendingCsvImport?.provider === "seekingAlpha") {
+    applyPendingSeekingAlphaImport();
+    return;
+  }
+  applyPendingPortfolioImport();
+}
+
+function cancelPendingImportPreview() {
+  if (pendingCsvImport?.provider === "seekingAlpha") {
+    cancelPendingSeekingAlphaImport();
+    return;
+  }
+  cancelPendingPortfolioImport();
 }
 
 function parsePastedFidelityHoldings() {
@@ -1855,6 +2006,59 @@ function clearFidelityPaste() {
   }
 }
 
+function parsePastedSeekingAlphaRatings() {
+  const input = $("seekingAlphaPasteInput");
+  const value = String(input?.value || "").trim();
+  if (!value) {
+    showImportStatus({
+      validation: { ok: false },
+      summary: { message: "Paste Seeking Alpha rating rows before previewing." },
+      importReport: {
+        provider: "seekingAlpha",
+        fileName: "pasted-seeking-alpha-table",
+        detectedColumns: [],
+        rowsParsed: 0,
+        holdingsImported: 0,
+        ratingsImported: 0,
+        rejectedRows: [],
+        missingRequiredFields: [],
+        columnMapping: {},
+        totalMarketValue: 0,
+        accountsDetected: [],
+        tickersDetected: [],
+        health: { status: "Failed", tone: "error", message: "Paste Seeking Alpha rating rows before previewing." }
+      }
+    }, { persist: false });
+    return;
+  }
+  const adapters = globalThis.DataAdapters;
+  const looksJson = /^[\[{]/.test(value);
+  const result = buildCsvImportResult("seekingAlpha", value, adapters, {
+    fileName: looksJson ? "pasted-seeking-alpha-ratings.json" : "pasted-seeking-alpha-table.csv",
+    isJson: looksJson
+  });
+  pendingCsvImport = {
+    provider: "seekingAlpha",
+    fileName: looksJson ? "pasted-seeking-alpha-ratings.json" : "pasted-seeking-alpha-table.csv",
+    csv: value,
+    isJson: looksJson,
+    mode: "pasted",
+    result,
+    preview: null
+  };
+  showImportStatus(result, { preview: canApplySeekingAlphaImport(result), persist: false });
+}
+
+function clearSeekingAlphaPaste() {
+  const input = $("seekingAlphaPasteInput");
+  if (input) input.value = "";
+  const status = $("importStatus");
+  if (status) {
+    status.textContent = "Pasted Seeking Alpha rows cleared. No ratings were changed.";
+    status.className = "import-status pending";
+  }
+}
+
 function handleFidelityDrop(event) {
   const zone = $("fidelityDropZone");
   if (!zone) return;
@@ -1879,6 +2083,12 @@ function handleFidelityDropZoneKeydown(event) {
   if (!["Enter", " "].includes(event.key)) return;
   event.preventDefault();
   $("fidelityFile")?.click();
+}
+
+function handleSeekingAlphaFileZoneKeydown(event) {
+  if (!["Enter", " "].includes(event.key)) return;
+  event.preventDefault();
+  $("alphaFile")?.click();
 }
 
 function showFidelityStatus(message, tone = "pending") {
@@ -2916,7 +3126,7 @@ function mergeImportedRecords(importedRecords, options = {}) {
   if (options.render !== false) render();
 }
 
-function mergeSeekingAlphaRecords(records, mode) {
+function mergeSeekingAlphaRecords(records, mode, metadata = {}) {
   const enrichment = seekingAlphaEnrichmentByTicker(records);
   const holdingTickers = new Set(state.holdings.map((holding) => holding.ticker).filter(Boolean));
   const matchedTickers = [...enrichment.keys()].filter((ticker) => holdingTickers.has(ticker));
@@ -2932,18 +3142,38 @@ function mergeSeekingAlphaRecords(records, mode) {
   }));
   saveHoldings();
   const insights = buildSeekingAlphaInsights(records);
+  const report = metadata.importReport || {};
+  const staleRows = report.staleRows || [];
+  const importedMode = /csv|xlsx|json|import|pasted/i.test(String(mode || ""));
+  const sampleMode = /demo|sample/i.test(String(mode || ""));
   state.seekingAlphaStatus = {
-    connected: mode !== "demo",
+    connected: false,
     lastSync: new Date().toISOString(),
+    importedAt: new Date().toISOString(),
     mode,
+    fileName: metadata.fileName || report.fileName || "",
     records: records.length,
     matchedHoldings: matchedTickers.length,
     unmatchedTickers,
+    staleRows: staleRows.length,
+    dataFreshness: staleRows.length ? "stale" : sampleMode ? "sample" : importedMode ? "imported" : "not configured",
+    sourceMode: sampleMode ? "sample" : mode === "pasted" ? "pasted" : importedMode ? "imported" : "not configured",
+    message: seekingAlphaStatusMessage({ mode, records: records.length, matchedHoldings: matchedTickers.length, staleRows: staleRows.length }),
     insights
   };
   saveSeekingAlphaStatus();
   renderSeekingAlphaInsights(insights);
   render();
+}
+
+function seekingAlphaStatusMessage({ mode = "", records = 0, matchedHoldings = 0, staleRows = 0 } = {}) {
+  const label = /demo|sample/i.test(mode)
+    ? "Sample Seeking Alpha Premium data loaded"
+    : /pasted/i.test(mode)
+    ? "Pasted Seeking Alpha Premium ratings loaded"
+    : "Imported Seeking Alpha Premium ratings loaded";
+  const staleText = staleRows ? ` ${staleRows} stale rating row${staleRows === 1 ? "" : "s"} need review.` : "";
+  return `${label}: ${records} record${records === 1 ? "" : "s"}; ${matchedHoldings} matched active holding${matchedHoldings === 1 ? "" : "s"}.${staleText}`;
 }
 
 function seekingAlphaEnrichmentByTicker(records = []) {
@@ -2966,11 +3196,15 @@ function importFile(file, provider) {
   const reader = new FileReader();
   reader.onload = async () => {
     try {
-      pendingCsvImport = provider === "seekingAlpha" && isWorkbookFile(file)
-        ? null
-        : { provider, fileName: file.name, csv: String(reader.result || "") };
+      const importMode = provider === "seekingAlpha" && isWorkbookFile(file)
+        ? "xlsx-import"
+        : provider === "seekingAlpha" && isJsonFile(file)
+        ? "json-import"
+        : provider === "seekingAlpha"
+        ? "csv-import"
+        : "csv-import";
       const result = provider === "seekingAlpha" && isWorkbookFile(file)
-        ? buildSeekingAlphaWorkbookImportResult(await normalizeSeekingAlphaWorkbook(reader.result))
+        ? buildSeekingAlphaWorkbookImportResult(await normalizeSeekingAlphaWorkbook(reader.result), { fileName: file.name })
         : buildCsvImportResult(provider, String(reader.result || ""), adapters, { fileName: file.name, isJson: isJsonFile(file) });
       if (provider === "fidelity") {
         const preview = buildPortfolioImportPreview(result, {
@@ -2988,16 +3222,24 @@ function importFile(file, provider) {
         showImportStatus(result, { preview: canApplyPortfolioImport(result), persist: false });
         return;
       }
+      if (provider === "seekingAlpha") {
+        pendingCsvImport = {
+          provider,
+          fileName: file.name,
+          csv: isWorkbookFile(file) ? "" : String(reader.result || ""),
+          isJson: isJsonFile(file),
+          mode: importMode,
+          result,
+          preview: null
+        };
+        showImportStatus(result, { preview: canApplySeekingAlphaImport(result), persist: false });
+        return;
+      }
       if (!result.validation.ok) {
         showImportStatus(result);
         return;
       }
-      if (provider === "seekingAlpha") {
-        pendingCsvImport = null;
-        mergeSeekingAlphaRecords(result.records, isWorkbookFile(file) ? "xlsx-import" : "csv-import");
-      } else {
-        mergeImportedRecords(result.records, { replace: true });
-      }
+      mergeImportedRecords(result.records, { replace: true });
       showImportStatus(result);
     } catch (error) {
       showImportStatus({
@@ -3528,26 +3770,20 @@ function buildCsvImportResult(provider, csv, adapters, options = {}) {
         fidelityFileName: options.fileName,
         columnMapping: options.columnMapping
       })
-    : adapters.buildImportResult({ seekingAlphaCsv: csv, seekingAlphaFileName: options.fileName, seekingAlphaColumnMapping: options.columnMapping });
+    : adapters.buildImportResult({
+        seekingAlphaCsv: options.isJson ? undefined : csv,
+        seekingAlphaJson: options.isJson ? csv : undefined,
+        seekingAlphaFileName: options.fileName,
+        seekingAlphaColumnMapping: options.columnMapping
+      });
 }
 
-function buildSeekingAlphaWorkbookImportResult(records) {
+function buildSeekingAlphaWorkbookImportResult(records, options = {}) {
   const adapters = globalThis.DataAdapters;
-  const mergeResult = adapters.mergeRecordsByTicker(records);
-  const validation = adapters.validateRecords(mergeResult.records);
-  return {
-    records: mergeResult.records,
-    fidelityRecords: [],
-    seekingAlphaRecords: records,
-    validation,
-    summary: adapters.summarizeImport({
-      fidelityRecords: [],
-      seekingAlphaRecords: records,
-      mergedRecords: mergeResult.records,
-      duplicateTickers: mergeResult.summary.duplicateTickers,
-      validation
-    })
-  };
+  return adapters.buildImportResult({
+    seekingAlphaRows: records,
+    seekingAlphaFileName: options.fileName
+  });
 }
 
 function isWorkbookFile(file) {
@@ -3745,14 +3981,18 @@ function renderSeekingAlphaStatus() {
   }
   if (status.lastSync) {
     const synced = new Date(status.lastSync).toLocaleString();
-    const label = status.mode === "demo"
-      ? "Sample Premium data loaded"
-      : /csv|xlsx|import/i.test(String(status.mode || ""))
-      ? "Seeking Alpha export imported"
+    const label = /demo|sample/i.test(String(status.mode || ""))
+      ? "Sample"
+      : /pasted/i.test(String(status.mode || ""))
+      ? "Pasted"
+      : /csv|xlsx|json|import/i.test(String(status.mode || ""))
+      ? "Imported"
       : status.connected && status.mode === "live"
-      ? "Seeking Alpha connector synced"
-      : "Seeking Alpha local data loaded";
-    showSeekingAlphaStatus(`${label}: ${status.records || 0} records at ${synced}.`, "success");
+      ? "Live"
+      : "Imported";
+    const stale = Number(status.staleRows || 0);
+    const sourceNote = status.fileName ? ` from ${status.fileName}` : "";
+    showSeekingAlphaStatus(`${label}: ${status.records || 0} Premium rating record${(status.records || 0) === 1 ? "" : "s"}${sourceNote} at ${synced}. ${status.matchedHoldings || 0} matched active holding${(status.matchedHoldings || 0) === 1 ? "" : "s"}.${stale ? ` ${stale} stale row${stale === 1 ? "" : "s"} need review.` : ""}`, stale ? "warning" : "success");
   } else {
     showSeekingAlphaStatus("Not configured.", "pending");
   }
@@ -3770,6 +4010,8 @@ function wireEvents() {
   $("fidelityDropZone")?.addEventListener("keydown", handleFidelityDropZoneKeydown);
   $("parseFidelityPasteBtn")?.addEventListener("click", parsePastedFidelityHoldings);
   $("clearFidelityPasteBtn")?.addEventListener("click", clearFidelityPaste);
+  $("parseSeekingAlphaPasteBtn")?.addEventListener("click", parsePastedSeekingAlphaRatings);
+  $("clearSeekingAlphaPasteBtn")?.addEventListener("click", clearSeekingAlphaPaste);
   $("accountScopePanel")?.addEventListener("click", handleAccountScopeClick);
   $("connectPlaidFidelityBtn")?.addEventListener("click", startPlaidFidelityLink);
   $("syncPlaidFidelityBtn")?.addEventListener("click", syncPlaidFidelityHoldings);
@@ -3779,10 +4021,11 @@ function wireEvents() {
     importFile(event.target.files[0], "seekingAlpha");
     event.target.value = "";
   });
+  $("seekingAlphaFileZone")?.addEventListener("keydown", handleSeekingAlphaFileZoneKeydown);
   $("importDebugPanel").addEventListener("click", (event) => {
     if (event.target.closest("[data-import-action='apply-mapping']")) applyManualImportMapping();
-    if (event.target.closest("[data-import-action='apply-preview']")) applyPendingPortfolioImport();
-    if (event.target.closest("[data-import-action='cancel-preview']")) cancelPendingPortfolioImport();
+    if (event.target.closest("[data-import-action='apply-preview']")) applyPendingImportPreview();
+    if (event.target.closest("[data-import-action='cancel-preview']")) cancelPendingImportPreview();
   });
   $("demoSeekingAlphaBtn").addEventListener("click", demoSyncSeekingAlpha);
   $("exportStateBtn").addEventListener("click", exportDashboardState);

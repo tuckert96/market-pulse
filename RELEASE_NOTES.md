@@ -2,6 +2,14 @@
 
 Date: 2026-05-24
 
+## Seeking Alpha Premium Import Update
+
+- Seeking Alpha Premium ratings now use a preview-before-apply workflow like portfolio imports, so CSV/JSON/XLSX files and pasted table rows do not mutate holdings until Tucker confirms the preview.
+- The Seeking Alpha preview shows detected columns, mapped fields, accepted rating rows, rejected rows, duplicate ticker handling, stale rating dates, source mode, and row-level errors.
+- Paste-from-table support lets Tucker copy Premium-visible rows into the dashboard without storing a Seeking Alpha username, password, cookie, session token, or browser credential.
+- Data Sources and Settings now label Seeking Alpha records as Sample, Imported, Pasted/Imported, Stale, Error, or Not configured. Imported and pasted ratings are never labeled Live.
+- Seeking Alpha normalization now supports SA Analysts Rating, Dividend Grade, rating date/as-of fields, JSON payloads, and common factor-grade aliases while keeping invalid grades out of accepted rows.
+
 ## News Engine Update
 
 - Market Intelligence now has a local-first news/signal engine that combines source-labeled X/social rows, Reddit mention summaries, federal disclosure rows, market read-throughs, and calendar context without scraping or storing browser credentials.

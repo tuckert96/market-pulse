@@ -5,9 +5,9 @@ import { normalizeSeekingAlphaWorkbook, normalizeSeekingAlphaWorkbookRows } from
 test("Seeking Alpha workbook rows normalize premium rating fields", () => {
   const records = normalizeSeekingAlphaWorkbookRows([
     ["Portfolio Export"],
-    ["Symbol", "Company Name", "Quant Rating", "SA Author Rating", "Wall Street Rating", "Valuation Grade", "Growth Grade", "Profitability Grade", "Momentum Grade", "EPS Revisions Grade", "Dividend Yield", "Gross Margin", "FCF Margin", "Price To Sales", "Free Cash Flow", "Total Debt", "Earnings Date", "Price Target", "Rating Changes"],
-    ["MU", "Micron Technology", "4.43", "Buy", "Strong Buy", "B", "A-", "B+", "A", "A-", "0.42%", "48%", "17%", "6.2", "$3,200,000,000", "$12,000,000,000", "2026-06-26", "$155", "Quant upgraded"],
-    ["NVDA", "NVIDIA", "4.92", "Buy", "Buy", "C", "A+", "A+", "A", "A+", "0.03%", "72%", "34%", "18.4", "$27,000,000,000", "$11,000,000,000", "46239", "$1200", "No change"]
+    ["Symbol", "Company Name", "Quant Rating", "SA Author Rating", "Wall Street Rating", "SA Analysts Rating", "Valuation Grade", "Growth Grade", "Profitability Grade", "Momentum Grade", "EPS Revisions Grade", "Dividend Yield", "Gross Margin", "FCF Margin", "Price To Sales", "Free Cash Flow", "Total Debt", "Earnings Date", "Price Target", "Rating Changes"],
+    ["MU", "Micron Technology", "4.43", "Buy", "Strong Buy", "Buy", "B", "A-", "B+", "A", "A-", "0.42%", "48%", "17%", "6.2", "$3,200,000,000", "$12,000,000,000", "2026-06-26", "$155", "Quant upgraded"],
+    ["NVDA", "NVIDIA", "4.92", "Buy", "Buy", "Strong Buy", "C", "A+", "A+", "A", "A+", "0.03%", "72%", "34%", "18.4", "$27,000,000,000", "$11,000,000,000", "46239", "$1200", "No change"]
   ]);
 
   const mu = records.find((record) => record.ticker === "MU");
@@ -18,6 +18,7 @@ test("Seeking Alpha workbook rows normalize premium rating fields", () => {
   assert.equal(mu.quant, 4.43);
   assert.equal(mu.authorRating, "Buy");
   assert.equal(mu.wallStreetRating, "Strong Buy");
+  assert.equal(mu.saAnalystsRating, "Buy");
   assert.equal(mu.value, 4);
   assert.equal(mu.growth, 4.6);
   assert.equal(mu.profitability, 4.3);

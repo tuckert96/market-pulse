@@ -191,13 +191,15 @@
       "daychangepercent"
     ],
     quant: ["quant", "quantscore", "saquant", "quantrating", "quantscore"],
+    quantRating: ["quantrating", "quantrecommendation", "quantrecommendationrating", "saquantlabel"],
     growth: ["growth", "growthscore", "growthgrade", "sagrowth"],
     momentum: ["momentum", "momentumscore", "momentumgrade", "samomentum"],
     value: ["valuegrade", "value", "valuation", "valuationgrade"],
     profitability: ["profitability", "profitabilitygrade", "profitabilityscore"],
-    revisions: ["revisions", "revision", "epsrevisions", "revisionsgrade", "revisiongrade"],
+    revisions: ["revisions", "revision", "epsrevisions", "epsrevisionsgrade", "revisionsgrade", "revisiongrade"],
     authorRating: ["authorrating", "authorsrating", "sarating", "rating", "analyst"],
     wallStreetRating: ["wallstreetrating", "wallstreet", "sellside", "analystconsensus"],
+    saAnalystsRating: ["saanalystsrating", "saanalysts", "seekingalphaanalystsrating", "saanalystconsensus"],
     revenueGrowth: [
       "revenuegrowth",
       "salesgrowth",
@@ -219,6 +221,7 @@
     dividendYield: ["dividendyield", "yield", "divyield"],
     dividendGrade: ["dividendgrade", "dividend"],
     nextEarnings: ["nextearnings", "earningsdate", "nextreport", "reportdate"],
+    updatedAt: ["updated", "updatedat", "saupdatedat", "asof", "date", "ratingdate", "ratingasof", "importedat", "sourceasof", "lastupdated"],
     notes: ["notes", "thesis", "comment", "comments", "watchlistnotes"]
   };
 
@@ -320,6 +323,42 @@
         label: "Quant rating / score",
         examples: ["Quant Rating", "Quant Score"],
         required: false
+      },
+      {
+        field: "value",
+        label: "Valuation grade",
+        examples: ["Valuation Grade", "Value Grade"],
+        required: false
+      },
+      {
+        field: "growth",
+        label: "Growth grade",
+        examples: ["Growth Grade"],
+        required: false
+      },
+      {
+        field: "profitability",
+        label: "Profitability grade",
+        examples: ["Profitability Grade"],
+        required: false
+      },
+      {
+        field: "momentum",
+        label: "Momentum grade",
+        examples: ["Momentum Grade"],
+        required: false
+      },
+      {
+        field: "revisions",
+        label: "EPS revisions grade",
+        examples: ["EPS Revisions Grade", "Revisions Grade"],
+        required: false
+      },
+      {
+        field: "updatedAt",
+        label: "Rating date / as of",
+        examples: ["Rating Date", "Updated At", "As Of"],
+        required: false
       }
     ]
   };
@@ -407,6 +446,19 @@
 
     if (!Array.isArray(rows)) {
       throw new Error("Holdings JSON must be an array, contain a holdings, positions, records, rows, or data array, or contain accounts with positions.");
+    }
+
+    return rows.map((row, index) => flattenHoldingJsonRow(row, index + 1));
+  }
+
+  function parseSeekingAlphaJsonRows(textOrPayload) {
+    const payload = typeof textOrPayload === "string"
+      ? JSON.parse(textOrPayload || "null")
+      : textOrPayload;
+    const rows = seekingAlphaRowsFromPayload(payload);
+
+    if (!Array.isArray(rows)) {
+      throw new Error("Seeking Alpha JSON must be an array, contain ratings, records, rows, holdings, or data, or be an object keyed by ticker.");
     }
 
     return rows.map((row, index) => flattenHoldingJsonRow(row, index + 1));
@@ -547,7 +599,7 @@
 
   function buildImportResult(inputs = {}) {
     const hasFidelityInput = inputs.fidelityRows !== undefined || inputs.fidelityCsv !== undefined || inputs.fidelityJson !== undefined;
-    const hasSeekingAlphaInput = inputs.seekingAlphaCsv !== undefined || inputs.seekingAlphaRows !== undefined;
+    const hasSeekingAlphaInput = inputs.seekingAlphaCsv !== undefined || inputs.seekingAlphaRows !== undefined || inputs.seekingAlphaJson !== undefined;
     const preferredProvider = hasFidelityInput || !hasSeekingAlphaInput ? "fidelity" : "seekingAlpha";
     let fidelityInput = inputs.fidelityRows || inputs.fidelityCsv || [];
     if (!inputs.fidelityRows && inputs.fidelityJson) {
@@ -565,7 +617,19 @@
       fileName: inputs.fidelityFileName || inputs.fileName,
       columnMapping: inputs.columnMapping || inputs.fidelityColumnMapping
     });
-    const seekingAlphaImport = buildProviderImport("seekingAlpha", inputs.seekingAlphaCsv || inputs.seekingAlphaRows || [], {
+    let seekingAlphaInput = inputs.seekingAlphaRows || inputs.seekingAlphaCsv || [];
+    if (!inputs.seekingAlphaRows && inputs.seekingAlphaJson) {
+      try {
+        seekingAlphaInput = parseSeekingAlphaJsonRows(inputs.seekingAlphaJson);
+      } catch (error) {
+        return buildFailedImportResult({
+          provider: "seekingAlpha",
+          fileName: inputs.seekingAlphaFileName || inputs.fileName,
+          message: `Seeking Alpha JSON could not be parsed: ${safeParseErrorMessage(error)}`
+        });
+      }
+    }
+    const seekingAlphaImport = buildProviderImport("seekingAlpha", seekingAlphaInput, {
       fileName: inputs.seekingAlphaFileName || inputs.fileName,
       columnMapping: inputs.seekingAlphaColumnMapping
     });
@@ -612,7 +676,7 @@
     });
     const merged = provider === "fidelity"
       ? mergeDuplicatePositionRows(detail.records)
-      : { records: detail.records, duplicateRows: [] };
+      : mergeDuplicateRatingRows(detail.records);
 
     return {
       records: merged.records,
@@ -626,7 +690,8 @@
         missingRequiredFields: detail.missingRequiredFields,
         columnMapping: detail.columnMapping,
         repairWarnings: detail.repairWarnings,
-        duplicateRows: merged.duplicateRows
+        duplicateRows: merged.duplicateRows,
+        staleRows: provider === "seekingAlpha" ? staleSeekingAlphaRows(merged.records) : []
       })
     };
   }
@@ -778,6 +843,7 @@
 
     if (provider === "seekingAlpha") {
       normalized.quant = readScore(lookup, aliasesFor("quant", columnMapping));
+      normalized.quantRating = readableRatingText(readText(lookup, aliasesFor("quantRating", columnMapping))) || readableRatingText(readText(lookup, aliasesFor("quant", columnMapping))) || undefined;
       normalized.growth = readScore(lookup, aliasesFor("growth", columnMapping));
       normalized.momentum = readPercentOrGrade(lookup, aliasesFor("momentum", columnMapping));
       normalized.value = readScore(lookup, aliasesFor("value", columnMapping));
@@ -785,6 +851,7 @@
       normalized.revisions = readPercentOrGrade(lookup, aliasesFor("revisions", columnMapping));
       normalized.authorRating = readText(lookup, aliasesFor("authorRating", columnMapping)) || undefined;
       normalized.wallStreetRating = readText(lookup, aliasesFor("wallStreetRating", columnMapping)) || undefined;
+      normalized.saAnalystsRating = readText(lookup, aliasesFor("saAnalystsRating", columnMapping)) || undefined;
       normalized.revenueGrowth = readNumber(lookup, aliasesFor("revenueGrowth", columnMapping), undefined);
       normalized.epsGrowth = readNumber(lookup, aliasesFor("epsGrowth", columnMapping), undefined);
       normalized.forwardPe = readNumber(lookup, aliasesFor("forwardPe", columnMapping), undefined);
@@ -800,6 +867,7 @@
       normalized.dividendYield = readPercentValue(lookup, aliasesFor("dividendYield", columnMapping), undefined);
       normalized.dividendGrade = readText(lookup, aliasesFor("dividendGrade", columnMapping)) || undefined;
       normalized.nextEarnings = normalizeDate(readText(lookup, aliasesFor("nextEarnings", columnMapping)));
+      normalized.saUpdatedAt = normalizeDate(readText(lookup, aliasesFor("updatedAt", columnMapping)));
       normalized.thesis = readText(lookup, aliasesFor("notes", columnMapping)) || undefined;
     }
 
@@ -867,6 +935,32 @@
 
     return {
       records: Array.from(byKey.values()),
+      duplicateRows
+    };
+  }
+
+  function mergeDuplicateRatingRows(records = []) {
+    const byTicker = new Map();
+    const duplicateRows = [];
+
+    records.forEach((record) => {
+      const ticker = normalizeTicker(record.ticker);
+      if (!ticker) return;
+      const previous = byTicker.get(ticker);
+      if (!previous) {
+        byTicker.set(ticker, { ...record, ticker });
+        return;
+      }
+      byTicker.set(ticker, mergeRecord(previous, { ...record, ticker }));
+      duplicateRows.push({
+        ticker,
+        rowNumbers: Array.from(new Set([...(previous.sourceRows || []), ...(record.sourceRows || [])].map((source) => source.rowNumber).filter(Boolean))).sort((a, b) => a - b),
+        reason: "duplicate Seeking Alpha ticker; latest row values kept"
+      });
+    });
+
+    return {
+      records: Array.from(byTicker.values()).sort((left, right) => String(left.ticker || "").localeCompare(String(right.ticker || ""))),
       duplicateRows
     };
   }
@@ -952,7 +1046,7 @@
     }));
     const fields = provider === "fidelity"
       ? ["ticker", "company", "account", "accountType", "shares", "price", "marketValue", "costBasis", "unrealizedGain", "unrealizedGainPercent", "dailyChange", "dailyChangePercent", "sector", "type"]
-      : ["ticker", "company", "sector", "quant", "growth", "momentum", "value", "profitability", "revisions", "authorRating", "wallStreetRating", "revenueGrowth", "epsGrowth", "forwardPe", "nextEarnings", "notes"];
+      : ["ticker", "company", "sector", "quant", "quantRating", "growth", "momentum", "value", "profitability", "revisions", "authorRating", "wallStreetRating", "saAnalystsRating", "revenueGrowth", "epsGrowth", "forwardPe", "priceToSales", "grossMargin", "freeCashFlowMargin", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "cashAndEquivalents", "totalDebt", "debtToEquity", "dividendYield", "dividendGrade", "nextEarnings", "updatedAt", "notes"];
 
     return fields.reduce((mapping, field) => {
       const manual = manualMapping[field] || manualMapping[normalizeHeader(field)];
@@ -1010,7 +1104,7 @@
 
   function buildImportReport(details) {
     const totalMarketValue = details.records.reduce((total, record) => total + numericValue(record.marketValue), 0);
-    return {
+    const report = {
       provider: details.provider,
       fileName: safeFileName(details.fileName || ""),
       detectedFileDate: detectedFileDate(details.fileName, details.rows),
@@ -1018,8 +1112,10 @@
       unsupportedColumns: unsupportedColumns(details.headers || [], details.columnMapping),
       rowsParsed: details.rows.length,
       holdingsImported: details.records.length,
+      ratingsImported: details.provider === "seekingAlpha" ? details.records.length : 0,
       rejectedRows: details.rejectedRows,
       duplicateRows: details.duplicateRows || [],
+      staleRows: details.staleRows || [],
       missingRequiredFields: details.missingRequiredFields,
       expectedColumns: expectedColumnsForProvider(details.provider),
       missingColumnHints: missingColumnHints(details.provider, details.columnMapping),
@@ -1034,6 +1130,10 @@
       totalMarketValue,
       accountsDetected: Array.from(new Set(details.records.map((record) => record.account).filter(Boolean))).sort(),
       tickersDetected: Array.from(new Set(details.records.map((record) => record.ticker).filter(Boolean))).sort()
+    };
+    return {
+      ...report,
+      health: importHealth(report)
     };
   }
 
@@ -1060,6 +1160,7 @@
         holdingsImported: 0,
         rejectedRows: [],
         duplicateRows: [],
+        staleRows: [],
         missingRequiredFields: [],
         expectedColumns,
         missingColumnHints: missingHints,
@@ -1079,6 +1180,7 @@
     }
 
     const report = {
+      provider: active.length === 1 ? active[0].provider : "combined",
       fileName: active.map((report) => report.fileName).filter(Boolean).join(", "),
       detectedFileDate: active.find((report) => report.detectedFileDate)?.detectedFileDate || "",
       detectedColumns: Array.from(new Set(active.flatMap((report) => report.detectedColumns))),
@@ -1087,6 +1189,7 @@
       holdingsImported: active.reduce((total, report) => total + report.holdingsImported, 0),
       rejectedRows: active.flatMap((report) => report.rejectedRows.map((row) => ({ ...row, provider: report.provider }))),
       duplicateRows: active.flatMap((report) => (report.duplicateRows || []).map((row) => ({ ...row, provider: report.provider }))),
+      staleRows: active.flatMap((report) => (report.staleRows || []).map((row) => ({ ...row, provider: report.provider }))),
       missingRequiredFields: combineMissingFields(active.flatMap((report) => report.missingRequiredFields)),
       expectedColumns: active.length === 1
         ? active[0].expectedColumns || []
@@ -1096,6 +1199,7 @@
       columnMapping: active.length === 1 ? active[0].columnMapping : Object.fromEntries(active.map((report) => [report.provider, report.columnMapping])),
       mappingWarnings: active.flatMap((report) => report.mappingWarnings || []),
       totalMarketValue: active.reduce((total, report) => total + report.totalMarketValue, 0),
+      ratingsImported: active.reduce((total, report) => total + (report.ratingsImported || 0), 0),
       accountsDetected: Array.from(new Set(active.flatMap((report) => report.accountsDetected || []))).sort(),
       tickersDetected: Array.from(new Set(active.flatMap((report) => report.tickersDetected))).sort(),
       providerReports: active
@@ -1156,6 +1260,12 @@
         if (!hasParsedNumber(lookup, aliasesFor("marketValue", columnMapping))) missing.push("market value");
         reject.push("missing market value or shares plus price");
       }
+    }
+
+    if (provider === "seekingAlpha") {
+      const numericIssues = invalidNumberIssues(row, columnMapping, ["revenueGrowth", "epsGrowth", "forwardPe", "priceToSales", "grossMargin", "freeCashFlowMargin", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "cashAndEquivalents", "totalDebt", "debtToEquity", "dividendYield"]);
+      reject.push(...numericIssues);
+      reject.push(...invalidSeekingAlphaRatingIssues(row, record, columnMapping));
     }
 
     return {
@@ -1371,8 +1481,14 @@
   }
 
   function missingColumnHints(provider, columnMapping = {}) {
-    if (provider !== "fidelity") return [];
     const hints = [];
+    if (provider === "seekingAlpha") {
+      if (!columnMapping.ticker) {
+        hints.push(`Ticker/symbol column not mapped. Expected one of: ${expectedExamples(provider, ["ticker"]).join(", ")}.`);
+      }
+      return hints;
+    }
+    if (provider !== "fidelity") return [];
     if (!columnMapping.ticker) {
       hints.push(`Ticker/symbol column not mapped. Expected one of: ${expectedExamples(provider, ["ticker"]).join(", ")}.`);
     }
@@ -1394,6 +1510,9 @@
     }
     if (provider === "fidelity" && looksLikeTransactionExport(details.headers || [])) {
       actions.push("This looks like a Fidelity activity or transaction export. Export Positions/Holdings instead, then import that file.");
+    }
+    if (provider === "seekingAlpha" && !details.columnMapping?.ticker) {
+      actions.push("Export or paste a ratings table that includes Ticker or Symbol plus the Premium rating columns.");
     }
     if ((details.rejectedRows || []).some((row) => (row.reasons || []).some((reason) => /column count mismatch/i.test(reason)))) {
       actions.push("If dollar values contain commas, export as CSV with quoted values or paste the table from a spreadsheet so each value stays in one cell.");
@@ -1449,6 +1568,7 @@
         values: {}
       }],
       duplicateRows: [],
+      staleRows: [],
       missingRequiredFields: [],
       expectedColumns: expectedColumnsForProvider(provider),
       missingColumnHints: missingColumnHints(provider, {}),
@@ -1487,6 +1607,36 @@
       if (!raw || isBlankNumericPlaceholder(raw)) return [];
       return Number.isFinite(parseNumeric(raw)) ? [] : [`invalid number format in ${field} (${column}: ${raw})`];
     });
+  }
+
+  function invalidSeekingAlphaRatingIssues(row, record, columnMapping = {}) {
+    const lookup = makeLookup(row);
+    return ["quant", "growth", "momentum", "value", "profitability", "revisions"].flatMap((field) => {
+      const column = columnMapping[field];
+      if (!column) return [];
+      const raw = readText(lookup, [normalizeHeader(column)]);
+      if (!raw || isBlankNumericPlaceholder(raw)) return [];
+      return record[field] === undefined ? [`unrecognized Seeking Alpha rating/grade in ${field} (${column}: ${raw})`] : [];
+    });
+  }
+
+  function staleSeekingAlphaRows(records = [], options = {}) {
+    const staleDays = Number(options.staleDays || 45);
+    const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+    const staleMs = staleDays * 24 * 60 * 60 * 1000;
+    return records
+      .map((record) => {
+        const date = record.saUpdatedAt || record.updatedAt || record.importedAt || "";
+        const dateMs = date ? new Date(date).getTime() : NaN;
+        if (!Number.isFinite(dateMs) || nowMs - dateMs <= staleMs) return null;
+        return {
+          ticker: record.ticker,
+          date,
+          daysOld: Math.floor((nowMs - dateMs) / (24 * 60 * 60 * 1000)),
+          reason: `rating date is older than ${staleDays} days`
+        };
+      })
+      .filter(Boolean);
   }
 
   const CASH_LIKE_TICKERS = new Set([
@@ -1549,6 +1699,25 @@
     if (!rows) {
       return { status: "Failed", tone: "error", message: "Failed: no CSV rows were parsed." };
     }
+    if (report.provider === "seekingAlpha") {
+      if (!imported && (missingTicker || !hasTickerMapping(report.columnMapping))) {
+        return { status: "Needs manual mapping", tone: "error", message: `Needs manual mapping: no Seeking Alpha ticker/symbol column was detected. Expected columns include ${shortExpectedColumnList(report.expectedColumns)}.` };
+      }
+      if (!imported) {
+        return { status: "Failed", tone: "error", message: "Failed: no Seeking Alpha rating rows were imported." };
+      }
+      if (rejected) {
+        return { status: "Partial success", tone: "warning", message: `Imported ${imported} Seeking Alpha rating row${imported === 1 ? "" : "s"}, rejected ${rejected} row${rejected === 1 ? "" : "s"}. Review rejected rows below.` };
+      }
+      const stale = report.staleRows?.length || 0;
+      return {
+        status: stale ? "Imported with stale rating rows" : "Success",
+        tone: stale ? "warning" : "success",
+        message: stale
+          ? `Imported ${imported} Seeking Alpha rating row${imported === 1 ? "" : "s"}; ${stale} row${stale === 1 ? "" : "s"} look stale by rating date.`
+          : `Imported ${imported} Seeking Alpha rating row${imported === 1 ? "" : "s"}.`
+      };
+    }
     if (!imported && (report.mappingWarnings || []).some((warning) => /activity\/transaction export/i.test(warning))) {
       return {
         status: "Failed",
@@ -1576,7 +1745,7 @@
     const columns = Array.isArray(expectedColumns)
       ? expectedColumns
       : Object.values(expectedColumns || {}).flat();
-    const importantFields = new Set(["ticker", "shares", "price", "marketValue", "costBasis"]);
+    const importantFields = new Set(["ticker", "shares", "price", "marketValue", "costBasis", "quant", "growth", "value"]);
     const examples = columns
       .filter((item) => importantFields.has(item.field))
       .flatMap((item) => item.examples || [])
@@ -1681,6 +1850,16 @@
         __rowNumber: position.__rowNumber || positionIndex + 1 + accountIndex * 1000
       }));
     });
+  }
+
+  function seekingAlphaRowsFromPayload(payload) {
+    if (Array.isArray(payload)) return payload;
+    const directRows = firstArray(payload, ["seekingAlphaRatings", "ratings", "records", "rows", "data", "holdings", "positions"]);
+    if (Array.isArray(directRows)) return directRows;
+    if (!payload || typeof payload !== "object") return null;
+    return Object.entries(payload)
+      .filter(([, value]) => value && typeof value === "object" && !Array.isArray(value))
+      .map(([ticker, value]) => ({ ticker, ...value }));
   }
 
   function flattenHoldingJsonRow(row, rowNumber) {
@@ -1991,6 +2170,23 @@
     return readNumber(lookup, aliases, undefined);
   }
 
+  function readableRatingText(raw = "") {
+    const text = String(raw || "").trim();
+    return [
+      "strong buy",
+      "buy",
+      "bullish",
+      "outperform",
+      "hold",
+      "neutral",
+      "market perform",
+      "sell",
+      "bearish",
+      "underperform",
+      "strong sell"
+    ].includes(text.toLowerCase()) ? text : "";
+  }
+
   function readPercentOrGrade(lookup, aliases) {
     const rawScore = readScore(lookup, aliases);
     if (rawScore === undefined) return undefined;
@@ -2060,6 +2256,7 @@
     parseCsv,
     parseCsvRows,
     parseHoldingJsonRows,
+    parseSeekingAlphaJsonRows,
     buildColumnMapping,
     normalizeFidelityPositions,
     normalizeSeekingAlphaRatings,

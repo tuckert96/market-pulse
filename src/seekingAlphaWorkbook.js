@@ -8,6 +8,7 @@ const HEADER_ALIASES = Object.freeze({
   quant: ["quant", "quantrating", "quantscore", "saquant", "quantfactorgrade"],
   authorRating: ["authorrating", "sarating", "saauthorrating", "authorsrating"],
   wallStreetRating: ["wallstreetrating", "sellside", "sellsideconsensus", "analystconsensus", "analystsrating"],
+  saAnalystsRating: ["saanalystsrating", "saanalysts", "seekingalphaanalystsrating", "saanalystconsensus"],
   valuationGrade: ["valuation", "valuationgrade", "value", "valuegrade"],
   growthGrade: ["growth", "growthgrade"],
   profitabilityGrade: ["profitability", "profitabilitygrade"],
