@@ -108,6 +108,45 @@ test("missing and stale data lowers confidence without fabricating precision", (
   assert.equal(result.ratingLabel, "Needs evidence");
 });
 
+test("provider coverage gaps lower institutional data quality confidence", () => {
+  const complete = buildInstitutionalQuantLens({
+    ticker: "MU",
+    price: 132,
+    marketDataPrice: 132,
+    marketDataMode: "live",
+    liveProviderCalls: true,
+    sector: "Technology",
+    industry: "Semiconductors",
+    marketDataMarketCap: 150_000_000_000,
+    historicalPrices: Array.from({ length: 24 }, (_, index) => ({
+      date: new Date(Date.UTC(2024, index, 1)).toISOString().slice(0, 10),
+      close: 90 + index
+    })),
+    thesisStatus: "Active",
+    marketDataCoverageScore: 100
+  });
+  const partial = buildInstitutionalQuantLens({
+    ticker: "MU",
+    price: 132,
+    marketDataPrice: 132,
+    marketDataMode: "live",
+    liveProviderCalls: true,
+    thesisStatus: "Active",
+    marketDataCoverageScore: 38,
+    marketDataMissingHistory: true,
+    marketDataMissingProfileOrMetrics: true,
+    marketDataCoverageWarnings: [
+      "Missing historical candles; momentum and technical confidence are reduced.",
+      "Missing company profile, market cap; quality and fundamental confidence are reduced."
+    ]
+  });
+
+  assert.equal(partial.dataCoverageScore < complete.dataCoverageScore, true);
+  assert.equal(partial.confidenceScore < complete.confidenceScore, true);
+  assert.ok(partial.missingData.some((item) => /provider historical candles|quality and fundamental confidence/i.test(item)));
+  assert.ok(partial.dataSufficiencyWarnings.some((warning) => /History coverage|missing|confidence/i.test(warning)));
+});
+
 test("evidence cap prevents thin-data setups from looking institutionally high conviction", () => {
   const result = buildInstitutionalQuantLens({
     ticker: "PROMO",

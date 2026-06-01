@@ -7,6 +7,7 @@ Market Pulse ranks tickers as review priorities, not as price predictions. A hig
 The current score uses local/imported/mock provider layers, plus server-side market data when Tucker has configured it:
 
 - price momentum from imported holdings or mock market quotes
+- provider coverage quality for quote, profile, fundamentals/metrics, 52-week range, volume, and historical candles
 - relative strength placeholder versus sample/local benchmark context
 - Reddit mention acceleration from sample/local JSON Reddit rows
 - Reddit sentiment context when available, otherwise a clearly labeled missing/limited layer
@@ -42,6 +43,7 @@ The confluence model must not imply precision that the data cannot support:
 - social and disclosure layers stay lower-trust and source-labeled
 - mock/sample layers lower confidence and remain visibly labeled
 - missing quote, history, thesis, or factor data appears in `missingData`
+- partial provider data reduces confidence: missing quote/current price is most severe, missing history reduces momentum/technical confidence, and missing profile/metrics reduces quality/fundamental confidence
 - `topDrivers` explain directionally why a ticker needs review instead of promising returns
 - Quant Lens peer rank and score-history labels remain context, not score ingredients
 - academic factor diagnostics stay attached to the Quant Lens, not merged into confluence without an explicit model change
@@ -64,6 +66,7 @@ Each ticker signal includes:
 - `institutionalQuantMissingData`: missing data that lowers confidence in the stock-quality view
 - `institutionalQuantPeerSummary`: peer-relative rank context within comparable tracked names
 - `institutionalQuantScoreHistoryLabel`: local change context since the prior score in the same portfolio mode
+- `marketDataCoverageScore`, `marketDataCoverageLabel`, and `marketDataCoverageWarnings`: per-ticker provider coverage and the exact missing fields that lower confidence
 
 See `docs/quantitative-engine.md` for the stock-quality model. The ticker confluence score remains a review-priority score; the Institutional Quant Lens is a separate “good stock setup” lens.
 

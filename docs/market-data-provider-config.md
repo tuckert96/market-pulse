@@ -134,6 +134,10 @@ The endpoint returns a normalized `MarketDataSnapshot`:
 - `missingTickers`
 - `warnings`
 - `status`
+- `coverageByTicker`
+- `status.quoteDiagnostics[].coverageScore`
+- `status.quoteDiagnostics[].coverageQualityLabel`
+- `status.quoteDiagnostics[].confidenceWarnings`
 - `cache.requestBudget`
 - `cache.deferredEnrichmentTickers`
 - optional `error`
@@ -158,6 +162,7 @@ Official Finnhub endpoint shapes used by the adapter:
 - Provider omits a previously cached ticker: returns the last successful quote as stale cached data and records a warning/error message.
 - Invalid or omitted ticker: no fake quote is created; valid tickers still normalize when returned, and `status.status = "partial data"`, `missingTickers`, and `warnings` identify requested symbols that did not produce normalized quotes.
 - Partial profile/history response: quote data still loads, with unknown sector/industry or empty history as needed; the snapshot stays usable while showing the provider warning.
+- Partial per-ticker coverage: the provider diagnostics score quote, profile, fundamentals/metrics, 52-week range, volume, and historical candles. Missing quote/current price is the most severe gap. Missing history lowers momentum/technical confidence. Missing profile, market cap, sector/industry, 52-week range, or average volume lowers quality/fundamental confidence.
 - Stale data: quote snapshots older than 24 hours report `stale data`.
 - Empty live-provider error snapshots are labeled `error`, not live.
 

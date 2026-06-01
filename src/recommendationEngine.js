@@ -174,6 +174,9 @@ export function explainRecommendationRank(recommendation = {}) {
   if (recommendation.concentrationRiskScore >= 0.66) drivers.push("Concentration risk increases the rank because position size, theme, or leverage is elevated.");
   if (recommendation.sourceFreshnessScore >= 0.7) drivers.push("Source freshness supports the rank because the relevant data is live, cached, imported, or recent.");
   if (recommendation.dataQualityScore < 0.45) drivers.push("Lower confidence because data is missing, stale, mock, or weakly sourced.");
+  if ((recommendation.missingWeakSignals || []).some((item) => /provider missing|coverage|historical candles|quote\/current price|profile\/fundamental/i.test(item))) {
+    drivers.push("Lower confidence because provider coverage is incomplete for this ticker.");
+  }
   if (recommendation.sourceFreshnessScore < 0.45) drivers.push("Lower rank because one or more source labels are sample, stale, missing, not configured, or erroring.");
   if (recommendation.riskScore >= 0.7) drivers.push("Risk raises review priority because exposure, leverage, target drift, or concentration is elevated.");
   if (!drivers.length) drivers.push("Rank is moderate because the available inputs are useful but not urgent.");
@@ -251,7 +254,12 @@ function recommendationsFromTickerSignals(tickerSignals, context) {
       const quantScore = score01((Number(signal.institutionalQuantScore) || 0) / 100);
       const quantConfidenceScore = score01((Number(signal.institutionalQuantConfidenceScore) || 0) / 100);
       const quantEvidenceScore = quantEvidenceQualityScore(signal);
-      const dataQualityScore = Math.max(tickerSignalDataQuality(signal), quantEvidenceScore);
+      const providerCoverageScore = Number(signal.marketDataCoverageScore);
+      const providerCoverageQuality = Number.isFinite(providerCoverageScore) ? score01(providerCoverageScore / 100) : null;
+      const dataQualityBase = Math.max(tickerSignalDataQuality(signal), quantEvidenceScore);
+      const dataQualityScore = providerCoverageQuality === null
+        ? dataQualityBase
+        : score01(dataQualityBase * 0.62 + providerCoverageQuality * 0.38);
       const riskScore = score01(signal.concentrationRiskScore);
       const holdingQualityScore = score01((Number(signal.holdingQualityScore) || 0) / 100 || quantScore);
       const recommendationType = recommendationTypeForTickerSignal(signal, holding, watchlistIdea, riskScore, holdingQualityScore, dataQualityScore);
@@ -287,6 +295,7 @@ function recommendationsFromTickerSignals(tickerSignals, context) {
           signal.holdingQualityScore ? `Holding quality context ${Math.round(signal.holdingQualityScore)}/100: ${signal.holdingQualityLabel || "quality context"}` : "",
           signal.institutionalQuantScore ? `Institutional Quant Lens ${Math.round(signal.institutionalQuantScore)}/100: quality context, not rank urgency (${signal.institutionalQuantLabel || "factor review"})` : "",
           signal.institutionalQuantDataCoverageLabel ? `Quant data coverage: ${signal.institutionalQuantDataCoverageLabel}` : "",
+          signal.marketDataCoverageLabel ? `Provider coverage: ${signal.marketDataCoverageLabel}` : "",
           signal.institutionalQuantPeerLabel ? `Quant peer context: ${signal.institutionalQuantPeerLabel} in ${signal.institutionalQuantPeerGroup || "tracked peer group"}` : "",
           signal.institutionalQuantScoreTrendLabel ? `Quant score trend: ${signal.institutionalQuantScoreTrendLabel}` : "",
           ...(signal.institutionalQuantStrengths || []).slice(0, 2),
@@ -298,6 +307,8 @@ function recommendationsFromTickerSignals(tickerSignals, context) {
           ...(signal.institutionalQuantMissingData || []).slice(0, 2).map((item) => `Quant lens missing ${item}`),
           ...(signal.institutionalQuantDataSufficiencyWarnings || []).slice(0, 2),
           signal.institutionalQuantPeerWarning || "",
+          ...(signal.marketDataCoverageWarnings || []).slice(0, 3),
+          ...(signal.marketDataMissingFields || []).slice(0, 3).map((field) => `Provider missing ${field}`),
           signal.sourceTrustCapReason || "",
           ...(signal.missingData || []).slice(0, 3),
           ...(signal.warnings || []).filter((warning) => /mock|not live|missing|stale/i.test(warning)).slice(0, 2)

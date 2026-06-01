@@ -141,7 +141,7 @@ compositeRankScore =
   + 3% concentration risk
 ```
 
-Low-quality data receives an additional penalty, and stale/mock/not-configured/error source states are called out in the row/detail view rather than hidden. Finnhub or other provider quote inputs can raise source freshness and price-movement context when configured, but the recommendation remains a local review-priority score rather than a return prediction. Low-quality social or rumor-like data can still appear, but it should rank below better-supported portfolio risks and opportunities unless there is strong supporting evidence.
+Low-quality data receives an additional penalty, and stale/mock/not-configured/error source states are called out in the row/detail view rather than hidden. Finnhub or other provider quote inputs can raise source freshness and price-movement context when configured, but partial ticker coverage now lowers confidence. Missing quote/current price is treated as the most severe provider gap. Missing history lowers momentum/technical confidence. Missing profile, market cap, sector/industry, 52-week range, or average volume lowers quality/fundamental confidence. The recommendation remains a local review-priority score rather than a return prediction. Low-quality social or rumor-like data can still appear, but it should rank below better-supported portfolio risks and opportunities unless there is strong supporting evidence.
 
 The holdings ranking now uses the Institutional Quant Lens as a first-class quality input. That lens is documented in `docs/quantitative-engine.md` and is still separate from recommendation rank, ticker confluence, and alert severity. A high Quant Lens score can lift the Alpha quality score only when academic factor discipline, source coverage, and validation guardrails support it. Missing, stale, or thin factor inputs remain visible and can lower data quality or cap the integrated quality score.
 
@@ -167,6 +167,7 @@ Recommendation inputs currently include:
 - Institutional Quant Lens stock-quality scores
 - active portfolio weight and ownership/watchlist status
 - provider quote price movement and source freshness, including Finnhub when configured through the local backend
+- per-ticker provider coverage score and missing-field warnings from Finnhub diagnostics
 - concentration and leverage risk
 - alert severity
 - local portfolio alerts

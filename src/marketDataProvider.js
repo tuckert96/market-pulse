@@ -39,6 +39,31 @@ const MARKET_DATA_COVERAGE_FIELDS = Object.freeze([
   { key: "historicalCandles", label: "Historical candles", missingLabel: "historical candles", resource: "history" }
 ]);
 
+export const MARKET_DATA_COVERAGE_QUALITY_WEIGHTS = Object.freeze({
+  quote: 0.34,
+  week52Range: 0.07,
+  volume: 0.08,
+  averageVolume: 0.06,
+  marketCap: 0.1,
+  companyProfile: 0.11,
+  sectorIndustry: 0.08,
+  historicalCandles: 0.16
+});
+
+const MARKET_DATA_FIELD_CONFIDENCE = Object.freeze({
+  live: 1,
+  connected: 1,
+  available: 0.92,
+  cached: 0.88,
+  mock: 0.48,
+  stale: 0.42,
+  deferred: 0.36,
+  skipped: 0.28,
+  disabled: 0.28,
+  missing: 0,
+  unknown: 0
+});
+
 export const MARKET_DATA_PROVIDER_CONFIGS = Object.freeze({
   finnhub: {
     id: "finnhub",
@@ -882,6 +907,12 @@ export function buildMarketDataSnapshot({ provider = createUnconfiguredMarketDat
     status: null
   };
   snapshot.status = buildMarketDataStatus(snapshot, { now });
+  snapshot.coverageByTicker = Object.fromEntries((snapshot.status.quoteDiagnostics || []).map((row) => [normalizeTicker(row.ticker), row]));
+  snapshot.quotes = snapshot.quotes.map((quote) => ({
+    ...quote,
+    providerCoverage: snapshot.coverageByTicker[normalizeTicker(quote.ticker)] || null
+  }));
+  snapshot.quotesByTicker = Object.fromEntries(snapshot.quotes.map((quote) => [quote.ticker, quote]));
   return snapshot;
 }
 
@@ -1807,6 +1838,7 @@ export function marketDataQuoteDiagnostics(snapshot = {}) {
     const quote = quotesByTicker[ticker];
     if (!quote) {
       const fieldCoverage = buildQuoteFieldCoverage(null, snapshot);
+      const quality = marketDataCoverageQualityFromFields(fieldCoverage, { status: "missing" });
       return {
         ticker,
         status: MARKET_DATA_PROVIDER_STATUSES.PARTIAL,
@@ -1824,6 +1856,7 @@ export function marketDataQuoteDiagnostics(snapshot = {}) {
         unavailableFields: fieldCoverage.map((field) => field.missingLabel),
         coverageSummary: "0/8 fields available",
         coverageStatus: "missing",
+        ...quality,
         fetchedAt: null,
         lastError: snapshot.error || "No normalized quote returned."
       };
@@ -1844,6 +1877,7 @@ export function marketDataQuoteDiagnostics(snapshot = {}) {
       : unavailableFields.length
         ? "partial"
         : "complete";
+    const quality = marketDataCoverageQualityFromFields(fieldCoverage, { status: coverageStatus });
     return {
       ticker,
       status: snapshot.status?.status || snapshot.status || freshness,
@@ -1861,10 +1895,98 @@ export function marketDataQuoteDiagnostics(snapshot = {}) {
       unavailableFields,
       coverageSummary: `${availableFields.length}/${MARKET_DATA_COVERAGE_FIELDS.length} fields available`,
       coverageStatus,
+      ...quality,
       fetchedAt: quote.fetchedAt || snapshot.fetchedAt || null,
       lastError: quote.lastError?.message || quote.lastError || ""
     };
   });
+}
+
+export function marketDataCoverageQualityForTicker(snapshot = {}, ticker = "") {
+  snapshot = snapshot || {};
+  const normalizedTicker = normalizeTicker(ticker);
+  if (!normalizedTicker) return null;
+  const diagnostics = Array.isArray(snapshot.status?.quoteDiagnostics) ? snapshot.status.quoteDiagnostics : [];
+  const row = diagnostics.find((item) => normalizeTicker(item.ticker) === normalizedTicker);
+  if (row) return row;
+  const quote = (snapshot.quotesByTicker || {})[normalizedTicker];
+  if (!quote) return null;
+  const fieldCoverage = buildQuoteFieldCoverage(quote, snapshot);
+  return {
+    ticker: normalizedTicker,
+    fieldCoverage,
+    ...marketDataCoverageQualityFromFields(fieldCoverage)
+  };
+}
+
+export function marketDataCoverageQualityFromFields(fieldCoverage = [], options = {}) {
+  const fields = Array.isArray(fieldCoverage) ? fieldCoverage : [];
+  const fieldByKey = Object.fromEntries(fields.map((field) => [field.key, field]));
+  const fieldScore = (key) => coverageFieldQuality(fieldByKey[key]);
+  const weightedScore = Object.entries(MARKET_DATA_COVERAGE_QUALITY_WEIGHTS)
+    .reduce((total, [key, weight]) => total + fieldScore(key) * weight, 0);
+  const quoteScore = fieldScore("quote");
+  const profileScore = averageScore([
+    fieldScore("companyProfile"),
+    fieldScore("sectorIndustry"),
+    fieldScore("marketCap")
+  ]);
+  const fundamentalScore = averageScore([
+    fieldScore("companyProfile"),
+    fieldScore("sectorIndustry"),
+    fieldScore("marketCap"),
+    fieldScore("week52Range"),
+    fieldScore("averageVolume")
+  ]);
+  const volumeScore = averageScore([fieldScore("volume"), fieldScore("averageVolume")]);
+  const historyScore = fieldScore("historicalCandles");
+  const staleFields = fields.filter((field) => String(field.status || "").toLowerCase() === "stale").map((field) => field.label);
+  const missingFields = fields
+    .filter((field) => ["missing", "unknown"].includes(String(field.status || "").toLowerCase()))
+    .map((field) => field.missingLabel || field.label)
+    .filter(Boolean);
+  const deferredFields = fields
+    .filter((field) => ["deferred", "skipped", "disabled"].includes(String(field.status || "").toLowerCase()))
+    .map((field) => field.missingLabel || field.label)
+    .filter(Boolean);
+  const quoteMissing = quoteScore <= 0.05;
+  const rawCoverageScore = Math.round(weightedScore * 100);
+  const coverageScore = quoteMissing ? Math.min(rawCoverageScore, 35) : rawCoverageScore;
+  const momentumConfidenceScore = Math.round((quoteScore * 0.5 + historyScore * 0.5) * 100);
+  const fundamentalConfidenceScore = Math.round((profileScore * 0.42 + fundamentalScore * 0.42 + volumeScore * 0.16) * 100);
+  const technicalConfidenceScore = Math.round((quoteScore * 0.36 + historyScore * 0.44 + fieldScore("week52Range") * 0.2) * 100);
+  const confidenceWarnings = marketDataCoverageWarnings({
+    fields,
+    quoteMissing,
+    historyScore,
+    profileScore,
+    fundamentalScore,
+    volumeScore,
+    staleFields,
+    missingFields,
+    deferredFields
+  });
+  const status = options.status || coverageQualityStatus({ coverageScore, quoteMissing, staleFields, missingFields, deferredFields });
+  const label = coverageQualityLabel({ coverageScore, quoteMissing, status });
+
+  return {
+    coverageScore,
+    coverageQualityLabel: label,
+    coverageQualityStatus: status,
+    quoteQualityScore: Math.round(quoteScore * 100),
+    profileQualityScore: Math.round(profileScore * 100),
+    fundamentalQualityScore: fundamentalConfidenceScore,
+    volumeQualityScore: Math.round(volumeScore * 100),
+    historyQualityScore: Math.round(historyScore * 100),
+    momentumConfidenceScore,
+    technicalConfidenceScore,
+    fundamentalConfidenceScore,
+    confidenceWarnings,
+    missingDataWarnings: confidenceWarnings,
+    missingQuote: quoteMissing,
+    missingHistory: historyScore < 0.5,
+    missingProfileOrMetrics: profileScore < 0.45 || fundamentalScore < 0.45
+  };
 }
 
 function buildQuoteFieldCoverage(quote = null, snapshot = {}) {
@@ -1922,6 +2044,79 @@ function fieldCoverageStatus(available, resourceStatus = "unknown", freshness = 
   }
   if (["deferred", "skipped", "disabled"].includes(resource)) return resource;
   return "missing";
+}
+
+function coverageFieldQuality(field = {}) {
+  if (!field) return 0;
+  const status = String(field.status || field.resourceStatus || "unknown").toLowerCase();
+  const base = MARKET_DATA_FIELD_CONFIDENCE[status] ?? MARKET_DATA_FIELD_CONFIDENCE.unknown;
+  if (!field.available && ["live", "connected", "available", "cached", "mock", "stale"].includes(status)) return Math.min(base, 0.25);
+  return base;
+}
+
+function averageScore(values = []) {
+  const usable = values.filter((value) => Number.isFinite(Number(value)));
+  if (!usable.length) return 0;
+  return usable.reduce((sum, value) => sum + Number(value), 0) / usable.length;
+}
+
+function coverageQualityStatus({ coverageScore = 0, quoteMissing = false, staleFields = [], missingFields = [], deferredFields = [] } = {}) {
+  if (quoteMissing) return "missing quote";
+  if (staleFields.length) return "stale";
+  if (coverageScore >= 84 && !missingFields.length && !deferredFields.length) return "complete";
+  if (coverageScore >= 62) return "partial";
+  return "thin";
+}
+
+function coverageQualityLabel({ coverageScore = 0, quoteMissing = false, status = "" } = {}) {
+  if (quoteMissing) return "Quote missing";
+  if (status === "stale") return `Stale coverage ${coverageScore}/100`;
+  if (coverageScore >= 84) return `Strong coverage ${coverageScore}/100`;
+  if (coverageScore >= 62) return `Partial coverage ${coverageScore}/100`;
+  return `Thin coverage ${coverageScore}/100`;
+}
+
+function marketDataCoverageWarnings({
+  fields = [],
+  quoteMissing = false,
+  historyScore = 0,
+  profileScore = 0,
+  fundamentalScore = 0,
+  volumeScore = 0,
+  staleFields = [],
+  missingFields = [],
+  deferredFields = []
+} = {}) {
+  const fieldLabels = (keys) => fields
+    .filter((field) => keys.includes(field.key) && ["missing", "deferred", "skipped", "disabled", "unknown"].includes(String(field.status || "").toLowerCase()))
+    .map((field) => field.missingLabel || field.label)
+    .filter(Boolean);
+  const warnings = [];
+  if (quoteMissing) {
+    warnings.push("Missing quote/current price; price-sensitive scores and recommendations are capped.");
+  }
+  if (historyScore < 0.5) {
+    const labels = fieldLabels(["historicalCandles"]);
+    warnings.push(`${labels.length ? `Missing ${labels.join(", ")}` : "Missing historical candles"}; momentum and technical confidence are reduced.`);
+  }
+  if (profileScore < 0.45 || fundamentalScore < 0.45) {
+    const labels = fieldLabels(["companyProfile", "sectorIndustry", "marketCap", "week52Range", "averageVolume"]);
+    warnings.push(`${labels.length ? `Missing ${labels.slice(0, 4).join(", ")}` : "Missing profile/fundamental fields"}; quality and fundamental confidence are reduced.`);
+  }
+  if (volumeScore < 0.45) {
+    const labels = fieldLabels(["volume", "averageVolume"]);
+    warnings.push(`${labels.length ? `Missing ${labels.join(", ")}` : "Missing volume context"}; liquidity confidence is reduced.`);
+  }
+  if (staleFields.length) {
+    warnings.push(`Stale provider fields: ${staleFields.slice(0, 4).join(", ")}${staleFields.length > 4 ? ` +${staleFields.length - 4} more` : ""}.`);
+  }
+  if (!quoteMissing && deferredFields.length && !warnings.some((warning) => /profile|fundamental|historical|volume/i.test(warning))) {
+    warnings.push(`Provider enrichment deferred for ${deferredFields.slice(0, 4).join(", ")}${deferredFields.length > 4 ? ` +${deferredFields.length - 4} more` : ""}; confidence is lower until refreshed.`);
+  }
+  if (!warnings.length && missingFields.length) {
+    warnings.push(`Missing provider fields: ${missingFields.slice(0, 4).join(", ")}${missingFields.length > 4 ? ` +${missingFields.length - 4} more` : ""}.`);
+  }
+  return unique(warnings).slice(0, 6);
 }
 
 function providerCredentialStatus(env, spec) {
@@ -2033,4 +2228,8 @@ function roundRatio(value) {
 
 function pruneEmpty(record) {
   return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
+
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
 }

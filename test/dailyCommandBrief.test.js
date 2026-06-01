@@ -235,6 +235,42 @@ test("daily command brief is honest when history or live data is missing", () =>
   assert.doesNotMatch(JSON.stringify(brief), /\b(buy now|sell now|guaranteed|prediction)\b/i);
 });
 
+test("daily command brief surfaces per-ticker market data coverage gaps", () => {
+  const brief = buildDailyCommandBrief({
+    analysis: { ...analysis, alerts: [] },
+    tickerSignals: [],
+    redditMentions: [],
+    politicianTrades: [],
+    targetPlan: { rows: [] },
+    providerReadiness: { providerStatuses: {} },
+    marketDataStatus: {
+      status: "connected",
+      label: "Live market data",
+      quoteDiagnostics: [{
+        ticker: "MU",
+        coverageScore: 42,
+        coverageQualityStatus: "thin",
+        coverageQualityLabel: "Thin coverage 42/100",
+        missingHistory: true,
+        missingProfileOrMetrics: true,
+        unavailableFields: ["historical candles", "company profile", "market cap"],
+        confidenceWarnings: ["Missing historical candles; momentum and technical confidence are reduced."]
+      }]
+    },
+    portfolioDataQuality: { status: "clean" },
+    uiState: "IMPORTED_CLEAN",
+    asOf
+  });
+  const item = brief.items.find((row) => row.id === "daily:market-coverage:MU");
+
+  assert.ok(item);
+  assert.equal(item.group, DAILY_BRIEF_GROUPS.WATCH);
+  assert.equal(item.href, "#/ticker/MU");
+  assert.match(item.title, /MU market data coverage is thin/i);
+  assert.match(item.detail, /Thin coverage 42\/100/);
+  assert.match(item.reason, /confidence/i);
+});
+
 test("daily command brief explains missing position movement coverage", () => {
   const brief = buildDailyCommandBrief({
     analysis: {

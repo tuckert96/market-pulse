@@ -2,6 +2,7 @@ import { normalizeTicker } from "./portfolioSchema.js";
 import { summarizeRedditMentions } from "./redditSignals.js";
 import { buildInstitutionalQuantLens } from "./scoringModel.js";
 import { buildStockPredictionModel } from "./stockPredictionModel.js";
+import { marketDataCoverageQualityForTicker } from "./marketDataProvider.js";
 
 export const DEFAULT_TICKER_SIGNAL_WATCHLIST = Object.freeze(["MU", "NVDA", "AMD", "SOXL", "UPRO", "VGT", "CRDO", "QQQ"]);
 export const TICKER_SIGNAL_WEIGHTS = Object.freeze({
@@ -53,6 +54,7 @@ export function buildCombinedTickerSignals({
       const politician = politicianByTicker.get(ticker) || { buyScore: 0, sellScore: 0, tradeCount: 0 };
       const marketItemCount = marketCounts.get(ticker) || 0;
       const marketDataQuote = marketDataByTicker.get(ticker);
+      const marketDataCoverage = marketDataCoverageQualityForTicker(marketDataSnapshot, ticker);
       const liveMarketDataInput = Boolean(marketDataQuote && !marketDataQuote.isMock && marketDataQuote.liveProviderCalls);
       const benchmarkDailyChangePercent = benchmarkDailyChangePercentFromSnapshot(marketDataSnapshot, ticker);
       const priceMomentumPlaceholder = scorePriceMomentumPlaceholder(holding, marketItemCount, marketDataQuote);
@@ -70,7 +72,7 @@ export function buildCombinedTickerSignals({
       const thesisConvictionRiskScore = scoreThesisConvictionRisk(holding);
       const concentrationRiskScore = scoreConcentrationRisk(holding);
       const institutionalQuant = buildInstitutionalQuantLens(
-        institutionalStockInput({ ticker, holding, marketDataQuote }),
+        institutionalStockInput({ ticker, holding, marketDataQuote, marketDataCoverage }),
         {
           asOf,
           portfolio: {
@@ -150,6 +152,7 @@ export function buildCombinedTickerSignals({
         thesisConvictionRiskScore,
         concentrationRiskScore,
         marketDataQuote,
+        marketDataCoverage,
         reddit,
         politician,
         holding,
@@ -157,7 +160,7 @@ export function buildCombinedTickerSignals({
         benchmarkDailyChangePercent
       });
       const materialityScore = scoreMateriality(holding, marketItemCount);
-      const confidenceScore = scoreTickerSignalConfidence({ marketItemCount, sourceCounts, marketDataQuote, reddit, politician });
+      const confidenceScore = scoreTickerSignalConfidence({ marketItemCount, sourceCounts, marketDataQuote, marketDataCoverage, reddit, politician });
       const actionCategory = actionForConfluence(confluenceScore);
       const holdingQualityScore = scoreHoldingQuality({ holding, institutionalQuant });
       const explanation = buildScoreExplanation({
@@ -169,6 +172,7 @@ export function buildCombinedTickerSignals({
         marketDataQuote,
         watchlistSet,
         realPortfolio,
+        marketDataCoverage,
         priceMomentumScore,
         relativeStrengthScore,
         redditMentionAccelerationScore,
@@ -294,6 +298,14 @@ export function buildCombinedTickerSignals({
         marketDataMode: marketDataQuote?.sourceMode || marketDataSnapshot?.mode || "mock",
         marketDataAsOf: marketDataQuote?.asOf || marketDataSnapshot?.asOf || "",
         marketDataFetchedAt: marketDataQuote?.fetchedAt || marketDataSnapshot?.fetchedAt || "",
+        marketDataCoverageScore: marketDataCoverage?.coverageScore ?? null,
+        marketDataCoverageStatus: marketDataCoverage?.coverageQualityStatus || "",
+        marketDataCoverageLabel: marketDataCoverage?.coverageQualityLabel || "",
+        marketDataCoverageWarnings: marketDataCoverage?.confidenceWarnings || [],
+        marketDataMissingFields: marketDataCoverage?.unavailableFields || marketDataCoverage?.missingFields || [],
+        marketDataMomentumConfidenceScore: marketDataCoverage?.momentumConfidenceScore ?? null,
+        marketDataTechnicalConfidenceScore: marketDataCoverage?.technicalConfidenceScore ?? null,
+        marketDataFundamentalConfidenceScore: marketDataCoverage?.fundamentalConfidenceScore ?? null,
         updatedAt: marketDataQuote?.fetchedAt || marketDataQuote?.asOf || marketDataSnapshot?.fetchedAt || marketDataSnapshot?.asOf || "",
         marketDataLabel: marketDataQuote?.isMock
           ? `Sample market data quote ${currencyLike(marketDataQuote.price)} · daily ${percentLike(marketDataQuote.dailyChangePercent)} · Live data not configured.`
@@ -334,13 +346,14 @@ export function buildCombinedTickerSignals({
           realPortfolio,
           marketItemCount,
           marketDataQuote,
+          marketDataCoverage,
           benchmarkDailyChangePercent
         }),
         topHeadline: headlineForTicker({ ticker, reddit, politician, marketItemCount }),
         nextCheck: "Confirm with primary sources, price action, and thesis review before making portfolio changes.",
         warnings: liveMarketDataInput
-          ? [!realPortfolio && holding?.marketValue ? "Sample portfolio context, not Tucker's imported holdings" : "Local confluence model only", "Market quote input is live/provider data, but social/disclosure/thesis layers may still be mock or imported", sourceTrust.reason && rawConfluenceScore > sourceTrust.cap ? sourceTrust.reason : "", "Not a recommendation to buy or sell"].filter(Boolean)
-          : [!realPortfolio && holding?.marketValue ? "Sample portfolio context, not Tucker's imported holdings" : "Sample/local score only", "Market data not configured", sourceTrust.reason && rawConfluenceScore > sourceTrust.cap ? sourceTrust.reason : "", "Not a recommendation to buy or sell"].filter(Boolean),
+          ? [!realPortfolio && holding?.marketValue ? "Sample portfolio context, not Tucker's imported holdings" : "Local confluence model only", "Market quote input is live/provider data, but social/disclosure/thesis layers may still be mock or imported", ...(marketDataCoverage?.confidenceWarnings || []).slice(0, 3), sourceTrust.reason && rawConfluenceScore > sourceTrust.cap ? sourceTrust.reason : "", "Not a recommendation to buy or sell"].filter(Boolean)
+          : [!realPortfolio && holding?.marketValue ? "Sample portfolio context, not Tucker's imported holdings" : "Sample/local score only", "Market data not configured", ...(marketDataCoverage?.confidenceWarnings || []).slice(0, 3), sourceTrust.reason && rawConfluenceScore > sourceTrust.cap ? sourceTrust.reason : "", "Not a recommendation to buy or sell"].filter(Boolean),
         explanation: explanation.summary,
         whyScoreIsHigh: explanation.whyScoreIsHigh,
         missingData: explanation.missingData,
@@ -351,7 +364,7 @@ export function buildCombinedTickerSignals({
     .sort((a, b) => b.confluenceScore - a.confluenceScore || b.holdingsValue - a.holdingsValue || a.ticker.localeCompare(b.ticker));
 }
 
-function institutionalStockInput({ ticker, holding = null, marketDataQuote = null } = {}) {
+function institutionalStockInput({ ticker, holding = null, marketDataQuote = null, marketDataCoverage = null } = {}) {
   const quoteHistory = marketDataQuote?.historicalPrices || [];
   const holdingHistory = holding?.marketDataHistoricalPrices?.length ? holding.marketDataHistoricalPrices : holding?.historicalPrices || [];
   return {
@@ -397,6 +410,17 @@ function institutionalStockInput({ ticker, holding = null, marketDataQuote = nul
     marketDataMode: marketDataQuote?.sourceMode || holding?.marketDataMode,
     dataFreshness: marketDataQuote?.dataFreshness,
     cacheStatus: marketDataQuote?.cacheStatus,
+    marketDataCoverageScore: marketDataCoverage?.coverageScore,
+    marketDataCoverageStatus: marketDataCoverage?.coverageQualityStatus,
+    marketDataCoverageLabel: marketDataCoverage?.coverageQualityLabel,
+    marketDataCoverageWarnings: marketDataCoverage?.confidenceWarnings || [],
+    marketDataMissingFields: marketDataCoverage?.unavailableFields || marketDataCoverage?.missingFields || [],
+    marketDataMissingQuote: marketDataCoverage?.missingQuote,
+    marketDataMissingHistory: marketDataCoverage?.missingHistory,
+    marketDataMissingProfileOrMetrics: marketDataCoverage?.missingProfileOrMetrics,
+    marketDataMomentumConfidenceScore: marketDataCoverage?.momentumConfidenceScore,
+    marketDataTechnicalConfidenceScore: marketDataCoverage?.technicalConfidenceScore,
+    marketDataFundamentalConfidenceScore: marketDataCoverage?.fundamentalConfidenceScore,
     isMock: marketDataQuote?.isMock || holding?.marketDataIsMock,
     liveProviderCalls: Boolean(marketDataQuote?.liveProviderCalls)
   };
@@ -560,14 +584,20 @@ function sourceTrustGuardrail({
   };
 }
 
-function scoreTickerSignalConfidence({ marketItemCount = 0, sourceCounts = {}, marketDataQuote = null, reddit = null, politician = {} } = {}) {
+function scoreTickerSignalConfidence({ marketItemCount = 0, sourceCounts = {}, marketDataQuote = null, marketDataCoverage = null, reddit = null, politician = {} } = {}) {
   const base = 0.18;
-  const marketData = marketDataQuote ? 0.08 : 0;
+  const coverage = Number(marketDataCoverage?.coverageScore);
+  const hasCoverageScore = Number.isFinite(coverage);
+  const coverageComponent = hasCoverageScore ? Math.max(0, Math.min(0.1, coverage / 100 * 0.1)) : 0;
+  const marketData = marketDataQuote ? Math.max(0.03, coverageComponent || 0.08) : 0;
   const marketContext = Math.min(0.1, marketItemCount * 0.035);
   const redditContext = Math.min(0.08, (sourceCounts.reddit || 0) * 0.018);
   const disclosureContext = Math.min(0.08, (politician.tradeCount || 0) * 0.04);
   const importedBoost = reddit?.sourceIds?.length ? 0.02 : 0;
-  return roundScore(Math.min(0.58, base + marketData + marketContext + redditContext + disclosureContext + importedBoost));
+  const missingQuotePenalty = marketDataCoverage?.missingQuote ? 0.08 : 0;
+  const missingHistoryPenalty = marketDataCoverage?.missingHistory ? 0.04 : 0;
+  const missingProfilePenalty = marketDataCoverage?.missingProfileOrMetrics ? 0.03 : 0;
+  return roundScore(Math.min(0.58, base + marketData + marketContext + redditContext + disclosureContext + importedBoost - missingQuotePenalty - missingHistoryPenalty - missingProfilePenalty));
 }
 
 function buildScoreExplanation(context = {}) {
@@ -578,6 +608,7 @@ function buildScoreExplanation(context = {}) {
     politician = {},
     marketItemCount = 0,
     marketDataQuote,
+    marketDataCoverage = null,
     watchlistSet,
     priceMomentumScore,
     relativeStrengthScore,
@@ -604,6 +635,9 @@ function buildScoreExplanation(context = {}) {
 
   const missingData = [];
   if (!marketDataQuote || marketDataQuote.isMock) missingData.push("live market quote and history");
+  if (marketDataQuote && !marketDataQuote.isMock && marketDataCoverage?.missingQuote) missingData.push("provider quote/current price");
+  if (marketDataQuote && !marketDataQuote.isMock && marketDataCoverage?.missingHistory) missingData.push("historical candles");
+  if (marketDataQuote && !marketDataQuote.isMock && marketDataCoverage?.missingProfileOrMetrics) missingData.push("provider profile/fundamental fields");
   if (!reddit?.sevenDayMentions) missingData.push("Reddit mention confirmation");
   if (!politician?.tradeCount) missingData.push("politician disclosure confirmation");
   if (!holding || !realPortfolio) missingData.push("imported portfolio ownership context");
@@ -611,17 +645,19 @@ function buildScoreExplanation(context = {}) {
 
   const dataModeDetails = [
     liveMarketDataInput ? "provider market data input" : marketDataQuote?.isMock ? "sample market data" : marketDataQuote ? "provider-shaped market data" : "no market quote",
+    marketDataCoverage?.coverageQualityLabel ? `market data coverage: ${marketDataCoverage.coverageQualityLabel}` : "",
     reddit?.sourceIds?.length ? "sample/local Reddit mentions" : "no Reddit rows",
     politician?.tradeCount ? "sample/local politician disclosures" : "no politician disclosure rows",
     liveMarketDataInput ? "market quote provider calls happened server-side before scoring" : "no live provider calls"
-  ];
+  ].filter(Boolean);
 
   const reason = whyScoreIsHigh.length ? whyScoreIsHigh.slice(0, 3).join(", ") : "baseline watchlist/portfolio context";
+  const combinedMissingData = unique([...(marketDataCoverage?.confidenceWarnings || []), ...missingData]);
   return {
     whyScoreIsHigh,
-    missingData,
+    missingData: combinedMissingData,
     dataModeDetails,
-    summary: `${ticker}: score reflects ${reason}. Missing: ${missingData.slice(0, 3).join(", ") || "none from current local data"}.`
+    summary: `${ticker}: score reflects ${reason}. Missing: ${combinedMissingData.slice(0, 3).join(", ") || "none from current local data"}.`
   };
 }
 
@@ -635,6 +671,7 @@ function buildScoreLayers({
   thesisConvictionRiskScore,
   concentrationRiskScore,
   marketDataQuote,
+  marketDataCoverage,
   reddit,
   politician = {},
   holding,
@@ -648,7 +685,10 @@ function buildScoreLayers({
       score: roundScore(priceMomentumScore),
       weight: TICKER_SIGNAL_WEIGHTS.priceMomentumScore,
       dataMode: marketDataQuote?.isMock ? "sample market quote" : marketDataQuote?.liveProviderCalls ? "live provider quote" : marketDataQuote ? "provider-shaped quote" : "local holding move",
-      missingData: marketDataQuote ? [] : ["live quote", "historical price series"]
+      missingData: marketDataQuote
+        ? (marketDataCoverage?.missingHistory ? ["historical candles"] : [])
+        : ["live quote", "historical price series"],
+      note: marketDataCoverage?.coverageQualityLabel || ""
     },
     {
       key: "relativeStrengthScore",
@@ -735,6 +775,7 @@ function topDrivers({
   realPortfolio = true,
   marketItemCount,
   marketDataQuote,
+  marketDataCoverage,
   benchmarkDailyChangePercent
 }) {
   return [
@@ -744,7 +785,7 @@ function topDrivers({
       score: priceMomentumScore,
       reason: marketDataQuote
         ? marketDataQuote.liveProviderCalls
-          ? `Uses ${marketDataQuote.providerLabel || "provider"} daily price change as a server-side market data input; the confluence score remains a local review model.`
+          ? `Uses ${marketDataQuote.providerLabel || "provider"} daily price change as a server-side market data input; ${marketDataCoverage?.coverageQualityLabel || "coverage pending"}.`
           : `Uses ${marketDataQuote.providerLabel || "provider-shaped"} daily price change; live provider status is not confirmed.`
         : "Uses local daily move when available; not a live price feed.",
       sourceIds: []

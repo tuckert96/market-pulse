@@ -14,6 +14,7 @@ import {
   createUnconfiguredMarketDataProvider,
   fetchMarketDataSnapshot,
   marketDataCacheTtlConfig,
+  marketDataCoverageQualityFromFields,
   marketDataFallbackProviderIds,
   normalizeFinnhubHistory,
   normalizeFinnhubQuote,
@@ -379,6 +380,52 @@ test("Finnhub diagnostics list partial missing and deferred fields by ticker", a
   assert.ok(nvda.deferredFields.includes("company profile"));
   assert.ok(nvda.deferredFields.includes("historical candles"));
   assert.ok(nvda.unavailableFields.includes("average volume"));
+  assert.equal(mu.coverageScore < 84, true);
+  assert.equal(mu.coverageQualityStatus, "partial");
+  assert.ok(mu.confidenceWarnings.some((warning) => /liquidity confidence/i.test(warning)));
+  assert.ok(nvda.confidenceWarnings.some((warning) => /historical candles|momentum and technical confidence/i.test(warning)));
+});
+
+test("market data coverage quality weights missing quote more severely than missing history", () => {
+  const full = marketDataCoverageQualityFromFields([
+    { key: "quote", available: true, status: "live" },
+    { key: "week52Range", available: true, status: "live" },
+    { key: "volume", available: true, status: "live" },
+    { key: "averageVolume", available: true, status: "live" },
+    { key: "marketCap", available: true, status: "live" },
+    { key: "companyProfile", available: true, status: "live" },
+    { key: "sectorIndustry", available: true, status: "live" },
+    { key: "historicalCandles", available: true, status: "live" }
+  ]);
+  const missingHistory = marketDataCoverageQualityFromFields([
+    { key: "quote", available: true, status: "live" },
+    { key: "week52Range", available: true, status: "live" },
+    { key: "volume", available: true, status: "live" },
+    { key: "averageVolume", available: true, status: "live" },
+    { key: "marketCap", available: true, status: "live" },
+    { key: "companyProfile", available: true, status: "live" },
+    { key: "sectorIndustry", available: true, status: "live" },
+    { key: "historicalCandles", available: false, status: "missing", missingLabel: "historical candles" }
+  ]);
+  const missingQuote = marketDataCoverageQualityFromFields([
+    { key: "quote", available: false, status: "missing", missingLabel: "quote/current price" },
+    { key: "week52Range", available: true, status: "live" },
+    { key: "volume", available: true, status: "live" },
+    { key: "averageVolume", available: true, status: "live" },
+    { key: "marketCap", available: true, status: "live" },
+    { key: "companyProfile", available: true, status: "live" },
+    { key: "sectorIndustry", available: true, status: "live" },
+    { key: "historicalCandles", available: true, status: "live" }
+  ]);
+
+  assert.equal(full.coverageScore, 100);
+  assert.equal(full.coverageQualityStatus, "complete");
+  assert.equal(missingHistory.coverageScore > missingQuote.coverageScore, true);
+  assert.equal(missingQuote.coverageScore <= 35, true);
+  assert.equal(missingQuote.missingQuote, true);
+  assert.equal(missingHistory.missingHistory, true);
+  assert.ok(missingHistory.confidenceWarnings.some((warning) => /momentum and technical confidence/i.test(warning)));
+  assert.ok(missingQuote.confidenceWarnings.some((warning) => /price-sensitive scores/i.test(warning)));
 });
 
 test("Finnhub blocked candle access does not stale otherwise usable quote data", async () => {
@@ -867,7 +914,10 @@ test("Finnhub stale cache falls back when refresh fails", async () => {
   assert.match(stale.status.detail, /refresh failed/i);
   const diagnostic = stale.status.quoteDiagnostics.find((item) => item.ticker === "MU");
   assert.equal(diagnostic.coverageStatus, "stale");
+  assert.equal(diagnostic.coverageQualityStatus, "stale");
+  assert.equal(diagnostic.coverageScore < 60, true);
   assert.ok(diagnostic.staleFields.includes("Quote"));
+  assert.ok(diagnostic.confidenceWarnings.some((warning) => /Stale provider fields/i.test(warning)));
   assert.equal(JSON.stringify(stale).includes("finnhub-secret-value"), false);
 });
 
@@ -972,6 +1022,8 @@ test("Finnhub invalid credentials, invalid tickers, and rate limits stay safe", 
   assert.equal(rateLimited.status.status, "rate limited");
   assert.match(rateLimited.status.detail, /rate limit|quota/i);
   assert.equal(rateLimited.status.quoteDiagnostics[0].coverageStatus, "missing");
+  assert.equal(rateLimited.status.quoteDiagnostics[0].coverageQualityStatus, "missing");
+  assert.equal(rateLimited.status.quoteDiagnostics[0].coverageScore, 0);
   assert.ok(rateLimited.status.quoteDiagnostics[0].missingFields.includes("quote/current price"));
   assert.match(rateLimited.status.quoteDiagnostics[0].lastError, /rate limit|quota/i);
   assert.equal(JSON.stringify(invalidCredentials).includes("finnhub-secret-value"), false);

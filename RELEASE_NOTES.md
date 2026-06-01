@@ -12,6 +12,7 @@ Date: 2026-05-24
 
 ## What Is Ready
 
+- Finnhub coverage quality scoring now turns per-ticker partial data into visible confidence warnings: missing quote/current price is severe, missing history lowers momentum/technical confidence, and missing profile/metric fields lower quality/fundamental confidence across Daily Brief, Data Sources, Alpha recommendations, Quant Lens, and ticker pages.
 - GitHub ticket sweep: Fidelity CSV verification, CI checks, provider diagnostics/source labels, and OpenAI/thesis summary work are split into reviewable PRs tied to the open issues.
 - Optional OpenAI portfolio explanations are now backend-only, disabled by default, redacted, source-labeled, and fall back to deterministic local explanations when no key is configured or the provider errors.
 - Ticker pages now include a clearer local deterministic thesis/risk summary with review flags, source label, key risks, invalidation criteria, add/trim/review conditions, and guardrail gaps.
