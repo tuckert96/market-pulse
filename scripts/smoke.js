@@ -924,6 +924,8 @@ assert(appJs.includes("growthDashboardWatchlistIdeas"), "app should persist watc
 assert(appJs.includes("quickAddWatchlistIdea"), "app should support simple user-managed watchlist add flow");
 assert(appJs.includes("promoteTickerSignalToIdea"), "app should let ticker signals promote into the idea pipeline");
 assert(indexHtml.includes('class="overview-digest-grid command-brief-grid overview-priority-grid"'), "Overview should use a compact command brief grid");
+assert(indexHtml.indexOf("<h3>Start Here</h3>") < indexHtml.indexOf("<h3>Portfolio Value & Daily Move</h3>"), "Overview should present the primary Daily Brief path before supporting portfolio metrics");
+assert(portfolioViewJs.includes('id="overviewPrimaryNextAction"') && indexHtml.includes(".primary-next-action"), "Overview should expose one primary next inspection path");
 assert(indexHtml.includes("Portfolio Value & Daily Move"), "Overview should lead with portfolio value and daily move");
 assert(indexHtml.includes('id="overviewDailySnapshot"'), "Overview should include a concise Daily Brief snapshot");
 assert(indexHtml.includes('id="overviewHealthSnapshot"'), "Overview should include a concise Portfolio Health snapshot");
@@ -976,7 +978,7 @@ assert(portfolioHealth.nextActions.every((action) => action.href.startsWith("#")
 assert(dailyBrief.groups["Action needed"].length >= 1, "Daily Brief should produce action-needed items from local alerts and drift");
 assert(dailyBrief.groups["Watch closely"].length >= 1, "Daily Brief should produce watch-closely items from movers, signals, disclosures, or social summaries");
 assert(dailyBrief.groups.Informational.length >= 1, "Daily Brief should produce informational source/context items");
-assert(indexHtml.includes(".daily-brief-item-top .status-badge"), "Daily Brief badges should have a responsive wrapping rule");
+assert(indexHtml.includes(".daily-brief-kind") && indexHtml.includes(".daily-brief-source-row") && indexHtml.includes(".daily-brief-item-top"), "Daily Brief rows should keep kind, source labels, and action badges in stable readable regions");
 assert(portfolioViewJs.includes("brief-action") && portfolioViewJs.includes("brief-watch"), "Daily Brief urgency badges should not reuse sample/demo data-mode classes");
 assert(indexHtml.includes(".ticker-section-list > div"), "Ticker movement context rows should override the generic mini-list three-column grid");
 assert(indexHtml.includes(".daily-brief-item-foot > span:empty"), "Daily Brief footer should hide empty placeholders instead of reserving awkward space");

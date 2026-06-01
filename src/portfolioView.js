@@ -415,15 +415,13 @@ function renderThirtySecondBrief(analysis, options = {}) {
   const biggestRisk = analysis.risk?.decisionDashboard?.sectorConcentration?.[0] ||
     analysis.risk?.decisionDashboard?.topPositionWeights?.[0] ||
     null;
-  const nextAction = portfolioNeedsImportReview(uiState)
-    ? "Review CSV import warnings before acting."
-    : displayStatus === "data missing"
-      ? "Import a Fidelity CSV so the dashboard reflects Tucker's real portfolio."
-      : topDailyItem?.title
-      ? `${topDailyItem.title}: ${topDailyItem.detail || "Open the Daily Brief for context."}`
-      : topAlert?.title
-      ? "Review the highest-priority alert, then set target allocations."
-      : "Import real data or set target allocations.";
+  const sourceTrustDetail = portfolioNeedsImportReview(uiState)
+    ? "CSV import has rows or mappings that need review."
+    : topDailyItem?.dataStatus
+    ? `${topDailyItem.dataStatus}. Primary review path lives in Start Here.`
+    : topAlert?.sourceMode
+    ? `${topAlert.sourceMode}. Primary review path lives in Start Here.`
+    : `${marketDataLabel}. Primary review path lives in Start Here.`;
   target.innerHTML = `
     <div class="command-snapshot ${escapeHtml((displayStatus || "data missing").replaceAll(" ", "-"))}">
       <div class="command-snapshot-top">
@@ -439,9 +437,9 @@ function renderThirtySecondBrief(analysis, options = {}) {
           <small>${formatSignedPct(analysis.overview.dailyChangePercent)} · ${escapeHtml(marketDataLabel)}</small>
         </div>
         <div>
-          <span>Next action</span>
-          <b>${escapeHtml(topDailyItem?.actionLabel || (topAlert?.title ? "Review alert" : "Set targets"))}</b>
-          <small>${escapeHtml(nextAction)}</small>
+          <span>Source trust</span>
+          <b>${escapeHtml(marketDataLabel)}</b>
+          <small>${escapeHtml(sourceTrustDetail)}</small>
         </div>
       </div>
       <div class="command-pair">
@@ -480,7 +478,7 @@ function renderOverviewDailySnapshot(brief = {}, uiState = "SAMPLE_MODE") {
           <div class="brief-count"><span>Watch</span><b>--</b></div>
           <div class="brief-count"><span>Info</span><b>--</b></div>
         </div>
-        <div class="priority-line">
+        <div class="priority-line primary-next-action" id="overviewPrimaryNextAction">
           <span>Start here</span>
           <b>${uiState === "SAMPLE_MODE" ? "Sample workflow only" : "Import your portfolio"}</b>
           <small>${uiState === "SAMPLE_MODE" ? "Sample values are not Tucker's real holdings." : "The brief stays quiet until real holdings are loaded."}</small>
@@ -498,14 +496,14 @@ function renderOverviewDailySnapshot(brief = {}, uiState = "SAMPLE_MODE") {
         <div class="brief-count"><span>Info</span><b>${escapeHtml(summary.infoCount || 0)}</b></div>
       </div>
       ${topItem ? `
-        <div class="priority-line">
+        <div class="priority-line primary-next-action" id="overviewPrimaryNextAction">
           <span>First thing to inspect</span>
           <b>${escapeHtml(topItem.title || "Open Daily Brief")}</b>
           <small>${escapeHtml(topItem.reason || topItem.detail || "Review the linked screen for context.")}</small>
           <a class="button-link" href="${escapeHtml(safeHashHref(topItem.href || "#daily"))}">${escapeHtml(dailyBriefItemCta(topItem))}</a>
         </div>
       ` : `
-        <div class="priority-line">
+        <div class="priority-line primary-next-action" id="overviewPrimaryNextAction">
           <span>First thing to inspect</span>
           <b>No review items right now</b>
           <small>Open the Daily Brief for source labels and missing-data notes.</small>
@@ -1364,12 +1362,17 @@ function renderDailyBriefItem(item = {}) {
   return `
     <article class="daily-brief-item ${escapeHtml(String(item.group || "").toLowerCase().replaceAll(" ", "-"))}">
       <div class="daily-brief-item-top">
-        <span class="status-badge">${escapeHtml(dailyBriefKindLabel(item))}</span>
+        <div class="daily-brief-item-heading">
+          <span class="status-badge daily-brief-kind">${escapeHtml(dailyBriefKindLabel(item))}</span>
+          <h3>${escapeHtml(item.title || "Brief item")}</h3>
+        </div>
         <span class="status-badge ${dailyBriefBadgeClass(item)}">${escapeHtml(item.actionLabel || "Review")}</span>
+      </div>
+      <p>${escapeHtml(item.detail || "")}</p>
+      <div class="daily-brief-source-row" aria-label="Brief item source context">
+        <span class="status-badge">${escapeHtml(item.group || "Informational")}</span>
         <span class="status-badge">${escapeHtml(item.dataStatus || "Local")}</span>
       </div>
-      <h3>${escapeHtml(item.title || "Brief item")}</h3>
-      <p>${escapeHtml(item.detail || "")}</p>
       <small><b>Why it matters:</b> ${escapeHtml(item.reason || "Review the linked screen for context.")}</small>
       <div class="daily-brief-item-foot">
         ${ticker ? `<div class="ticker-chips">${ticker}</div>` : "<span></span>"}
@@ -3798,15 +3801,18 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .filter((row) => normalizeTickerSymbol(row.ticker) === ticker)
     .sort((a, b) => timestampSortValue(b.dateTime) - timestampSortValue(a.dateTime))
     .slice(0, 6);
-  const redditSummary = summarizeRedditMentions(options.redditMentions || [])
+  const redditRecords = options.redditMentions || [];
+  const xRecords = options.xUpdates || [];
+  const socialAsOf = options.asOf || latestRecordTimestamp([...redditRecords, ...xRecords], ["sourceAsOf", "detectedAt", "createdAt"]);
+  const redditSummary = summarizeRedditMentions(redditRecords, { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
-  const redditMentions = (options.redditMentions || [])
+  const redditMentions = redditRecords
     .filter((record) => redditMentionTickers(record).includes(ticker))
     .sort((a, b) => timestampSortValue(b.createdAt || b.detectedAt || b.sourceAsOf) - timestampSortValue(a.createdAt || a.detectedAt || a.sourceAsOf))
     .slice(0, 8);
-  const xSummary = summarizeXUpdates(options.xUpdates || [])
+  const xSummary = summarizeXUpdates(xRecords, { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
-  const xUpdates = (options.xUpdates || [])
+  const xUpdates = xRecords
     .filter((record) => normalizeTickerSymbol(record.ticker) === ticker || (record.extractedTickers || []).map(normalizeTickerSymbol).includes(ticker))
     .sort((a, b) => timestampSortValue(b.createdAt || b.detectedAt || b.sourceAsOf) - timestampSortValue(a.createdAt || a.detectedAt || a.sourceAsOf))
     .slice(0, 8);
@@ -5115,6 +5121,14 @@ function tickerMarketDataSourceLabel(model = {}) {
 function timestampSortValue(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function latestRecordTimestamp(records = [], keys = []) {
+  const latest = records.reduce((max, record) => {
+    const recordMax = keys.reduce((innerMax, key) => Math.max(innerMax, timestampSortValue(record?.[key])), 0);
+    return Math.max(max, recordMax);
+  }, 0);
+  return latest ? new Date(latest).toISOString() : undefined;
 }
 
 function tickerSignalSummary(model) {

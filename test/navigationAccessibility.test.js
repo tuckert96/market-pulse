@@ -250,7 +250,9 @@ test("brief and risk layouts do not collapse labels into one-character columns",
   assert.match(indexHtml, /\.mini-list > div/);
   assert.match(indexHtml, /\.mini-list > \.empty\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.doesNotMatch(indexHtml, /overflow-wrap:\s*anywhere/);
-  assert.match(indexHtml, /\.daily-brief-item-top \.status-badge\s*\{[\s\S]*white-space:\s*nowrap/);
+  assert.match(indexHtml, /\.daily-brief-kind,[\s\S]*\.daily-brief-source-row \.status-badge,[\s\S]*\.daily-brief-item-top > \.status-badge\s*\{[\s\S]*white-space:\s*nowrap/);
+  assert.match(indexHtml, /\.daily-brief-item-top\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+  assert.match(indexHtml, /@media \(max-width: 720px\)[\s\S]*\.daily-brief-item-top\s*\{[\s\S]*grid-template-columns:\s*1fr/);
   assert.match(indexHtml, /\.ticker-chips span,[\s\S]*\.ticker-chips a\s*\{[\s\S]*white-space:\s*nowrap/);
   assert.match(indexHtml, /\.risk-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(18rem, 1fr\) max-content/);
   assert.match(indexHtml, /\.risk-row-main\.ranked\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(0, 1fr\)/);

@@ -3980,15 +3980,32 @@
       }
 
       .daily-brief-item-top {
-        justify-content: flex-start;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
       }
 
-      .daily-brief-item-top .status-badge {
+      .daily-brief-item-heading {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .daily-brief-kind,
+      .daily-brief-source-row .status-badge,
+      .daily-brief-item-top > .status-badge {
         max-width: 100%;
-        min-width: fit-content;
         white-space: nowrap;
         overflow-wrap: normal;
         word-break: normal;
+      }
+
+      .daily-brief-source-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        align-items: center;
+        min-width: 0;
       }
 
       .daily-brief-item h3 {
@@ -5232,9 +5249,14 @@
         padding: 18px;
       }
 
-      .command-brief-grid .digest-card.portfolio-snapshot,
       .command-brief-grid .digest-card.daily-priority-card {
-        grid-column: span 3;
+        grid-column: span 4;
+        min-height: 222px;
+        padding: clamp(20px, 2vw, 26px);
+      }
+
+      .command-brief-grid .digest-card.portfolio-snapshot {
+        grid-column: span 2;
         min-height: 222px;
         padding: clamp(20px, 2vw, 26px);
       }
@@ -5249,6 +5271,7 @@
         background:
           linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(247, 248, 255, 0.78)),
           var(--surface-elevated);
+        border-color: rgba(0, 113, 227, 0.18);
       }
 
       .digest-card[href],
@@ -5367,6 +5390,16 @@
         border: 1px solid rgba(0, 0, 0, 0.055);
         border-radius: 16px;
         background: rgba(255, 255, 255, 0.76);
+      }
+
+      .primary-next-action {
+        gap: 8px;
+        border-color: rgba(0, 113, 227, 0.18);
+        background: rgba(0, 113, 227, 0.065);
+      }
+
+      .primary-next-action .button-link {
+        font-weight: 820;
       }
 
       .priority-line .button-link {
@@ -5963,8 +5996,11 @@
           grid-template-columns: repeat(2, 1fr);
         }
 
-        .command-brief-grid .digest-card.portfolio-snapshot,
         .command-brief-grid .digest-card.daily-priority-card {
+          grid-column: span 2;
+        }
+
+        .command-brief-grid .digest-card.portfolio-snapshot {
           grid-column: span 2;
         }
       }
@@ -6214,6 +6250,10 @@
           flex-direction: column;
         }
 
+        .daily-brief-item-top {
+          grid-template-columns: 1fr;
+        }
+
         .overview-health-summary,
         .health-action-row {
           grid-template-columns: 1fr;
@@ -6394,16 +6434,16 @@
             </div>
             <div id="firstRunOnboardingPanel" class="first-run-onboarding" aria-label="First-run setup actions"></div>
             <div class="overview-digest-grid command-brief-grid overview-priority-grid" aria-label="Market Pulse command brief">
+              <article class="digest-card daily-priority-card" data-route="#daily" role="link" tabindex="0" aria-label="Open Daily Command Brief from today's command brief card">
+                <h3>Start Here</h3>
+                <div id="overviewDailySnapshot"></div>
+                <div id="overviewHealthSnapshot"></div>
+                <a class="button-link" href="#daily">Open daily brief</a>
+              </article>
               <article class="digest-card portfolio-snapshot" data-route="#holdings" role="link" tabindex="0" aria-label="Open Holdings from portfolio value and daily move card">
                 <h3>Portfolio Value & Daily Move</h3>
                 <div id="thirtySecondBriefPanel"></div>
                 <a class="button-link" href="#holdings">Open holdings</a>
-              </article>
-              <article class="digest-card daily-priority-card" data-route="#daily" role="link" tabindex="0" aria-label="Open Daily Command Brief from today's command brief card">
-                <h3>Today’s Command Brief</h3>
-                <div id="overviewDailySnapshot"></div>
-                <div id="overviewHealthSnapshot"></div>
-                <a class="button-link" href="#daily">Open daily brief</a>
               </article>
               <article class="digest-card" data-route="#market-drivers" role="link" tabindex="0" aria-label="Open Market Drivers from why markets moved card">
                 <h3>Market Drivers</h3>
