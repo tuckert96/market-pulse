@@ -9,6 +9,7 @@ import { tuckerDemoHoldings } from "../src/portfolioDemoData.js";
 import {
   buildAlphaRecommendations,
   filterAlphaRecommendations,
+  recommendationEvidenceGate,
   recommendationRankBreakdown,
   RECOMMENDATION_RANK_WEIGHTS,
   scoreRecommendationRank
@@ -133,11 +134,11 @@ test("owned, watchlist, risk, opportunity, data issue, recent, and high-confiden
 test("recommendation filters return exact matching categories instead of passing empty sets", () => {
   const rows = [
     { id: "owned", relatedHoldingsStatus: "owned", recommendationType: "review position", riskScore: 0.4, dataQualityScore: 0.8, missingWeakSignals: [], recencyScore: 0.6, confidenceScore: 0.5 },
-    { id: "watchlist", relatedHoldingsStatus: "watchlist", recommendationType: "possible add", riskScore: 0.2, dataQualityScore: 0.8, missingWeakSignals: [], recencyScore: 0.6, confidenceScore: 0.5 },
+    { id: "watchlist", relatedHoldingsStatus: "watchlist", recommendationType: "possible add", riskScore: 0.2, dataQualityScore: 0.8, missingWeakSignals: [], supportingSignals: ["fresh quote", "thesis support"], recencyScore: 0.6, confidenceScore: 0.5 },
     { id: "risk", relatedHoldingsStatus: "owned", recommendationType: "trim risk", riskScore: 0.8, dataQualityScore: 0.8, missingWeakSignals: [], recencyScore: 0.6, confidenceScore: 0.5 },
     { id: "data", relatedHoldingsStatus: "portfolio", recommendationType: "stale data review", riskScore: 0.3, dataQualityScore: 0.3, missingWeakSignals: ["missing live quote", "stale cache"], recencyScore: 0.6, confidenceScore: 0.5 },
-    { id: "recent", relatedHoldingsStatus: "signal-only", recommendationType: "watch", riskScore: 0.3, dataQualityScore: 0.8, missingWeakSignals: [], recencyScore: 0.9, confidenceScore: 0.5 },
-    { id: "confidence", relatedHoldingsStatus: "signal-only", recommendationType: "investigate", riskScore: 0.3, dataQualityScore: 0.8, missingWeakSignals: [], recencyScore: 0.6, confidenceScore: 0.8 }
+    { id: "recent", relatedHoldingsStatus: "signal-only", recommendationType: "watch", riskScore: 0.3, dataQualityScore: 0.8, missingWeakSignals: [], supportingSignals: ["fresh quote", "factor support"], recencyScore: 0.9, confidenceScore: 0.5 },
+    { id: "confidence", relatedHoldingsStatus: "signal-only", recommendationType: "investigate", riskScore: 0.3, dataQualityScore: 0.8, missingWeakSignals: [], supportingSignals: ["fresh quote", "factor support"], recencyScore: 0.6, confidenceScore: 0.8 }
   ];
 
   assert.deepEqual(filterAlphaRecommendations(rows, "owned").map((row) => row.id), ["owned", "risk"]);
@@ -148,6 +149,91 @@ test("recommendation filters return exact matching categories instead of passing
   assert.deepEqual(filterAlphaRecommendations(rows, "recent").map((row) => row.id), ["recent"]);
   assert.deepEqual(filterAlphaRecommendations(rows, "high-confidence").map((row) => row.id), ["confidence"]);
   assert.deepEqual(filterAlphaRecommendations(rows, "not-a-filter").map((row) => row.id), rows.map((row) => row.id));
+});
+
+test("thin-data opportunities are confidence-capped and excluded from high-confidence filters", () => {
+  const recommendations = buildAlphaRecommendations({
+    analysis: { holdings: [] },
+    tickerSignals: [{
+      id: "ticker-signal-ai",
+      ticker: "AI",
+      combinedScore: 82,
+      confidenceScore: 0.86,
+      materialityScore: 0.72,
+      concentrationRiskScore: 0.12,
+      marketDataPrice: null,
+      sourceMode: "mock-local-only",
+      marketDataMode: "mock",
+      mockData: true,
+      whyScoreIsHigh: ["social mentions moved quickly"],
+      missingData: ["live market quote", "price history", "thesis evidence"],
+      warnings: ["Sample/local score only"],
+      topHeadline: "AI: thin source spike",
+      explanation: "Local-only signal."
+    }],
+    watchlistIdeas: [{ ticker: "AI", status: "watching" }],
+    marketDataStatus: { status: "mock/sample mode" },
+    uiState: "IMPORTED_CLEAN",
+    asOf
+  });
+  const row = recommendations.find((item) => item.ticker === "AI");
+
+  assert.ok(row);
+  assert.equal(row.evidenceGate.capped, true);
+  assert.equal(row.confidenceScore <= 0.56, true);
+  assert.ok(row.evidenceGateReasons.some((reason) => /Confidence cap/i.test(reason)));
+  assert.ok(row.missingWeakSignals.some((reason) => /Sample or mock|Market history|Data quality/i.test(reason)));
+  assert.ok(row.whyThisRank.some((reason) => /Confidence is capped/i.test(reason)));
+  assert.equal(filterAlphaRecommendations(recommendations, "high-confidence").some((item) => item.ticker === "AI"), false);
+  assert.equal(filterAlphaRecommendations(recommendations, "opportunities").some((item) => item.ticker === "AI"), false);
+});
+
+test("urgent risk reviews can rank high without becoming high-confidence opportunities", () => {
+  const recommendations = buildAlphaRecommendations({
+    analysis: { holdings: [{ ticker: "SOXL", marketValue: 18000, portfolioWeight: 0.22, riskLevel: "Very High", isLeveragedEtf: true }] },
+    alerts: [{
+      id: "soxl-leverage",
+      ticker: "SOXL",
+      title: "SOXL leveraged exposure needs review",
+      detail: "Leveraged ETF exposure is above the local threshold.",
+      severity: "critical",
+      score: 92,
+      type: "leveraged_etf",
+      ruleId: "leveraged-exposure",
+      createdAt: asOf
+    }],
+    marketDataStatus: { status: "not configured", detail: "No live market data key." },
+    uiState: "IMPORTED_CLEAN",
+    asOf
+  });
+  const soxl = recommendations.find((row) => row.ticker === "SOXL");
+
+  assert.ok(soxl);
+  assert.equal(soxl.recommendationType, "review position");
+  assert.ok(soxl.evidenceGate.floorReasons.some((reason) => /risk or alert rules/i.test(reason)));
+  assert.equal(soxl.confidenceScore < 0.68, true);
+  assert.equal(soxl.compositeRankScore >= 50, true);
+  assert.ok(soxl.whyThisRank.some((reason) => /High urgency, lower confidence|risk or alert rules/i.test(reason)));
+  assert.equal(filterAlphaRecommendations(recommendations, "risk").some((row) => row.ticker === "SOXL"), true);
+  assert.equal(filterAlphaRecommendations(recommendations, "opportunities").some((row) => row.ticker === "SOXL"), false);
+  assert.equal(filterAlphaRecommendations(recommendations, "high-confidence").some((row) => row.ticker === "SOXL"), false);
+});
+
+test("evidence gate names strong quality rows that still lack source freshness", () => {
+  const gate = recommendationEvidenceGate({
+    recommendationType: "possible add",
+    confidenceScore: 0.82,
+    dataQualityScore: 0.72,
+    sourceFreshness: "stale market data",
+    sourceFreshnessScore: 0.3,
+    relatedHoldingsStatus: "watchlist",
+    supportingSignals: ["good Quant Lens", "thesis support"],
+    missingWeakSignals: ["stale market data"]
+  });
+
+  assert.equal(gate.capped, true);
+  assert.equal(gate.label, "Strong quality, missing evidence");
+  assert.ok(gate.capReasons.some((reason) => /Stale provider|Source freshness/i.test(reason)));
 });
 
 test("weak data cannot rank highly without a visible warning", () => {

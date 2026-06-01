@@ -37,6 +37,9 @@ export const DEFAULT_RECOMMENDATION_FILTERS = Object.freeze([
   "high-confidence"
 ]);
 
+const OPPORTUNITY_RECOMMENDATION_TYPES = new Set(["possible add", "add to watchlist", "investigate", "watch"]);
+const RISK_REVIEW_RECOMMENDATION_TYPES = new Set(["trim risk", "possible exit/reduce", "review position"]);
+
 export function buildAlphaRecommendations({
   analysis = {},
   alphaSignals = [],
@@ -67,12 +70,13 @@ export function buildAlphaRecommendations({
 
   return dedupeRecommendations(recommendations)
     .map((recommendation) => {
-      const rankMath = recommendationRankBreakdown(recommendation);
+      const gatedRecommendation = applyRecommendationEvidenceGate(recommendation);
+      const rankMath = recommendationRankBreakdown(gatedRecommendation);
       return {
-        ...recommendation,
+        ...gatedRecommendation,
         compositeRankScore: rankMath.finalScore,
         rankMath,
-        whyThisRank: explainRecommendationRank(recommendation)
+        whyThisRank: explainRecommendationRank(gatedRecommendation)
       };
     })
     .sort((a, b) =>
@@ -146,16 +150,21 @@ export function filterAlphaRecommendations(recommendations = [], filter = "all")
     if (normalized === "owned") return recommendation.relatedHoldingsStatus === "owned";
     if (normalized === "watchlist") return recommendation.relatedHoldingsStatus === "watchlist";
     if (normalized === "risk") return ["trim risk", "possible exit/reduce", "review position", "stale data review"].includes(recommendation.recommendationType) || recommendation.riskScore >= 0.65;
-    if (normalized === "opportunities") return ["possible add", "add to watchlist", "investigate", "watch"].includes(recommendation.recommendationType);
+    if (normalized === "opportunities") return OPPORTUNITY_RECOMMENDATION_TYPES.has(recommendation.recommendationType) && !recommendationHasWeakEvidence(recommendation);
     if (normalized === "data-issues") return recommendation.recommendationType === "stale data review" || recommendation.dataQualityScore < 0.45 || (recommendation.missingWeakSignals || []).length >= 2;
     if (normalized === "recent") return recommendation.recencyScore >= 0.72;
-    if (normalized === "high-confidence") return recommendation.confidenceScore >= 0.68;
+    if (normalized === "high-confidence") return recommendationHasHighConfidenceEvidence(recommendation);
     return true;
   });
 }
 
 export function explainRecommendationRank(recommendation = {}) {
   const drivers = [];
+  const evidenceGate = recommendation.evidenceGate || {};
+  const evidenceGateReasons = [
+    ...(evidenceGate.capReasons || []),
+    ...(evidenceGate.floorReasons || [])
+  ];
   if (recommendation.portfolioWeight >= 0.1 && recommendation.ticker && recommendation.relatedHoldingsStatus === "sample") {
     drivers.push(`Sample context because ${recommendation.ticker} is ${percentLabel(recommendation.portfolioWeight)} of the sample portfolio. Import holdings before treating this as Tucker-specific.`);
   } else if (recommendation.portfolioWeight >= 0.1 && recommendation.ticker) {
@@ -176,8 +185,139 @@ export function explainRecommendationRank(recommendation = {}) {
   if (recommendation.dataQualityScore < 0.45) drivers.push("Lower confidence because data is missing, stale, mock, or weakly sourced.");
   if (recommendation.sourceFreshnessScore < 0.45) drivers.push("Lower rank because one or more source labels are sample, stale, missing, not configured, or erroring.");
   if (recommendation.riskScore >= 0.7) drivers.push("Risk raises review priority because exposure, leverage, target drift, or concentration is elevated.");
+  if (evidenceGate.label) drivers.push(`${evidenceGate.label}: ${evidenceGateReasons.slice(0, 2).join(" ") || "confidence reflects available evidence only."}`);
+  if (evidenceGate.capped) drivers.push(`Confidence is capped at ${percentLabel(evidenceGate.confidenceCapScore)} until missing or stale evidence improves.`);
+  if (evidenceGate.floorApplied) drivers.push("Urgent risk items can still rank for review, but the confidence floor does not turn them into opportunity recommendations.");
   if (!drivers.length) drivers.push("Rank is moderate because the available inputs are useful but not urgent.");
   return uniqueStrings(drivers);
+}
+
+export function applyRecommendationEvidenceGate(recommendation = {}) {
+  const evidenceGate = recommendationEvidenceGate(recommendation);
+  const rawConfidence = score01(recommendation.confidenceScore);
+  const flooredConfidence = Math.max(rawConfidence, evidenceGate.confidenceFloorScore);
+  const gatedConfidence = Math.min(flooredConfidence, evidenceGate.confidenceCapScore);
+  const gateNotes = [
+    ...evidenceGate.capReasons.map((reason) => `Confidence cap: ${reason}`),
+    ...evidenceGate.floorReasons.map((reason) => `${evidenceGate.floorApplied ? "Confidence floor" : "Urgency floor"}: ${reason}`)
+  ];
+
+  return {
+    ...recommendation,
+    rawConfidenceScore: rawConfidence,
+    confidenceScore: score01(gatedConfidence),
+    evidenceGate,
+    evidenceGateLabel: evidenceGate.label,
+    evidenceGateReasons: gateNotes,
+    missingWeakSignals: uniqueStrings([
+      ...(recommendation.missingWeakSignals || []),
+      ...gateNotes
+    ]).slice(0, 7)
+  };
+}
+
+export function recommendationEvidenceGate(recommendation = {}) {
+  const dataQuality = score01(recommendation.dataQualityScore);
+  const sourceFreshness = score01(recommendation.sourceFreshnessScore ?? sourceFreshnessScore(recommendation.sourceFreshness));
+  const sourceText = [
+    recommendation.sourceFreshness,
+    recommendation.sourceModes?.join?.(" "),
+    recommendation.missingWeakSignals?.join?.(" "),
+    recommendation.supportingSignals?.join?.(" ")
+  ].filter(Boolean).join(" ").toLowerCase();
+  const missingSignals = recommendation.missingWeakSignals || [];
+  const supportSignals = recommendation.supportingSignals || [];
+  const opportunity = OPPORTUNITY_RECOMMENDATION_TYPES.has(recommendation.recommendationType);
+  const riskReview = RISK_REVIEW_RECOMMENDATION_TYPES.has(recommendation.recommendationType);
+  const dataIssue = recommendation.recommendationType === "stale data review";
+  const signalOnlyOrWatchlist = ["signal-only", "watchlist", "sample"].includes(recommendation.relatedHoldingsStatus);
+  const capCandidates = [{ score: 1, reason: "" }];
+  const capReasons = [];
+  const addCap = (score, reason) => {
+    const normalizedScore = score01(score);
+    capCandidates.push({ score: normalizedScore, reason });
+    if (reason) capReasons.push(reason);
+  };
+
+  if (dataQuality < 0.3) addCap(0.42, "Data quality is very thin.");
+  else if (dataQuality < 0.45) addCap(0.56, "Data quality is weak or incomplete.");
+  else if (dataQuality < 0.55) addCap(0.66, "Data quality is usable but not strong enough for high confidence.");
+
+  if (sourceFreshness < 0.3) addCap(0.5, "Source freshness is missing, stale, or erroring.");
+  else if (sourceFreshness < 0.45) addCap(0.62, "Source freshness limits confidence.");
+
+  if (/error|failed|not configured|missing/.test(sourceText)) addCap(0.48, "Required source data is missing, not configured, or erroring.");
+  else if (/stale/.test(sourceText)) addCap(0.58, "Stale provider or thesis data limits confidence.");
+  else if (/mock|sample|demo/.test(sourceText)) addCap(0.56, "Sample or mock data cannot support high confidence.");
+
+  if (/no thesis|thesis.*missing|missing thesis/i.test(sourceText)) addCap(0.64, "Thesis evidence is missing.");
+  if (/history|historical|price history|fresh market quote/i.test(sourceText)) addCap(0.66, "Market history or fresh quote evidence is missing.");
+  if (missingSignals.length >= 4) addCap(0.58, "Several evidence gaps are still unresolved.");
+  else if (missingSignals.length >= 2) addCap(0.7, "Multiple weak or missing signals limit confidence.");
+  if (opportunity && signalOnlyOrWatchlist && supportSignals.length < 2) addCap(0.6, "Opportunity-style rows need more than one support layer.");
+  if (recommendation.relatedHoldingsStatus === "sample") addCap(0.52, "Sample portfolio context cannot be treated as Tucker-specific confidence.");
+
+  const strongestCap = capCandidates.reduce((lowest, candidate) => candidate.score < lowest.score ? candidate : lowest, capCandidates[0]);
+  const floorReasons = [];
+  let confidenceFloorScore = 0;
+  if (riskReview && (score01(recommendation.urgencyScore) >= 0.7 || score01(recommendation.riskScore) >= 0.7 || score01(recommendation.alertSeverityScore) >= 0.7)) {
+    confidenceFloorScore = 0.5;
+    floorReasons.push("Deterministic risk or alert rules keep the item reviewable even when evidence is incomplete.");
+  }
+  if (dataIssue && score01(recommendation.urgencyScore) >= 0.7) {
+    confidenceFloorScore = Math.max(confidenceFloorScore, 0.46);
+    floorReasons.push("A stale or errored data source deserves review even though investment confidence stays low.");
+  }
+  const rawConfidence = score01(recommendation.confidenceScore);
+  const gatedConfidence = Math.min(Math.max(rawConfidence, confidenceFloorScore), strongestCap.score);
+  const capped = gatedConfidence < rawConfidence - 0.001;
+  const floorApplied = confidenceFloorScore > rawConfidence + 0.001 && gatedConfidence >= confidenceFloorScore;
+  const label = evidenceGateLabel({
+    recommendation,
+    capped,
+    confidenceCapScore: strongestCap.score,
+    gatedConfidence,
+    dataQuality,
+    sourceFreshness,
+    opportunity
+  });
+
+  return {
+    confidenceCapScore: strongestCap.score,
+    confidenceFloorScore,
+    gatedConfidenceScore: gatedConfidence,
+    rawConfidenceScore: rawConfidence,
+    capped,
+    floorApplied,
+    label,
+    capReasons: capped ? uniqueStrings(capReasons).slice(0, 5) : [],
+    floorReasons: floorApplied || floorReasons.length ? uniqueStrings(floorReasons).slice(0, 3) : []
+  };
+}
+
+function evidenceGateLabel({ recommendation = {}, capped = false, confidenceCapScore = 1, gatedConfidence = 0, dataQuality = 0, sourceFreshness = 0, opportunity = false } = {}) {
+  if (score01(recommendation.urgencyScore) >= 0.7 && gatedConfidence < 0.68) return "High urgency, lower confidence";
+  if (dataQuality >= 0.62 && (capped || sourceFreshness < 0.55)) return "Strong quality, missing evidence";
+  if (opportunity && confidenceCapScore < 0.68) return "Opportunity needs more evidence";
+  if (capped) return "Evidence capped";
+  if (gatedConfidence >= 0.68 && dataQuality >= 0.55 && sourceFreshness >= 0.5) return "High confidence evidence";
+  return "Moderate evidence";
+}
+
+function recommendationHasWeakEvidence(recommendation = {}) {
+  const gate = recommendation.evidenceGate || recommendationEvidenceGate(recommendation);
+  return recommendation.dataQualityScore < 0.45 ||
+    score01(recommendation.sourceFreshnessScore ?? sourceFreshnessScore(recommendation.sourceFreshness)) < 0.45 ||
+    gate.confidenceCapScore < 0.68 ||
+    /stale|missing|not configured|mock|sample|error/i.test(`${recommendation.sourceFreshness || ""} ${(recommendation.sourceModes || []).join(" ")}`);
+}
+
+function recommendationHasHighConfidenceEvidence(recommendation = {}) {
+  const gate = recommendation.evidenceGate || recommendationEvidenceGate(recommendation);
+  return score01(recommendation.confidenceScore) >= 0.68 &&
+    score01(recommendation.dataQualityScore) >= 0.55 &&
+    score01(recommendation.sourceFreshnessScore ?? sourceFreshnessScore(recommendation.sourceFreshness)) >= 0.5 &&
+    !gate.capped;
 }
 
 function recommendationsFromAlphaSignals(alphaSignals, context) {

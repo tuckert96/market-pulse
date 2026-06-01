@@ -113,6 +113,7 @@ Date: 2026-05-24
 - Quant score history is stored as compact local score metadata only and remains separated between Sample and Imported portfolio modes.
 - Alpha recommendations can now cite Institutional Quant Lens support or missing factor data without turning the rank into a black-box buy/sell recommendation.
 - Alpha Engine quality ranking now uses the Institutional Quant Lens and academic factor discipline as first-class holding-quality inputs, while keeping review priority separate from quality and preserving no-trade-command guardrails.
+- Alpha Engine recommendations now pass through explicit evidence gates: thin-data opportunities are confidence-capped, stale/missing source states stay visible, urgent risk reviews can still rank for attention, and high-confidence filters exclude capped rows.
 - Quant/Alpha documentation now spells out the no-fake-precision display contract: whole-number review scores, coverage/confidence/source labels, evidence-cap warnings, academic validation warnings, and no conversion of factor scores into expected returns, price targets, probabilities, or trade instructions.
 - App shell and Data Sources now use one data-mode vocabulary: Sample, Imported, Live, Cached, Stale, Error, and Not configured. The header shows persistent Portfolio and Market data modes so sample data cannot quietly look imported or live.
 - Internal provider states still capture implementation detail, but the UI collapses them into Sample, Imported, Live, Cached, Stale, Error, or Not configured.
