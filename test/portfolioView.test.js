@@ -758,6 +758,32 @@ test("Alpha Engine quality rank is capped when evidence coverage is weak", () =>
   assert.notEqual(rows[0].postureLabel, "Strong");
 });
 
+test("Alpha Engine holding rows surface recommendation confidence gate labels", () => {
+  const rows = buildRankedAlphaHoldingRows([
+    { ticker: "GATE", name: "Gate Test Co", account: "Taxable", marketValue: 5000, portfolioWeight: 0.05, assetClass: "Equity", riskLevel: "Medium", thesisStatus: "Active", confidenceLevel: "Medium", quant: 4.1 }
+  ], [
+    {
+      ticker: "GATE",
+      recommendationType: "possible add",
+      confidenceScore: 0.56,
+      dataQualityScore: 0.42,
+      sourceFreshnessScore: 0.3,
+      evidenceGate: {
+        label: "Opportunity needs more evidence",
+        capped: true,
+        confidenceCapScore: 0.56,
+        capReasons: ["Data quality is weak or incomplete."]
+      },
+      missingWeakSignals: ["Confidence cap: Data quality is weak or incomplete."]
+    }
+  ], [
+    { ticker: "GATE", institutionalQuantScore: 72, institutionalQuantDataCoverageScore: 42, institutionalQuantConfidenceScore: 48, combinedScore: 60 }
+  ], "all", "IMPORTED_CLEAN");
+
+  assert.equal(rows[0].confidenceGateLabel, "Opportunity needs more evidence · cap 56/100");
+  assert.ok(rows[0].missingWeakSignals.some((item) => /Confidence cap/i.test(item)));
+});
+
 test("Alpha Engine quality rank does not change from prediction sidecar score alone", () => {
   const holding = { ticker: "MU", name: "Micron", account: "Taxable", marketValue: 12000, portfolioWeight: 0.12, assetClass: "Equity", riskLevel: "Medium", thesisStatus: "Active", confidenceLevel: "High" };
   const baseSignal = { ticker: "MU", institutionalQuantScore: 82, institutionalQuantDataCoverageScore: 78, institutionalQuantConfidenceScore: 76, combinedScore: 70, priceMomentumScore: 0.65, updatedAt: "2026-05-23T12:00:00Z" };

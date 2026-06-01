@@ -115,6 +115,10 @@ Each recommendation includes:
 - `alertSeverityScore`
 - `priceMovementScore`
 - `concentrationRiskScore`
+- `rawConfidenceScore`
+- `evidenceGate`
+- `evidenceGateLabel`
+- `evidenceGateReasons`
 - `portfolioWeight`
 - `compositeRankScore`
 - `supportingSignals`
@@ -142,6 +146,8 @@ compositeRankScore =
 ```
 
 Low-quality data receives an additional penalty, and stale/mock/not-configured/error source states are called out in the row/detail view rather than hidden. Finnhub or other provider quote inputs can raise source freshness and price-movement context when configured, but the recommendation remains a local review-priority score rather than a return prediction. Low-quality social or rumor-like data can still appear, but it should rank below better-supported portfolio risks and opportunities unless there is strong supporting evidence.
+
+Recommendation confidence now runs through an explicit evidence gate before ranking. The gate can cap confidence when source breadth is thin, market data is stale/missing, thesis evidence is absent, price history is unavailable, the row is sample/mock, or several weak-data flags are present. Urgent local risk alerts can receive a review floor so they still rank as "look at this now," but that floor does not turn the item into a high-confidence opportunity. The UI uses labels such as `High urgency, lower confidence`, `Opportunity needs more evidence`, and `Strong quality, missing evidence` so urgency, quality, source completeness, and risk are not blended into one overconfident score.
 
 The holdings ranking now uses the Institutional Quant Lens as a first-class quality input. That lens is documented in `docs/quantitative-engine.md` and is still separate from recommendation rank, ticker confluence, and alert severity. A high Quant Lens score can lift the Alpha quality score only when academic factor discipline, source coverage, and validation guardrails support it. Missing, stale, or thin factor inputs remain visible and can lower data quality or cap the integrated quality score.
 
@@ -175,7 +181,7 @@ Recommendation inputs currently include:
 - event calendar items
 - market-data source health
 
-Filters are available for All, Owned, Watchlist, Risk, Opportunities, Data issues, Recent, and High confidence. Each holding row exposes an `Explain score` control with the weighted quality-score math, review-priority math, missing-data handling, and the "Why this rank?" drivers such as high portfolio impact, recency, low data quality, or elevated concentration risk. These are calculated local scores, not AI explanations.
+Filters are available for All, Owned, Watchlist, Risk, Opportunities, Data issues, Recent, and High confidence. Opportunity and High confidence filters exclude evidence-capped thin-data rows. Each holding row exposes an `Explain score` control with the weighted quality-score math, review-priority math, confidence-gate label, missing-data handling, and the "Why this rank?" drivers such as high portfolio impact, recency, low data quality, or elevated concentration risk. These are calculated local scores, not AI explanations.
 
 ## Quant And No-Fake-Precision Guardrails
 
