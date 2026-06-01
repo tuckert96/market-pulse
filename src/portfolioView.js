@@ -3798,13 +3798,14 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .filter((row) => normalizeTickerSymbol(row.ticker) === ticker)
     .sort((a, b) => timestampSortValue(b.dateTime) - timestampSortValue(a.dateTime))
     .slice(0, 6);
-  const redditSummary = summarizeRedditMentions(options.redditMentions || [])
+  const socialAsOf = options.asOf || latestRecordTimestamp([...(options.redditMentions || []), ...(options.xUpdates || [])]) || new Date().toISOString();
+  const redditSummary = summarizeRedditMentions(options.redditMentions || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const redditMentions = (options.redditMentions || [])
     .filter((record) => redditMentionTickers(record).includes(ticker))
     .sort((a, b) => timestampSortValue(b.createdAt || b.detectedAt || b.sourceAsOf) - timestampSortValue(a.createdAt || a.detectedAt || a.sourceAsOf))
     .slice(0, 8);
-  const xSummary = summarizeXUpdates(options.xUpdates || [])
+  const xSummary = summarizeXUpdates(options.xUpdates || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const xUpdates = (options.xUpdates || [])
     .filter((record) => normalizeTickerSymbol(record.ticker) === ticker || (record.extractedTickers || []).map(normalizeTickerSymbol).includes(ticker))
@@ -5115,6 +5116,11 @@ function tickerMarketDataSourceLabel(model = {}) {
 function timestampSortValue(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function latestRecordTimestamp(records = []) {
+  const latest = records.reduce((max, record) => Math.max(max, timestampSortValue(record?.createdAt || record?.detectedAt || record?.sourceAsOf || record?.timestamp)), 0);
+  return latest ? new Date(latest).toISOString() : "";
 }
 
 function tickerSignalSummary(model) {

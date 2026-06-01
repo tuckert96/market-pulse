@@ -33,6 +33,7 @@ import {
   politicianTradeProviderStatuses
 } from "../src/politicianTrades.js";
 import {
+  assertSafeGeneratedExplanationText,
   buildOpenAIExplanationConfig,
   buildOpenAIResponsesRequest,
   buildPortfolioExplanationFallback,
@@ -616,6 +617,7 @@ async function portfolioExplanationResponse(body = {}, env = process.env, option
     }
     const outputText = extractOpenAIResponseText(payload);
     if (!outputText) throw new Error("OpenAI response did not include usable explanation text.");
+    const narrative = assertSafeGeneratedExplanationText(redactExplanationSecretLikeText(outputText, [env.OPENAI_API_KEY]));
 
     return ok({
       ok: true,
@@ -632,7 +634,7 @@ async function portfolioExplanationResponse(body = {}, env = process.env, option
       explanation: {
         ...fallback.explanation,
         title: "AI-assisted portfolio explanation",
-        narrative: outputText,
+        narrative,
         caveats: [
           ...(fallback.explanation.caveats || []),
           "AI-assisted text is grounded in the supplied dashboard data and should be reviewed for accuracy."
