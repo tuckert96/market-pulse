@@ -3798,13 +3798,14 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .filter((row) => normalizeTickerSymbol(row.ticker) === ticker)
     .sort((a, b) => timestampSortValue(b.dateTime) - timestampSortValue(a.dateTime))
     .slice(0, 6);
-  const redditSummary = summarizeRedditMentions(options.redditMentions || [])
+  const socialAsOf = options.asOf || latestRecordTimestamp([...(options.redditMentions || []), ...(options.xUpdates || [])]) || new Date().toISOString();
+  const redditSummary = summarizeRedditMentions(options.redditMentions || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const redditMentions = (options.redditMentions || [])
     .filter((record) => redditMentionTickers(record).includes(ticker))
     .sort((a, b) => timestampSortValue(b.createdAt || b.detectedAt || b.sourceAsOf) - timestampSortValue(a.createdAt || a.detectedAt || a.sourceAsOf))
     .slice(0, 8);
-  const xSummary = summarizeXUpdates(options.xUpdates || [])
+  const xSummary = summarizeXUpdates(options.xUpdates || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const xUpdates = (options.xUpdates || [])
     .filter((record) => normalizeTickerSymbol(record.ticker) === ticker || (record.extractedTickers || []).map(normalizeTickerSymbol).includes(ticker))
@@ -4917,7 +4918,7 @@ function renderTickerProviderCoverage(model = {}) {
     <div class="ticker-provider-coverage">
       <div>
         <b>Provider coverage</b>
-        <span>${escapeHtml(coverage.coverageSummary || "Coverage pending")} · ${escapeHtml(coverageGapSummary(coverage))}</span>
+        <span>${escapeHtml(coverage.coverageQualityLabel || coverage.coverageSummary || "Coverage pending")} · ${escapeHtml(coverageGapSummary(coverage))}</span>
       </div>
       <div class="coverage-chip-row" aria-label="Provider field coverage for ${escapeHtml(model.ticker)}">
         ${fields.map((field) => `
@@ -4927,6 +4928,7 @@ function renderTickerProviderCoverage(model = {}) {
           </span>
         `).join("")}
       </div>
+      ${(coverage.confidenceWarnings || []).length ? `<p class="section-note">${escapeHtml(coverage.confidenceWarnings.slice(0, 2).join(" "))}</p>` : ""}
       ${coverage.lastError ? `<p class="section-note">Provider note: ${escapeHtml(String(coverage.lastError))}</p>` : ""}
     </div>
   `;
@@ -5115,6 +5117,14 @@ function tickerMarketDataSourceLabel(model = {}) {
 function timestampSortValue(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function latestRecordTimestamp(records = []) {
+  const newest = (records || [])
+    .map((record) => timestampSortValue(record?.createdAt || record?.detectedAt || record?.sourceAsOf || record?.timestamp))
+    .filter((value) => value > 0)
+    .sort((a, b) => b - a)[0];
+  return newest ? new Date(newest).toISOString() : "";
 }
 
 function tickerSignalSummary(model) {
@@ -7572,14 +7582,14 @@ function marketDataCoverageTableHtml(rows = []) {
             const fields = coverageFieldsByKey(row);
             return `
               <tr>
-                <th scope="row">${escapeHtml(row.ticker || "Unknown")}</th>
+                <th scope="row">${row.ticker ? `<a class="ticker-link" href="#/ticker/${encodeURIComponent(row.ticker)}">${escapeHtml(row.ticker)}</a>` : "Unknown"}</th>
                 <td><span class="status-badge ${dataModeBadgeClass(mode)}">${escapeHtml(dataModeLabel(mode))}</span></td>
-                <td>${escapeHtml(row.coverageSummary || "Coverage pending")}</td>
+                <td>${escapeHtml(row.coverageQualityLabel || row.coverageSummary || "Coverage pending")}</td>
                 ${PROVIDER_COVERAGE_FIELD_ORDER.map(([key]) => {
                   const field = fields[key] || {};
                   return `<td><span class="data-tag ${coverageFieldBadgeClass(field)}">${escapeHtml(coverageFieldStatusLabel(field))}</span></td>`;
                 }).join("")}
-                <td>${escapeHtml(coverageGapSummary(row))}</td>
+                <td>${escapeHtml(coverageGapSummary(row))}${(row.confidenceWarnings || []).length ? `<br><small>${escapeHtml(row.confidenceWarnings[0])}</small>` : ""}</td>
                 <td>${row.fetchedAt ? escapeHtml(formatDateTime(row.fetchedAt)) : "Not available"}</td>
               </tr>
             `;

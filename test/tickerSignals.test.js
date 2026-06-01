@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMockMarketDataSnapshot } from "../src/marketDataProvider.js";
+import { buildMarketDataSnapshot, buildMockMarketDataSnapshot } from "../src/marketDataProvider.js";
 import {
   buildCombinedTickerSignals,
   scoreConcentrationRisk,
@@ -327,6 +327,71 @@ test("combined ticker signals separate local scoring from live market data input
     /server-side market data input/i.test(driver.reason) &&
     !/not a live price feed/i.test(driver.reason)
   ));
+});
+
+test("partial provider coverage lowers ticker signal confidence and names missing fields", () => {
+  const fullSnapshot = buildMarketDataSnapshot({
+    provider: { id: "finnhub", label: "Finnhub", mode: "live", configured: true, liveProviderCalls: true },
+    requestedTickers: ["MU"],
+    asOf,
+    now: asOf,
+    quotes: [{
+      ticker: "MU",
+      name: "Micron Technology, Inc.",
+      price: 132,
+      dailyChange: 2,
+      dailyChangePercent: 0.015,
+      volume: 1000,
+      averageVolume: 900,
+      marketCap: 150_000_000_000,
+      sector: "Semiconductors",
+      industry: "Memory",
+      fiftyTwoWeekHigh: 150,
+      fiftyTwoWeekLow: 80,
+      historicalPrices: [{ date: "2026-05-22", close: 130 }, { date: "2026-05-23", close: 132 }],
+      providerLabel: "Finnhub",
+      sourceMode: "live",
+      liveProviderCalls: true,
+      resourceFreshness: { quote: "live", profile: "live", metric: "live", history: "live" }
+    }]
+  });
+  const partialSnapshot = buildMarketDataSnapshot({
+    provider: { id: "finnhub", label: "Finnhub", mode: "live", configured: true, liveProviderCalls: true },
+    requestedTickers: ["MU"],
+    asOf,
+    now: asOf,
+    quotes: [{
+      ticker: "MU",
+      name: "MU",
+      price: 132,
+      dailyChange: 2,
+      dailyChangePercent: 0.015,
+      providerLabel: "Finnhub",
+      sourceMode: "live",
+      liveProviderCalls: true,
+      resourceFreshness: { quote: "live", profile: "missing", metric: "missing", history: "missing" }
+    }]
+  });
+  const [full] = buildCombinedTickerSignals({
+    holdings: [{ ticker: "MU", marketValue: 1000, portfolioWeight: 0.02, thesisStatus: "Active", riskLevel: "Medium" }],
+    marketDataSnapshot: fullSnapshot,
+    watchlist: ["MU"],
+    asOf
+  });
+  const [partial] = buildCombinedTickerSignals({
+    holdings: [{ ticker: "MU", marketValue: 1000, portfolioWeight: 0.02, thesisStatus: "Active", riskLevel: "Medium" }],
+    marketDataSnapshot: partialSnapshot,
+    watchlist: ["MU"],
+    asOf
+  });
+
+  assert.equal(full.marketDataCoverageScore, 100);
+  assert.equal(partial.marketDataCoverageScore < full.marketDataCoverageScore, true);
+  assert.equal(partial.confidenceScore < full.confidenceScore, true);
+  assert.ok(partial.marketDataCoverageWarnings.some((warning) => /momentum and technical confidence|quality and fundamental confidence/i.test(warning)));
+  assert.ok(partial.missingData.some((item) => /historical candles|provider profile\/fundamental fields|quality and fundamental confidence/i.test(item)));
+  assert.ok(partial.institutionalQuantMissingData.some((item) => /provider historical candles|provider profile\/fundamental fields|historical price series/i.test(item)));
+  assert.ok(partial.warnings.some((warning) => /confidence/i.test(warning)));
 });
 
 test("combined ticker signals preserve academic quant inputs from holdings", () => {

@@ -41,6 +41,7 @@ export function buildDailyCommandBrief({
         ...alertItems(analysis.alerts || []),
         ...topMoverItems(analysis.holdings || [], marketDataStatus),
         ...dailyMoveCoverageItems(analysis.holdings || [], marketDataStatus),
+        ...marketDataCoverageItems(marketDataStatus, analysis),
         ...marketDriverItems(marketDrivers),
         ...targetDriftItems(targetPlan),
         ...tickerSignalItems(tickerSignals, analysis),
@@ -212,6 +213,43 @@ function dailyMoveCoverageItems(holdings = [], marketDataStatus = {}) {
   })];
 }
 
+function marketDataCoverageItems(marketDataStatus = {}, analysis = {}) {
+  const ownedTickers = new Set((analysis.holdings || []).map((holding) => normalizeTicker(holding.ticker)).filter(Boolean));
+  const rows = (marketDataStatus.quoteDiagnostics || [])
+    .filter((row) => ownedTickers.has(normalizeTicker(row.ticker)))
+    .map((row) => ({
+      ...row,
+      coverageScore: Number(row.coverageScore)
+    }))
+    .filter((row) =>
+      row.missingQuote ||
+      row.missingHistory ||
+      row.missingProfileOrMetrics ||
+      Number.isFinite(row.coverageScore) && row.coverageScore < 62 ||
+      /missing quote|thin|stale/i.test(`${row.coverageQualityStatus || ""} ${row.coverageStatus || ""}`)
+    )
+    .sort((a, b) => (a.coverageScore || 0) - (b.coverageScore || 0) || String(a.ticker).localeCompare(String(b.ticker)))
+    .slice(0, 4);
+  return rows.map((row, index) => {
+    const ticker = normalizeTicker(row.ticker);
+    const warnings = row.confidenceWarnings || row.missingDataWarnings || [];
+    const severe = row.missingQuote || row.coverageScore < 40;
+    return briefItem({
+      id: `daily:market-coverage:${ticker}`,
+      group: severe ? DAILY_BRIEF_GROUPS.ACTION : DAILY_BRIEF_GROUPS.WATCH,
+      kind: "data-coverage",
+      title: `${ticker} market data coverage is ${row.coverageQualityStatus || row.coverageStatus || "partial"}`,
+      detail: `${row.coverageQualityLabel || row.coverageSummary || "Coverage is incomplete"}. ${warnings[0] || coverageGapDetail(row)}`,
+      reason: "Provider coverage gaps reduce confidence in price momentum, technical context, quality/fundamental scoring, and ticker recommendations.",
+      href: ticker ? tickerHref(ticker) : "#data-sources",
+      ticker,
+      actionLabel: "Inspect coverage",
+      dataStatus: marketDataLabel(marketDataStatus),
+      priority: (severe ? 88 : 72) - index
+    });
+  });
+}
+
 function dailyMoveCoverage(holdings = []) {
   const eligible = dailyMoveEligibleHoldings(holdings);
   const covered = eligible.filter((holding) => hasDailyMovement(holding));
@@ -256,6 +294,16 @@ function hasDailyMovement(holding = {}) {
   return Number.isFinite(Number(holding.dailyChange)) ||
     Number.isFinite(Number(holding.dailyChangePercent)) ||
     Boolean(holding.marketDataAppliedToDailyChange || holding.marketDataPrice || holding.lastPrice);
+}
+
+function coverageGapDetail(row = {}) {
+  const missing = Array.isArray(row.unavailableFields) && row.unavailableFields.length
+    ? row.unavailableFields
+    : Array.isArray(row.missingFields)
+      ? row.missingFields
+      : [];
+  if (!missing.length) return "Provider coverage is not complete for this ticker.";
+  return `Missing: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? ` +${missing.length - 4} more` : ""}.`;
 }
 
 function isCashLikeBriefHolding(holding = {}) {

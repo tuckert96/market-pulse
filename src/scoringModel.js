@@ -770,8 +770,13 @@ export function scoreInstitutionalDataQuality(stock = {}, options = {}) {
   const saFieldCount = ["quant", "quantScore", "valuationGrade", "valueGrade", "growthGrade", "profitabilityGrade", "momentumGrade", "epsRevisionsGrade", "revisionsGrade"].filter((key) => hasAny(stock, [key])).length;
   const liveQuote = Boolean(stock.liveProviderCalls || stock.marketDataMode === "live" || stock.dataFreshness === "live" || stock.cacheStatus === "live");
   const stalePenalty = /stale/i.test(`${stock.marketDataStatus || ""} ${stock.dataFreshness || ""} ${stock.cacheStatus || ""}`) ? 16 : 0;
+  const providerCoverageScore = numberFrom(stock, ["marketDataCoverageScore"], NaN);
+  const providerCoverageAdjustment = Number.isFinite(providerCoverageScore) ? (providerCoverageScore - 70) * 0.16 : 0;
+  const providerMissingQuotePenalty = stock.marketDataMissingQuote ? 10 : 0;
+  const providerMissingHistoryPenalty = stock.marketDataMissingHistory ? 5 : 0;
+  const providerMissingFundamentalPenalty = stock.marketDataMissingProfileOrMetrics ? 5 : 0;
   const historyCoverage = history.hasHistory ? 14 * history.reliability : 0;
-  const score = 20 + (hasQuote ? 16 : 0) + (liveQuote ? 10 : 0) + (hasProfile ? 12 : 0) + historyCoverage + Math.min(18, saFieldCount * 3) + (stock.thesisStatus ? 6 : 0) + (stock.portfolioWeight !== undefined || options.portfolio?.totalValue ? 4 : 0) - stalePenalty;
+  const score = 20 + (hasQuote ? 16 : 0) + (liveQuote ? 10 : 0) + (hasProfile ? 12 : 0) + historyCoverage + Math.min(18, saFieldCount * 3) + (stock.thesisStatus ? 6 : 0) + (stock.portfolioWeight !== undefined || options.portfolio?.totalValue ? 4 : 0) + providerCoverageAdjustment - stalePenalty - providerMissingQuotePenalty - providerMissingHistoryPenalty - providerMissingFundamentalPenalty;
   const missingData = [];
   if (!hasQuote) missingData.push("quote/price input");
   if (!hasProfile) missingData.push("company profile/sector");
@@ -779,13 +784,17 @@ export function scoreInstitutionalDataQuality(stock = {}, options = {}) {
   else if (history.count < ROBUST_HISTORY_POINTS) missingData.push("robust historical price series");
   if (saFieldCount < 4) missingData.push("complete factor ratings");
   if (!stock.thesisStatus) missingData.push("thesis status");
+  if (stock.marketDataMissingQuote) missingData.push("provider quote/current price");
+  if (stock.marketDataMissingHistory) missingData.push("provider historical candles");
+  if (stock.marketDataMissingProfileOrMetrics) missingData.push("provider profile/fundamental fields");
+  if (Array.isArray(stock.marketDataCoverageWarnings)) missingData.push(...stock.marketDataCoverageWarnings.slice(0, 3));
 
   return institutionalFactor({
     key: "dataQuality",
     label: "Data quality",
     score,
     missingData,
-    details: { hasQuote, liveQuote, hasProfile, historicalPoints: history.count, historyReliability: Number(history.reliability.toFixed(2)), seekingAlphaFieldCount: saFieldCount, stalePenalty },
+    details: { hasQuote, liveQuote, hasProfile, historicalPoints: history.count, historyReliability: Number(history.reliability.toFixed(2)), seekingAlphaFieldCount: saFieldCount, providerCoverageScore: finiteOrNull(providerCoverageScore), stalePenalty, providerCoverageAdjustment: Number(providerCoverageAdjustment.toFixed(1)) },
     driver: score >= 78 ? "source coverage is strong enough for higher-confidence review" : score >= 58 ? "source coverage is usable with gaps" : "source coverage is too thin for high conviction"
   });
 }

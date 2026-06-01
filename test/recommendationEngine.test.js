@@ -406,6 +406,49 @@ test("stale provider inputs lower source freshness and remain visible in why-thi
   assert.ok(soxl.whyThisRank.some((item) => /Lower rank because/i.test(item)));
 });
 
+test("partial Finnhub coverage lowers Alpha recommendation data quality and explains missing fields", () => {
+  const recommendations = buildAlphaRecommendations({
+    analysis: { holdings: [{ ticker: "MU", marketValue: 12000, portfolioWeight: 0.24, riskLevel: "Medium" }] },
+    tickerSignals: [{
+      id: "ticker-signal-mu",
+      ticker: "MU",
+      combinedScore: 72,
+      confidenceScore: 0.54,
+      materialityScore: 0.72,
+      concentrationRiskScore: 0.42,
+      marketDataPrice: 132.1,
+      marketDataDailyChangePercent: 0.025,
+      marketDataSourceLabel: "Finnhub",
+      marketDataStatus: "connected",
+      marketDataMode: "live",
+      sourceMode: "local-model-live-market-data",
+      mockData: false,
+      marketDataCoverageScore: 42,
+      marketDataCoverageLabel: "Thin coverage 42/100",
+      marketDataCoverageWarnings: [
+        "Missing historical candles; momentum and technical confidence are reduced.",
+        "Missing company profile, market cap; quality and fundamental confidence are reduced."
+      ],
+      marketDataMissingFields: ["historical candles", "company profile", "market cap"],
+      whyScoreIsHigh: ["provider-backed price momentum"],
+      missingData: ["historical candles", "provider profile/fundamental fields"],
+      warnings: ["Not a recommendation to buy or sell"],
+      topHeadline: "MU: partial Finnhub coverage",
+      explanation: "Local score with partial Finnhub context."
+    }],
+    marketDataStatus: { status: "connected", providerLabel: "Finnhub" },
+    uiState: "IMPORTED_CLEAN",
+    asOf
+  });
+  const mu = recommendations.find((row) => row.id === "recommendation:ticker-signal:MU");
+
+  assert.ok(mu);
+  assert.ok(mu.dataQualityScore < 0.62);
+  assert.ok(mu.supportingSignals.some((item) => /Provider coverage: Thin coverage 42\/100/.test(item)));
+  assert.ok(mu.missingWeakSignals.some((item) => /historical candles|Provider missing company profile/i.test(item)));
+  assert.ok(mu.whyThisRank.some((item) => /provider coverage is incomplete/i.test(item)));
+});
+
 test("ticker-signal recency uses provider timestamps and penalizes missing timestamps", () => {
   const analysis = analyzePortfolio([
     { ticker: "MU", name: "Micron", account: "Taxable", shares: 10, price: 100, marketValue: 1000, assetClass: "Equity", sector: "Semiconductors" }

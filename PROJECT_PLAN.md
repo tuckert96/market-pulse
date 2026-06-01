@@ -7,6 +7,12 @@ Team name: Dream Team
 Latest checkpoint source: run `git log --oneline -5 -- Documents/Codex/2026-05-20/build-me-an-online-dashboard-that`
 Latest completed product checkpoint before this plan: Meta-style product systems polish pass that tightened native navigation semantics, Daily Brief feed priority, source-state honesty, and import interaction flow, plus prior Steve-level command-center polish, Institutional Quant Lens v1.3 academic factor discipline, and real-data workflow repair.
 
+Current sprint checkpoint:
+
+- Improved Finnhub partial-data trust handling so per-ticker provider coverage now scores quote, profile, metrics, 52-week range, volume, and historical candles.
+- Missing quote/current price is treated as the highest-severity gap; missing history reduces momentum/technical confidence; missing profile/metric fields reduce quality/fundamental confidence.
+- Coverage warnings now flow into Daily Command Brief, Data Sources diagnostics, ticker pages, ticker signals, Quant Lens data coverage, and Alpha recommendation rank explanations.
+
 ## Resume Protocol
 
 When usage resets or a new session starts:
