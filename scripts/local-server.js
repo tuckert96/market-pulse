@@ -33,6 +33,7 @@ import {
   politicianTradeProviderStatuses
 } from "../src/politicianTrades.js";
 import {
+  buildExplanationReviewMode,
   buildOpenAIExplanationConfig,
   buildOpenAIResponsesRequest,
   buildPortfolioExplanationFallback,
@@ -578,12 +579,20 @@ async function portfolioExplanationResponse(body = {}, env = process.env, option
   const fallback = buildPortfolioExplanationFallback(body, { status: config.status });
 
   if (!config.liveProviderCalls) {
+    const unavailableReason = config.configured
+      ? "OpenAI explanation calls are disabled. Deterministic local facts are shown for review."
+      : "OpenAI API key is not configured. Deterministic local facts are shown for review.";
     return ok({
       ...fallback,
       provider: "openai",
       openai: config,
       status: config.status,
       fallbackUsed: true,
+      reviewMode: buildExplanationReviewMode(fallback, {
+        openai: config,
+        generatedStatus: config.configured ? "disabled" : "not configured",
+        unavailableReason
+      }),
       warnings: [config.configured
         ? "OpenAI explanation calls are disabled. Returned deterministic local explanation."
         : "OpenAI API key is not configured. Returned deterministic local explanation."]
@@ -616,6 +625,11 @@ async function portfolioExplanationResponse(body = {}, env = process.env, option
     }
     const outputText = extractOpenAIResponseText(payload);
     if (!outputText) throw new Error("OpenAI response did not include usable explanation text.");
+    const narrative = redactExplanationSecretLikeText(outputText, [env.OPENAI_API_KEY]);
+    const connectedOpenAI = {
+      ...config,
+      status: "connected"
+    };
 
     return ok({
       ok: true,
@@ -624,33 +638,46 @@ async function portfolioExplanationResponse(body = {}, env = process.env, option
       status: "connected",
       provider: "openai",
       model,
-      openai: {
-        ...config,
-        status: "connected"
-      },
+      openai: connectedOpenAI,
       dataSources: fallback.dataSources,
       explanation: {
         ...fallback.explanation,
         title: "AI-assisted portfolio explanation",
-        narrative: outputText,
+        narrative,
         caveats: [
           ...(fallback.explanation.caveats || []),
           "AI-assisted text is grounded in the supplied dashboard data and should be reviewed for accuracy."
         ]
       },
+      reviewMode: buildExplanationReviewMode(fallback, {
+        openai: connectedOpenAI,
+        generatedText: narrative,
+        generatedStatus: "generated",
+        model,
+        extraSecrets: [env.OPENAI_API_KEY]
+      }),
       fallbackUsed: false
     });
   } catch (error) {
+    const lastError = redactExplanationSecretLikeText(error?.message || String(error), [env.OPENAI_API_KEY]);
+    const erroredOpenAI = {
+      ...config,
+      status: "error",
+      lastError
+    };
     return ok({
       ...fallback,
       provider: "openai",
-      openai: {
-        ...config,
-        status: "error"
-      },
+      openai: erroredOpenAI,
       status: "error",
       fallbackUsed: true,
-      lastError: redactExplanationSecretLikeText(error?.message || String(error), [env.OPENAI_API_KEY]),
+      lastError,
+      reviewMode: buildExplanationReviewMode(fallback, {
+        openai: erroredOpenAI,
+        generatedStatus: "error",
+        unavailableReason: "OpenAI explanation failed safely. Deterministic local facts are shown for review.",
+        missingContext: ["Generated explanation unavailable because the provider returned an error."]
+      }),
       warnings: ["OpenAI explanation failed safely. Returned deterministic local explanation."]
     });
   }

@@ -155,6 +155,11 @@ test("portfolio explanation endpoint returns deterministic fallback when OpenAI 
   assert.equal(result.payload.fallbackUsed, true);
   assert.equal(result.payload.openai.status, "not configured");
   assert.match(result.payload.explanation.summary, /local explanation/i);
+  assert.equal(result.payload.reviewMode.mode, "side-by-side-review");
+  assert.equal(result.payload.reviewMode.deterministic.label, "Deterministic source facts");
+  assert.equal(result.payload.reviewMode.generated.label, "Optional generated summary");
+  assert.equal(result.payload.reviewMode.generated.status, "not configured");
+  assert.match(result.payload.reviewMode.generated.unavailableReason, /not configured/i);
   const text = JSON.stringify(result.payload);
   assert.equal(text.includes("123456789"), false);
 });
@@ -179,6 +184,8 @@ test("portfolio explanation endpoint does not call OpenAI when disabled", async 
   assert.equal(fetchCalls, 0);
   assert.equal(result.payload.openai.status, "configured-not-connected");
   assert.equal(result.payload.fallbackUsed, true);
+  assert.equal(result.payload.reviewMode.generated.status, "disabled");
+  assert.match(result.payload.reviewMode.generated.unavailableReason, /disabled/i);
   assert.equal(JSON.stringify(result.payload).includes("openai-secret"), false);
 });
 
@@ -209,7 +216,7 @@ test("portfolio explanation endpoint returns mocked OpenAI response without expo
         assert.equal(body.store, false);
         assert.equal(JSON.stringify(body).includes("acct-secret-id"), false);
         assert.equal(JSON.stringify(body).includes("123456789"), false);
-        return mockResponse({ output_text: "Portfolio is concentrated in MU. Review concentration and source freshness before changing position size." });
+        return mockResponse({ output_text: "Portfolio is concentrated in MU. Review concentration and source freshness before changing position size. api_key=do-not-return-this-fake-key" });
       }
     }
   );
@@ -220,8 +227,13 @@ test("portfolio explanation endpoint returns mocked OpenAI response without expo
   assert.equal(result.payload.provider, "openai");
   assert.equal(result.payload.model, "gpt-test");
   assert.match(result.payload.explanation.narrative, /Portfolio is concentrated/);
+  assert.equal(result.payload.reviewMode.generated.status, "generated");
+  assert.match(result.payload.reviewMode.generated.narrative, /Portfolio is concentrated/);
+  assert.ok(result.payload.reviewMode.deterministic.bullets.length > 0);
+  assert.ok(result.payload.reviewMode.sourceLabels.some((label) => /Market data: Live/.test(label)));
   const text = JSON.stringify(result.payload);
   assert.equal(text.includes("openai-secret-value"), false);
+  assert.equal(text.includes("do-not-return-this-fake-key"), false);
   assert.equal(text.includes("acct-secret-id"), false);
   assert.equal(text.includes("123456789"), false);
 });
@@ -247,6 +259,9 @@ test("portfolio explanation endpoint falls back and redacts provider errors", as
   assert.equal(JSON.stringify(result.payload).includes("openai-secret-value"), false);
   assert.equal(JSON.stringify(result.payload).includes("another-secret"), false);
   assert.match(result.payload.lastError, /\[redacted\]/);
+  assert.equal(result.payload.reviewMode.generated.status, "error");
+  assert.match(result.payload.reviewMode.generated.unavailableReason, /failed safely/i);
+  assert.ok(result.payload.reviewMode.missingContext.some((item) => /provider returned an error/i.test(item)));
 });
 
 test("local API blocks cross-site requests before provider work", async () => {

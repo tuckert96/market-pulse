@@ -254,6 +254,7 @@ const state = {
   eventCalendarImportReport: loadEventCalendarImportReport(),
   quantScoreHistory: loadQuantScoreHistory(),
   marketDataLiveMode: loadMarketDataLiveMode(),
+  aiExplanationReview: null,
   marketDataSnapshot: null,
   providerReadiness: {
     mode: "static-demo",
@@ -278,6 +279,7 @@ let latestTickerSignals = [];
 let marketDataLiveModeTimer = null;
 let marketDataLiveModeInFlight = false;
 let pendingStateRestore = null;
+let latestPortfolioExplanationContext = null;
 
 function loadHoldings() {
   try {
@@ -902,6 +904,14 @@ function render() {
   const alphaRecommendationFilter = $("alphaRecommendationFilter")?.value || "all";
   const filteredAlphaRecommendations = filterAlphaRecommendations(alphaRecommendations, alphaRecommendationFilter);
   const portfolioAttribution = buildPortfolioAttribution(analysis.holdings, { totalValue: analysis.overview.totalValue });
+  latestPortfolioExplanationContext = buildPortfolioExplanationRequestContext({
+    analysis,
+    thesisRows,
+    marketDataSnapshot,
+    portfolioDataQuality,
+    portfolioStatus,
+    providerReadiness: state.providerReadiness
+  });
   const whatIfScenario = readWhatIfScenario();
   const whatIfResult = simulateWhatIf({
     holdings: analysis.holdings,
@@ -984,6 +994,7 @@ function render() {
     journalFilters,
     alertThresholds,
     accountScope: accountScopeModel,
+    aiExplanationReview: state.aiExplanationReview,
     selectedTicker: routeFromHash().ticker,
     asOf: renderAsOf
   });
@@ -995,6 +1006,65 @@ function render() {
   updateRiskGuardrailSortHeaders();
   applyRoute();
   updateWhatIfInputVisibility();
+}
+
+function buildPortfolioExplanationRequestContext({ analysis = {}, thesisRows = [], marketDataSnapshot = {}, portfolioDataQuality = {}, portfolioStatus = {}, providerReadiness = {} } = {}) {
+  const marketStatus = marketDataSnapshot.status || {};
+  return {
+    requestType: "portfolio-review-mode",
+    overview: {
+      totalValue: analysis.overview?.totalValue,
+      dailyChange: analysis.overview?.dailyChange,
+      dailyChangePercent: analysis.overview?.dailyChangePercent,
+      source: portfolioStatus.label || portfolioStatus.uiState || ""
+    },
+    risk: {
+      top10Weight: analysis.risk?.top10Weight,
+      top5Weight: analysis.risk?.top5Weight,
+      leveragedEtfExposure: analysis.overview?.leveragedEtfExposure,
+      semiconductorAiExposure: analysis.overview?.semiconductorAiExposure
+    },
+    holdings: (analysis.holdings || []).slice(0, 30).map((holding) => ({
+      ticker: holding.ticker,
+      name: holding.name,
+      account: holding.account,
+      accountType: holding.accountType,
+      marketValue: holding.marketValue,
+      portfolioWeight: holding.portfolioWeight,
+      sector: holding.sector,
+      assetClass: holding.assetClass,
+      riskLevel: holding.riskLevel,
+      thesisStatus: holding.thesisStatus,
+      source: holding.source,
+      sourceAsOf: holding.sourceAsOf
+    })),
+    alerts: (analysis.alerts || []).slice(0, 20).map((alert) => ({
+      title: alert.title,
+      detail: alert.detail,
+      severity: alert.severity,
+      ticker: alert.ticker,
+      type: alert.type
+    })),
+    thesisRows: thesisRows.slice(0, 20).map((row) => ({
+      ticker: row.ticker,
+      thesisStatus: row.thesisStatus,
+      confidenceLevel: row.confidenceLevel,
+      reviewFlags: row.reviewFlags,
+      targetWeight: row.targetWeight
+    })),
+    sourceStatuses: {
+      portfolio: portfolioStatus.label || portfolioStatus.uiState || "No portfolio status",
+      marketData: marketStatus.label || marketStatus.status || "No market data status",
+      openai: providerReadiness.aiProviders?.openai?.liveProviderCalls ? "Live" : providerReadiness.aiProviders?.openai?.configured ? "Configured, disabled" : "Not configured",
+      dataQuality: portfolioDataQuality?.status || portfolioDataQuality?.label || ""
+    },
+    marketDataStatus: marketStatus,
+    dataQuality: {
+      portfolioSource: portfolioDataQuality?.portfolioSource || portfolioStatus.label,
+      issueCount: portfolioDataQuality?.issueCount,
+      summary: portfolioDataQuality?.summary
+    }
+  };
 }
 
 function readWhatIfScenario() {
@@ -2113,6 +2183,7 @@ function clearPortfolioData() {
   state.alertState = emptyAlertState();
   state.marketDataSnapshot = null;
   state.quantScoreHistory = [];
+  state.aiExplanationReview = null;
   latestTickerSignals = [];
   pendingCsvImport = null;
   state.fidelityStatus = {
@@ -2170,6 +2241,7 @@ function applyImportedState(payload) {
   state.quantScoreHistory = normalizeQuantScoreHistory(payload.quantScoreHistory || []);
   state.marketDataLiveMode = normalizeMarketDataLiveMode(payload.marketDataLiveMode || state.marketDataLiveMode || {});
   state.marketDataSnapshot = null;
+  state.aiExplanationReview = null;
   latestTickerSignals = [];
   pendingCsvImport = null;
   saveHoldings();
@@ -2910,6 +2982,7 @@ function mergeImportedRecords(importedRecords, options = {}) {
   }
   state.alertState = emptyAlertState();
   state.marketDataSnapshot = null;
+  state.aiExplanationReview = null;
   latestTickerSignals = [];
   saveAlertState();
   saveHoldings();
@@ -3809,6 +3882,7 @@ function wireEvents() {
   $("saveXSettingsBtn")?.addEventListener("click", saveXSettingsFromUi);
   $("syncXUpdatesBtn")?.addEventListener("click", () => refreshXUpdatesFromProvider({ force: true }));
   $("refreshMarketDataBtn")?.addEventListener("click", () => manualRefreshMarketDataSnapshot());
+  $("runPortfolioExplanationReviewBtn")?.addEventListener("click", refreshPortfolioExplanationReview);
   $("marketDataLiveModeToggle")?.addEventListener("change", (event) => toggleMarketDataLiveMode(event.target.checked));
   $("marketDataLiveModeInterval")?.addEventListener("change", (event) => setMarketDataLiveModeInterval(event.target.value));
   $("saveAlertThresholdsBtn").addEventListener("click", saveAlertThresholdsFromUi);
@@ -3904,6 +3978,7 @@ function loadSampleData() {
   state.eventCalendarImportReport = null;
   state.marketDataSnapshot = null;
   state.quantScoreHistory = [];
+  state.aiExplanationReview = null;
   latestTickerSignals = [];
   saveHoldings();
   saveFidelityStatus();
@@ -4029,6 +4104,44 @@ async function refreshProviderReadiness() {
     };
   }
   scheduleMarketDataLiveMode();
+  render();
+}
+
+async function refreshPortfolioExplanationReview() {
+  const status = $("aiExplanationReviewStatus");
+  if (status) {
+    status.textContent = "Building explanation review from current deterministic dashboard facts...";
+    status.className = "connector-status pending";
+  }
+  try {
+    if (!latestPortfolioExplanationContext) render();
+    const response = await fetch("/api/portfolio/explanation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(latestPortfolioExplanationContext || { requestType: "portfolio-review-mode" })
+    });
+    if (!response.ok) throw new Error(`Explanation endpoint returned ${response.status}`);
+    state.aiExplanationReview = await response.json();
+    const generated = Boolean(state.aiExplanationReview?.reviewMode?.generated?.narrative);
+    if (status) {
+      status.textContent = generated
+        ? "Review ready: deterministic facts and optional generated wording are shown separately."
+        : "Review ready: deterministic facts shown; generated wording is unavailable or disabled.";
+      status.className = generated ? "connector-status success" : "connector-status pending";
+    }
+  } catch (error) {
+    state.aiExplanationReview = {
+      ok: false,
+      status: "error",
+      fallbackUsed: true,
+      reviewMode: null,
+      warnings: ["Explanation review failed before provider output was shown."]
+    };
+    if (status) {
+      status.textContent = `Explanation review failed safely: ${safeErrorMessage(error)}`;
+      status.className = "connector-status error";
+    }
+  }
   render();
 }
 

@@ -4416,6 +4416,37 @@
         grid-column: 1 / -1;
       }
 
+      .ai-review-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .ai-review-card {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .ai-review-card b,
+      .ai-review-card strong {
+        display: block;
+      }
+
+      .ai-review-card ul {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+
+      .ai-review-card li {
+        margin: 4px 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
       .provider-status-card.configured {
         border-color: #b7dfbf;
         background: var(--good-bg);
@@ -6178,6 +6209,7 @@
         .recommendation-summary,
         .top-recommendation-strip,
         .recommendation-score-grid,
+        .ai-review-grid,
         .evidence-columns,
         .evidence-columns.two-col,
         .thesis-card-head,
@@ -7653,6 +7685,15 @@
                   </div>
                   <p id="marketDataLiveModeStatus" class="connector-status" aria-live="polite">Live mode off. Use Refresh market data for a one-time snapshot.</p>
                   <div class="provider-status-list" id="dataSourceHealthPanel"></div>
+                </div>
+                <div class="connector-zone">
+                  <strong>AI explanation review</strong>
+                  <small class="disclaimer">Compare deterministic source facts with optional OpenAI-generated wording. Missing data stays listed; no prompts, keys, or raw provider payloads are shown.</small>
+                  <div class="import-actions">
+                    <button id="runPortfolioExplanationReviewBtn" type="button">Review portfolio explanation</button>
+                  </div>
+                  <p id="aiExplanationReviewStatus" class="connector-status" aria-live="polite">Deterministic explanation review is ready. OpenAI is optional.</p>
+                  <div class="provider-status-list" id="aiExplanationReviewPanel"></div>
                 </div>
                 <div class="connector-zone">
                   <strong>Reddit ticker tracking</strong>
