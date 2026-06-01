@@ -226,6 +226,38 @@ test("portfolio explanation endpoint returns mocked OpenAI response without expo
   assert.equal(text.includes("123456789"), false);
 });
 
+test("portfolio explanation endpoint rejects unsafe generated investment language", async () => {
+  const result = await apiResponse(
+    "POST",
+    "/api/portfolio/explanation",
+    new URLSearchParams(),
+    {
+      overview: { totalValue: 100000 },
+      holdings: [{ ticker: "MU", marketValue: 20000, portfolioWeight: 0.2 }],
+      sourceStatuses: { portfolio: "Imported", marketData: "Live" },
+      marketDataStatus: { status: "connected", label: "Live market data" }
+    },
+    {
+      OPENAI_API_KEY: "openai-secret-value",
+      OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED: "true"
+    },
+    {
+      fetchImpl: async () => mockResponse({ output_text: "Buy now. Price target is 200. This is guaranteed. News caused the move." })
+    }
+  );
+
+  const text = JSON.stringify(result.payload);
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.fallbackUsed, true);
+  assert.equal(result.payload.status, "error");
+  assert.equal(text.includes("Buy now"), false);
+  assert.equal(text.includes("Price target"), false);
+  assert.equal(text.includes("guaranteed"), false);
+  assert.equal(text.includes("News caused"), false);
+  assert.match(result.payload.lastError, /unsupported investment language/i);
+  assert.match(result.payload.explanation.summary, /local explanation/i);
+});
+
 test("portfolio explanation endpoint falls back and redacts provider errors", async () => {
   const result = await apiResponse(
     "POST",
@@ -237,7 +269,7 @@ test("portfolio explanation endpoint falls back and redacts provider errors", as
       OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED: "true"
     },
     {
-      fetchImpl: async () => mockResponse({ error: { message: "rate limited Bearer openai-secret-value token=another-secret" } }, 429)
+      fetchImpl: async () => mockResponse({ error: { message: "rate limited at https://api.openai.com/v1/responses?api_key=openai-secret-value Bearer openai-secret-value token=another-secret cookie=session-secret-value account_id=123456789" } }, 429)
     }
   );
 
@@ -246,7 +278,11 @@ test("portfolio explanation endpoint falls back and redacts provider errors", as
   assert.equal(result.payload.status, "error");
   assert.equal(JSON.stringify(result.payload).includes("openai-secret-value"), false);
   assert.equal(JSON.stringify(result.payload).includes("another-secret"), false);
+  assert.equal(JSON.stringify(result.payload).includes("session-secret-value"), false);
+  assert.equal(JSON.stringify(result.payload).includes("123456789"), false);
+  assert.equal(JSON.stringify(result.payload).includes("https://api.openai.com"), false);
   assert.match(result.payload.lastError, /\[redacted\]/);
+  assert.match(result.payload.lastError, /\[redacted-url\]/);
 });
 
 test("local API blocks cross-site requests before provider work", async () => {

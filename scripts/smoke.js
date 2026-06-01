@@ -389,6 +389,7 @@ const marketEventProvidersJs = readFileSync("src/marketEventProviders.js", "utf8
 const marketDriversJs = readFileSync("src/marketDrivers.js", "utf8");
 const marketDataSelectionJs = readFileSync("src/marketDataSelection.js", "utf8");
 const technicalAnalysisJs = readFileSync("src/technicalAnalysis.js", "utf8");
+const portfolioExplanationJs = readFileSync("src/portfolioExplanation.js", "utf8");
 const localServerJs = readFileSync("scripts/local-server.js", "utf8");
 const packageJson = readFileSync("package.json", "utf8");
 const gitignore = readFileSync(".gitignore", "utf8");
@@ -1273,6 +1274,10 @@ assert(portfolioViewJs.includes("renderSettingsConfiguration"), "Settings route 
 assert(portfolioViewJs.includes("buildSettingsProviderStatusRows") && portfolioViewJs.includes("Provider configuration status"), "Settings should expose provider configuration status without showing secrets");
 assert(portfolioViewJs.includes("data-provider-settings-row") && portfolioViewJs.includes("Last error:"), "Settings provider cards should show credential state, last success, and last error metadata");
 assert(appJs.includes("aiProviders: config.aiProviders || {}") && appJs.includes("config.aiProviders?.openai?.liveProviderCalls"), "OpenAI provider readiness should pass from local backend config into Settings");
+assert(portfolioExplanationJs.includes("PORTFOLIO_EXPLANATION_ALLOWED_FIELDS"), "OpenAI explanation prompt should use an explicit approved-field contract");
+assert(portfolioExplanationJs.includes("assertSafeGeneratedExplanationText"), "OpenAI generated explanations should pass a safety-language gate before display");
+assert(portfolioExplanationJs.includes("price targets, return predictions") && portfolioExplanationJs.includes("Do not claim news"), "OpenAI explanation instructions should forbid fake precision and unsupported causality");
+assert(portfolioExplanationJs.includes("[redacted-url]"), "OpenAI explanation redaction should strip provider URLs from visible errors");
 assert(portfolioViewJs.includes("Manual/imported holdings"), "Data Sources should show manual/imported holdings readiness");
 assert(portfolioViewJs.includes("Reddit"), "Data Sources should include future Reddit source status");
 assert(portfolioViewJs.includes("Reddit diagnostics"), "Data Sources should expose Reddit diagnostics without provider internals");

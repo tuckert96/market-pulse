@@ -4,6 +4,24 @@ export const DEFAULT_OPENAI_EXPLANATION_MODEL = "gpt-5.2";
 
 const SENSITIVE_KEY_PATTERN = /(api[_-]?key|secret|token|password|cookie|authorization|session|credential|access[_-]?token|refresh[_-]?token)/i;
 const ACCOUNT_KEY_PATTERN = /(account(number|id)?|acct(number|id)?)/i;
+const URL_PATTERN = /https?:\/\/[^\s"')]+/gi;
+const UNSUPPORTED_EXPLANATION_PATTERNS = [
+  { id: "trade_command", pattern: /\b(buy now|sell now|trade now|place (a )?trade|place (an )?order|execute (a )?trade|enter (the )?position|exit (the )?position)\b/i },
+  { id: "price_target", pattern: /\b(price target|target price|fair value is|intrinsic value is)\b|\$?\d+(?:\.\d+)?\s*(?:price\s*)?target\b/i },
+  { id: "return_prediction", pattern: /\b(will (go|move|rise|fall|return|outperform|underperform)|guaranteed|certain to|sure to|risk-free|expected return|return prediction|probability of (outperformance|gain|loss))\b/i },
+  { id: "unsupported_causality", pattern: /\b(news caused|headline drove|because of breaking news|rumor proves|confirmed by social media)\b/i }
+];
+
+export const PORTFOLIO_EXPLANATION_ALLOWED_FIELDS = Object.freeze({
+  topLevel: Object.freeze(["requestType", "overview", "risk", "holdings", "alerts", "thesisRows", "sourceStatuses", "marketDataStatus", "dataQuality"]),
+  overview: Object.freeze(["totalValue", "marketValue", "dailyChange", "dailyChangePercent", "source", "label", "status"]),
+  risk: Object.freeze(["top10Weight", "top5Weight", "leveragedEtfExposure", "semiconductorAiExposure", "concentrationScore", "status", "label"]),
+  holding: Object.freeze(["ticker", "name", "account", "accountType", "marketValue", "portfolioWeight", "sector", "assetClass", "riskLevel", "thesisStatus", "source", "sourceAsOf"]),
+  alert: Object.freeze(["title", "detail", "severity", "ticker", "type", "source", "sourceStatus", "createdAt"]),
+  thesisRow: Object.freeze(["ticker", "thesisStatus", "confidenceLevel", "reviewFlags", "targetWeight", "lastReviewed", "source", "sourceAsOf"]),
+  sourceStatus: Object.freeze(["label", "status", "dataFreshness", "provider", "mode", "lastSuccessfulRefresh", "lastSync", "lastError", "fallbackReason"]),
+  dataQuality: Object.freeze(["portfolioSource", "issueCount", "summary", "status", "label"])
+});
 
 export function buildOpenAIExplanationConfig(env = {}) {
   const configured = isUsableCredentialValue(env.OPENAI_API_KEY);
@@ -96,7 +114,8 @@ export function buildOpenAIResponsesRequest(input = {}, options = {}) {
       "You are a portfolio explanation assistant inside Market Pulse.",
       "Use only the structured data supplied in the prompt.",
       "Do not invent news, prices, account data, catalysts, or recommendations.",
-      "Do not issue buy/sell commands or guaranteed-return language.",
+      "Do not issue buy/sell commands, price targets, return predictions, probability claims, or guaranteed-return language.",
+      "Do not claim news, headlines, social posts, or rumors caused a move unless that exact structured fact is supplied.",
       "Mention missing, stale, sample, imported, cached, or live data caveats when relevant.",
       "Keep the answer concise, practical, and review-oriented."
     ].join(" "),
@@ -135,14 +154,14 @@ export function sanitizePortfolioExplanationInput(input = {}) {
   const sanitized = sanitizeValue(input);
   return {
     requestType: String(sanitized.requestType || "portfolio-summary").slice(0, 80),
-    overview: sanitizeObject(sanitized.overview || sanitized.portfolio?.overview || {}),
-    risk: sanitizeObject(sanitized.risk || sanitized.portfolio?.risk || {}),
+    overview: pickSanitizedFields(sanitized.overview || sanitized.portfolio?.overview || {}, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.overview),
+    risk: pickSanitizedFields(sanitized.risk || sanitized.portfolio?.risk || {}, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.risk),
     holdings: sanitizeArray(sanitized.holdings || sanitized.portfolio?.holdings || [], 30).map(sanitizeHoldingForPrompt),
-    alerts: sanitizeArray(sanitized.alerts || sanitized.portfolio?.alerts || [], 20).map((alert) => sanitizeObject(alert)),
-    thesisRows: sanitizeArray(sanitized.thesisRows || [], 20).map((row) => sanitizeObject(row)),
-    sourceStatuses: sanitizeObject(sanitized.sourceStatuses || sanitized.dataSources || {}),
-    marketDataStatus: sanitizeObject(sanitized.marketDataStatus || {}),
-    dataQuality: sanitizeObject(sanitized.dataQuality || {})
+    alerts: sanitizeArray(sanitized.alerts || sanitized.portfolio?.alerts || [], 20).map((alert) => pickSanitizedFields(alert, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.alert)),
+    thesisRows: sanitizeArray(sanitized.thesisRows || [], 20).map((row) => pickSanitizedFields(row, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.thesisRow)),
+    sourceStatuses: sanitizeStatusMap(sanitized.sourceStatuses || sanitized.dataSources || {}),
+    marketDataStatus: pickSanitizedFields(sanitized.marketDataStatus || {}, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.sourceStatus),
+    dataQuality: pickSanitizedFields(sanitized.dataQuality || {}, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.dataQuality)
   };
 }
 
@@ -152,10 +171,30 @@ export function redactSecretLikeText(value = "", extraSecrets = []) {
     if (secret && String(secret).length >= 4) text = text.replaceAll(String(secret), "[redacted]");
   }
   return text
+    .replace(URL_PATTERN, "[redacted-url]")
     .replace(/(api[_-]?key|access_token|public_token|refresh_token|token|client_secret|secret|password|cookie|authorization)=([^&\s"']+)/gi, "$1=[redacted]")
     .replace(/\b(api[_-]?key|access_token|public_token|refresh_token|client_secret|secret|password|cookie|authorization)\b\s*:?\s*["']?[A-Za-z0-9._~-]{6,}["']?/gi, "$1 [redacted]")
+    .replace(/\b(account(?:number|id)?|acct(?:number|id)?|account_id|acct_id)\b\s*[:=]\s*["']?[A-Za-z0-9._~-]{4,}["']?/gi, "$1=[redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")
     .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]");
+}
+
+export function generatedExplanationSafetyViolations(text = "") {
+  const value = String(text || "");
+  return UNSUPPORTED_EXPLANATION_PATTERNS
+    .filter((rule) => rule.pattern.test(value))
+    .map((rule) => rule.id);
+}
+
+export function assertSafeGeneratedExplanationText(text = "") {
+  const violations = generatedExplanationSafetyViolations(text);
+  if (violations.length) {
+    const error = new Error("OpenAI response included unsupported investment language.");
+    error.code = "unsupported_generated_explanation";
+    error.violations = violations;
+    throw error;
+  }
+  return text;
 }
 
 function sanitizeValue(value, key = "") {
@@ -173,7 +212,7 @@ function sanitizeValue(value, key = "") {
 }
 
 function sanitizeHoldingForPrompt(holding = {}) {
-  return sanitizeObject({
+  return pickSanitizedFields({
     ticker: holding.ticker,
     name: holding.name || holding.company,
     account: holding.account,
@@ -186,12 +225,30 @@ function sanitizeHoldingForPrompt(holding = {}) {
     thesisStatus: holding.thesisStatus,
     source: holding.source,
     sourceAsOf: holding.sourceAsOf
-  });
+  }, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.holding);
 }
 
 function sanitizeObject(value = {}) {
   const cleaned = sanitizeValue(value);
   return cleaned && typeof cleaned === "object" && !Array.isArray(cleaned) ? cleaned : {};
+}
+
+function pickSanitizedFields(value = {}, allowedFields = []) {
+  const cleaned = sanitizeObject(value);
+  return Object.fromEntries(allowedFields
+    .filter((field) => cleaned[field] !== undefined)
+    .map((field) => [field, sanitizeValue(cleaned[field], field)]));
+}
+
+function sanitizeStatusMap(value = {}) {
+  const cleaned = sanitizeObject(value);
+  return Object.fromEntries(Object.entries(cleaned).map(([key, status]) => {
+    const safeKey = String(redactSecretLikeText(key)).slice(0, 80);
+    if (status && typeof status === "object" && !Array.isArray(status)) {
+      return [safeKey, pickSanitizedFields(status, PORTFOLIO_EXPLANATION_ALLOWED_FIELDS.sourceStatus)];
+    }
+    return [safeKey, redactSecretLikeText(status)];
+  }));
 }
 
 function sanitizeArray(value = [], limit = 20) {
