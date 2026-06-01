@@ -334,6 +334,7 @@ Internal provider payloads may still include raw values such as `not configured`
 - `requestedTickers`: normalized tickers requested from the provider/cache layer
 - `missingTickers`: requested tickers that did not produce a normalized quote
 - `warnings`: human-readable notes such as omitted provider rows or stale cache fallback
+- `providerAttempts`: safe audit trail of the selected provider, any configured fallback providers, and sample/no-data fallback. Each attempt includes provider id/label, role (`primary`, `fallback`, or `sample`), status, timestamp, quote count, cache status, cache-hit/stale counts, and a redacted safe error reason when applicable.
 
 If a provider omits a ticker that has a prior cached quote, the snapshot can return that quote as `stale` with `lastError` explaining the fallback. It should never fabricate a quote for an invalid or omitted ticker.
 

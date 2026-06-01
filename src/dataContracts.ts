@@ -493,6 +493,26 @@ export interface MarketDataQuoteDiagnostic {
   lastError?: string;
 }
 
+export interface MarketDataProviderAttempt {
+  providerId: string;
+  providerLabel: string;
+  role: "primary" | "fallback" | "sample" | string;
+  status: MarketDataStatusValue | string;
+  timestamp: string;
+  fetchedAt?: string | null;
+  quoteCount: number;
+  requestedTickerCount?: number;
+  missingTickerCount?: number;
+  cacheStatus?: string;
+  dataFreshness?: string;
+  cacheHitCount?: number;
+  liveCount?: number;
+  staleCount?: number;
+  fallbackReason?: string;
+  safeErrorReason?: string;
+  detail?: string;
+}
+
 export interface MarketDataProviderStatus {
   status: MarketDataStatusValue | string;
   label: string;
@@ -518,6 +538,11 @@ export interface MarketDataProviderStatus {
   truncatedTickers?: string[];
   warnings?: string[];
   fallbackReason?: string;
+  primaryProviderId?: string;
+  primaryProviderLabel?: string;
+  fallbackProviderId?: string;
+  fallbackProviderLabel?: string;
+  providerAttempts?: MarketDataProviderAttempt[];
   cache?: MarketDataSnapshot["cache"];
   quoteDiagnostics?: MarketDataQuoteDiagnostic[];
 }
@@ -595,6 +620,11 @@ export interface MarketDataSnapshot {
   truncatedTickers?: string[];
   warnings?: string[];
   fallbackReason?: string;
+  primaryProviderId?: string;
+  primaryProviderLabel?: string;
+  fallbackProviderId?: string;
+  fallbackProviderLabel?: string;
+  providerAttempts?: MarketDataProviderAttempt[];
   error?: string;
   sourceTypes: string[];
   status: MarketDataProviderStatus;

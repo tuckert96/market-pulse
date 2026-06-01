@@ -146,6 +146,33 @@ test("market data status handles mock, stale, error, and not configured states",
   assert.match(error.status.detail, /provider unavailable/);
 });
 
+test("market data snapshots include a safe provider attempt audit trail", async () => {
+  const snapshot = await fetchMarketDataSnapshot({
+    provider: createFinnhubProvider({
+      env: { FINNHUB_API_KEY: "finnhub-secret-value" },
+      fetchImpl: finnhubFetchMock({ quoteStatus: 429, quoteText: "API limit reached for finnhub-secret-value" })
+    }),
+    tickers: ["MU"],
+    asOf: "2026-05-23T12:00:00-04:00",
+    now: "2026-05-23T12:00:00-04:00"
+  });
+
+  assert.equal(snapshot.status.status, "rate limited");
+  assert.equal(snapshot.providerAttempts.length, 1);
+  assert.equal(snapshot.status.providerAttempts.length, 1);
+  const [attempt] = snapshot.providerAttempts;
+  assert.equal(attempt.providerId, "finnhub");
+  assert.equal(attempt.role, "primary");
+  assert.equal(attempt.status, "rate limited");
+  assert.equal(attempt.quoteCount, 0);
+  assert.equal(attempt.requestedTickerCount, 1);
+  assert.equal(attempt.missingTickerCount, 1);
+  assert.equal(attempt.cacheStatus, "error");
+  assert.ok(attempt.timestamp);
+  assert.match(attempt.safeErrorReason, /rate limit|quota/i);
+  assert.equal(JSON.stringify(snapshot).includes("finnhub-secret-value"), false);
+});
+
 test("market data status exposes per-ticker quote coverage diagnostics", () => {
   const snapshot = buildMarketDataSnapshot({
     provider: {

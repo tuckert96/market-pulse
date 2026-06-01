@@ -578,6 +578,9 @@ test("market data quotes endpoint safely falls back to mock data without credent
   assert.equal(result.payload.mode, "mock");
   assert.equal(result.payload.fallbackReason, "missing-market-data-credentials");
   assert.equal(result.payload.status.status, "mock/sample mode");
+  assert.equal(result.payload.status.providerAttempts.length, 2);
+  assert.equal(result.payload.status.providerAttempts[0].status, "not configured");
+  assert.equal(result.payload.status.providerAttempts[1].role, "sample");
   assert.deepEqual(result.payload.quotes.map((quote) => quote.ticker), ["MU", "NVDA"]);
 });
 
@@ -725,9 +728,52 @@ test("market data quotes endpoint can fall back from rate-limited Finnhub to con
   assert.equal(result.payload.primaryProviderId, "finnhub");
   assert.equal(result.payload.status.status, "connected");
   assert.equal(result.payload.status.providerAttempts.length, 2);
+  assert.equal(result.payload.status.providerAttempts[0].role, "primary");
   assert.equal(result.payload.status.providerAttempts[0].status, "rate limited");
+  assert.equal(result.payload.status.providerAttempts[0].requestedTickerCount, 1);
+  assert.ok(result.payload.status.providerAttempts[0].timestamp);
+  assert.equal(result.payload.status.providerAttempts[1].role, "fallback");
+  assert.equal(result.payload.status.providerAttempts[1].cacheStatus, "live");
   assert.equal(result.payload.quotesByTicker.MU.price, 133.25);
   assert.match(result.payload.warnings.join(" "), /using Financial Modeling Prep fallback quotes/);
+  assert.equal(JSON.stringify(result.payload).includes("finnhub-secret-value"), false);
+  assert.equal(JSON.stringify(result.payload).includes("fmp-secret-value"), false);
+});
+
+test("market data fallback audit trail records failed primary and failed fallback safely", async () => {
+  const result = await apiResponse(
+    "GET",
+    "/api/market-data/quotes",
+    new URLSearchParams({ tickers: "MU", history: "0", profile: "0" }),
+    {},
+    {
+      MARKET_DATA_PROVIDER: "finnhub",
+      FINNHUB_API_KEY: "finnhub-secret-value",
+      MARKET_DATA_FALLBACK_PROVIDERS: "financialModelingPrep",
+      FINANCIAL_MODELING_PREP_API_KEY: "fmp-secret-value"
+    },
+    {
+      cache: createMarketDataCache(),
+      now: "2026-05-23T12:30:00-04:00",
+      fetchImpl: async (url) => {
+        const textUrl = String(url);
+        if (textUrl.includes("finnhub.io")) return mockResponse({ error: "rate limit for finnhub-secret-value" }, 429);
+        if (textUrl.includes("financialmodelingprep.com")) return mockResponse({ Error: "Limit Reach for fmp-secret-value" }, 429);
+        return mockResponse({ error: "unexpected endpoint" }, 404);
+      }
+    }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.status.status, "rate limited");
+  assert.equal(result.payload.status.providerAttempts.length, 2);
+  assert.deepEqual(result.payload.status.providerAttempts.map((attempt) => attempt.providerId), ["finnhub", "financialModelingPrep"]);
+  assert.deepEqual(result.payload.status.providerAttempts.map((attempt) => attempt.role), ["primary", "fallback"]);
+  assert.equal(result.payload.status.providerAttempts[0].status, "rate limited");
+  assert.equal(result.payload.status.providerAttempts[1].status, "rate limited");
+  assert.match(result.payload.status.providerAttempts[1].safeErrorReason, /rate limit|quota/i);
+  assert.equal(result.payload.status.providerAttempts[0].quoteCount, 0);
+  assert.equal(result.payload.status.providerAttempts[1].quoteCount, 0);
   assert.equal(JSON.stringify(result.payload).includes("finnhub-secret-value"), false);
   assert.equal(JSON.stringify(result.payload).includes("fmp-secret-value"), false);
 });

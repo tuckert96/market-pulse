@@ -3798,13 +3798,16 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .filter((row) => normalizeTickerSymbol(row.ticker) === ticker)
     .sort((a, b) => timestampSortValue(b.dateTime) - timestampSortValue(a.dateTime))
     .slice(0, 6);
-  const redditSummary = summarizeRedditMentions(options.redditMentions || [])
+  const socialAsOf = options.asOf ||
+    latestRecordTimestamp([...(options.redditMentions || []), ...(options.xUpdates || [])]) ||
+    new Date().toISOString();
+  const redditSummary = summarizeRedditMentions(options.redditMentions || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const redditMentions = (options.redditMentions || [])
     .filter((record) => redditMentionTickers(record).includes(ticker))
     .sort((a, b) => timestampSortValue(b.createdAt || b.detectedAt || b.sourceAsOf) - timestampSortValue(a.createdAt || a.detectedAt || a.sourceAsOf))
     .slice(0, 8);
-  const xSummary = summarizeXUpdates(options.xUpdates || [])
+  const xSummary = summarizeXUpdates(options.xUpdates || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const xUpdates = (options.xUpdates || [])
     .filter((record) => normalizeTickerSymbol(record.ticker) === ticker || (record.extractedTickers || []).map(normalizeTickerSymbol).includes(ticker))
@@ -4909,6 +4912,7 @@ function renderTickerProviderCoverage(model = {}) {
         <div>
           <b>Provider coverage</b>
           <span>No per-ticker provider diagnostics yet. Refresh market data from Data Sources after loading a portfolio.</span>
+          ${marketDataAttemptSummary(model.marketDataStatus) ? `<p class="section-note">Provider path: ${escapeHtml(marketDataAttemptSummary(model.marketDataStatus))}</p>` : ""}
         </div>
       </div>
     `;
@@ -4918,6 +4922,7 @@ function renderTickerProviderCoverage(model = {}) {
       <div>
         <b>Provider coverage</b>
         <span>${escapeHtml(coverage.coverageSummary || "Coverage pending")} · ${escapeHtml(coverageGapSummary(coverage))}</span>
+        ${marketDataAttemptSummary(model.marketDataStatus) ? `<p class="section-note">Provider path: ${escapeHtml(marketDataAttemptSummary(model.marketDataStatus))}</p>` : ""}
       </div>
       <div class="coverage-chip-row" aria-label="Provider field coverage for ${escapeHtml(model.ticker)}">
         ${fields.map((field) => `
@@ -5115,6 +5120,15 @@ function tickerMarketDataSourceLabel(model = {}) {
 function timestampSortValue(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function latestRecordTimestamp(records = []) {
+  const newest = (Array.isArray(records) ? records : [])
+    .flatMap((record) => [record.createdAt, record.detectedAt, record.sourceAsOf, record.retrievedAt])
+    .map(timestampSortValue)
+    .filter((value) => value > 0)
+    .sort((a, b) => b - a)[0];
+  return newest ? new Date(newest).toISOString() : null;
 }
 
 function tickerSignalSummary(model) {
@@ -7603,7 +7617,7 @@ export function marketDataDiagnosticsHtml(status = {}, config = {}) {
   const lastError = status.lastError?.message || cache.lastError?.message || "";
   const providerAttempts = Array.isArray(status.providerAttempts) ? status.providerAttempts : [];
   const attemptLabel = providerAttempts.length
-    ? providerAttempts.map((attempt) => `${attempt.providerLabel || attempt.providerId || "Provider"}: ${attempt.status || "unknown"} (${attempt.quoteCount || 0})`).join(" -> ")
+    ? marketDataAttemptSummary(status)
     : "Primary provider only";
   const diagnostics = [
     ["Provider selected", status.providerLabel || config.selectedLabel || "Market data provider"],
@@ -7628,8 +7642,54 @@ export function marketDataDiagnosticsHtml(status = {}, config = {}) {
       </div>
       <p><b>Per-ticker provider coverage</b></p>
       ${marketDataCoverageTableHtml(status.quoteDiagnostics || [])}
+      ${marketDataAttemptTrailHtml(providerAttempts)}
       ${warnings.length ? `<p><b>Provider warnings</b></p><ul>${warnings.slice(0, 6).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : ""}
     </details>
+  `;
+}
+
+function marketDataAttemptSummary(status = {}) {
+  const providerAttempts = Array.isArray(status.providerAttempts) ? status.providerAttempts : [];
+  return providerAttempts.length
+    ? providerAttempts
+      .map((attempt) => `${attempt.providerLabel || attempt.providerId || "Provider"}: ${attempt.status || "unknown"} (${attempt.quoteCount || 0})`)
+      .join(" -> ")
+    : "";
+}
+
+function marketDataAttemptTrailHtml(providerAttempts = []) {
+  const attempts = Array.isArray(providerAttempts) ? providerAttempts.filter(Boolean) : [];
+  if (!attempts.length) return "";
+  return `
+    <p><b>Provider attempt audit trail</b></p>
+    <div class="table-scroll compact-table">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Provider</th>
+            <th scope="col">Role</th>
+            <th scope="col">Status</th>
+            <th scope="col">Quotes</th>
+            <th scope="col">Cache</th>
+            <th scope="col">Time</th>
+            <th scope="col">Safe reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${attempts.map((attempt) => `
+            <tr>
+              <th scope="row">${escapeHtml(attempt.providerLabel || attempt.providerId || "Provider")}</th>
+              <td>${escapeHtml(attempt.role || "primary")}</td>
+              <td><span class="data-tag ${dataModeBadgeClass(marketDataMode({ status: attempt.status, dataFreshness: attempt.dataFreshness, cacheStatus: attempt.cacheStatus }))}">${escapeHtml(dataModeLabel(marketDataMode({ status: attempt.status, dataFreshness: attempt.dataFreshness, cacheStatus: attempt.cacheStatus })))}</span></td>
+              <td>${escapeHtml(`${attempt.quoteCount || 0}${attempt.requestedTickerCount ? ` of ${attempt.requestedTickerCount}` : ""}`)}</td>
+              <td>${escapeHtml(`${attempt.cacheStatus || "unknown"} · cached ${attempt.cacheHitCount || 0} · stale ${attempt.staleCount || 0}`)}</td>
+              <td>${attempt.timestamp ? escapeHtml(formatDateTime(attempt.timestamp)) : "Not available"}</td>
+              <td>${escapeHtml(attempt.safeErrorReason || attempt.detail || attempt.fallbackReason || "None")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
