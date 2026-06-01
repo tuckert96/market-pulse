@@ -83,6 +83,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
     xUpdates: options.xUpdates || []
   });
   renderDataSourceHealth(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.latestImportReport, options.marketDataStatus, options.politicianTradeImportReport, options.politicianTrades || [], options.redditImportReport, options.redditMentions || [], options.portfolioStatus, options.accountScope, options.xUpdateImportReport, options.xUpdates || []);
+  renderAIExplanationReview(options.aiExplanationReview, options.providerReadiness?.aiProviders?.openai);
   renderRedditSourceStatus(options.redditMentions || [], options.redditImportReport, options.redditSettings, options.providerReadiness);
   renderXSourceStatus(options.xUpdates || [], options.xUpdateImportReport, options.xSettings, options.providerReadiness);
   renderPoliticianTrades(options.politicianTrades || [], options.politicianTradeImportReport);
@@ -3798,13 +3799,14 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .filter((row) => normalizeTickerSymbol(row.ticker) === ticker)
     .sort((a, b) => timestampSortValue(b.dateTime) - timestampSortValue(a.dateTime))
     .slice(0, 6);
-  const redditSummary = summarizeRedditMentions(options.redditMentions || [])
+  const socialAsOf = options.asOf || latestRecordTimestamp([...(options.redditMentions || []), ...(options.xUpdates || [])]) || new Date().toISOString();
+  const redditSummary = summarizeRedditMentions(options.redditMentions || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const redditMentions = (options.redditMentions || [])
     .filter((record) => redditMentionTickers(record).includes(ticker))
     .sort((a, b) => timestampSortValue(b.createdAt || b.detectedAt || b.sourceAsOf) - timestampSortValue(a.createdAt || a.detectedAt || a.sourceAsOf))
     .slice(0, 8);
-  const xSummary = summarizeXUpdates(options.xUpdates || [])
+  const xSummary = summarizeXUpdates(options.xUpdates || [], { asOf: socialAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const xUpdates = (options.xUpdates || [])
     .filter((record) => normalizeTickerSymbol(record.ticker) === ticker || (record.extractedTickers || []).map(normalizeTickerSymbol).includes(ticker))
@@ -5117,6 +5119,11 @@ function timestampSortValue(value) {
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
+function latestRecordTimestamp(records = []) {
+  const latest = records.reduce((max, record) => Math.max(max, timestampSortValue(record?.createdAt || record?.detectedAt || record?.sourceAsOf || record?.timestamp)), 0);
+  return latest ? new Date(latest).toISOString() : "";
+}
+
 function tickerSignalSummary(model) {
   const signal = model.tickerSignal;
   if (!signal) return '<div><span>Ticker signal</span><b>No confluence row</b><small>Future watchlist/data signals will populate this row.</small></div>';
@@ -6422,7 +6429,8 @@ export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seek
       providerBacked: Boolean(readiness.aiProviders?.openai?.liveProviderCalls),
       sourceType: "AI explanation provider",
       lastSuccessfulAt: readiness.aiProviders?.openai?.lastSuccessfulRefresh || readiness.aiProviders?.openai?.lastSync,
-      fallbackReason: readiness.aiProviders?.openai?.liveProviderCalls ? "" : "Deterministic local explanation fallback is used when OpenAI is not enabled."
+      fallbackReason: readiness.aiProviders?.openai?.liveProviderCalls ? "" : "Deterministic local explanation fallback is used when OpenAI is not enabled.",
+      diagnostics: openAIExplanationReviewModeHtml(readiness.aiProviders?.openai || {})
     }
   ];
   const summary = buildDataSourceHealthSummary(rows);
@@ -6450,6 +6458,91 @@ export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seek
       ${row.diagnostics || ""}
     </div>
   `).join("")}`;
+}
+
+function openAIExplanationReviewModeHtml(openai = {}) {
+  const generatedState = openai.liveProviderCalls
+    ? "Available when requested"
+    : openai.configured
+      ? "Disabled until enabled"
+      : "Not configured";
+  return `
+    <div class="provider-status-note quiet" aria-label="AI explanation review mode">
+      <b>AI explanation review mode</b>
+      <span>Portfolio explanations compare deterministic source facts and optional generated text side by side. Missing context is listed instead of filled in.</span>
+      <p class="source-meta">Deterministic facts: Always visible · Generated summary: ${escapeHtml(generatedState)} · Safety: no API keys, raw prompts, buy/sell commands, price targets, or return predictions.</p>
+    </div>
+  `;
+}
+
+export function renderAIExplanationReview(payload = null, openai = {}) {
+  const target = byId("aiExplanationReviewPanel");
+  if (!target) return;
+  const review = payload?.reviewMode || null;
+  if (!review) {
+    const generatedState = openai?.liveProviderCalls
+      ? "OpenAI can generate wording when requested."
+      : openai?.configured
+        ? "OpenAI key is present, but generated wording is disabled."
+        : "OpenAI is not configured; deterministic wording remains available.";
+    target.innerHTML = `
+      <div class="provider-status-card configured-pending">
+        <div>
+          <b>Ready for review</b>
+          <span>Click Review portfolio explanation to build a local review packet from the current dashboard state.</span>
+        </div>
+        <div>
+          <strong>Deterministic first</strong>
+          <span class="status-badge ${escapeHtml(openai?.liveProviderCalls ? dataModeBadgeClass(DATA_MODES.LIVE) : dataModeBadgeClass(DATA_MODES.NOT_CONFIGURED))}">${escapeHtml(openai?.liveProviderCalls ? "Optional AI available" : "Local fallback")}</span>
+        </div>
+        <p>${escapeHtml(generatedState)} No API keys, prompts, or raw provider payloads are shown in this panel.</p>
+      </div>
+    `;
+    return;
+  }
+  target.innerHTML = renderExplanationReviewPayload(payload);
+}
+
+function renderExplanationReviewPayload(payload = {}) {
+  const review = payload.reviewMode || {};
+  const deterministic = review.deterministic || {};
+  const generated = review.generated || {};
+  const generatedAvailable = Boolean(generated.narrative);
+  const statusLabel = generatedAvailable ? "Generated" : payload.fallbackUsed ? "Fallback" : titleCase(generated.status || "Review");
+  return `
+    <div class="provider-status-card ${generatedAvailable ? "configured" : payload.status === "error" ? "missing" : "configured-pending"}">
+      <div>
+        <b>${escapeHtml(review.label || "AI explanation review mode")}</b>
+        <span>${escapeHtml(payload.fallbackUsed ? "Deterministic fallback is active." : "Optional generated wording is available beside deterministic facts.")}</span>
+      </div>
+      <div>
+        <strong>${escapeHtml(statusLabel)}</strong>
+        <span class="status-badge ${escapeHtml(generatedAvailable ? dataModeBadgeClass(DATA_MODES.LIVE) : payload.status === "error" ? dataModeBadgeClass(DATA_MODES.ERROR) : dataModeBadgeClass(DATA_MODES.NOT_CONFIGURED))}">${escapeHtml(generatedAvailable ? "Optional generated" : "Local deterministic")}</span>
+      </div>
+      <div class="ai-review-grid">
+        <div class="ai-review-card">
+          <b>${escapeHtml(deterministic.label || "Deterministic source facts")}</b>
+          <strong>${escapeHtml(deterministic.summary || "No deterministic summary available.")}</strong>
+          ${renderCompactList(deterministic.bullets || [], "No deterministic bullets listed.")}
+          ${renderCompactList(deterministic.actionItems || [], "No next checks listed.")}
+        </div>
+        <div class="ai-review-card">
+          <b>${escapeHtml(generated.label || "Optional generated summary")}</b>
+          <strong>${escapeHtml(generatedAvailable ? generated.narrative : generated.unavailableReason || "Generated wording unavailable.")}</strong>
+          ${renderCompactList(generated.caveats || [], generatedAvailable ? "No generated caveats listed." : "OpenAI output was not generated.")}
+        </div>
+      </div>
+      <p class="source-meta"><b>Missing context:</b> ${escapeHtml((review.missingContext || []).join(" · ") || "None listed.")}</p>
+      <p class="source-meta"><b>Source labels:</b> ${escapeHtml((review.sourceLabels || deterministic.sourceLabels || []).join(" · ") || "No source labels supplied.")}</p>
+      <p>${escapeHtml((review.safetyNotes || []).join(" "))}</p>
+    </div>
+  `;
+}
+
+function renderCompactList(items = [], fallback = "None listed.") {
+  const values = (Array.isArray(items) ? items : [items]).map((item) => String(item || "").trim()).filter(Boolean).slice(0, 5);
+  if (!values.length) return `<ul><li>${escapeHtml(fallback)}</li></ul>`;
+  return `<ul>${values.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
 export function portfolioImportDiagnosticsLine(report = {}) {

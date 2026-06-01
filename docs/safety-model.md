@@ -45,7 +45,7 @@ Provider-specific live modes must fail closed:
 - Reddit defaults to Sample/local JSON mode unless official API credentials and `REDDIT_LIVE_ENABLED=true` are present.
 - Federal disclosure / politician trade data defaults to Sample/local import mode unless the public static dataset provider and `POLITICIAN_TRADES_LIVE_ENABLED=true` are present.
 - X/Twitter defaults to Sample/local mode unless a server-side `X_BEARER_TOKEN` and `X_LIVE_ENABLED=true` are present. The local backend must never expose bearer tokens, usernames, cookies, sessions, or authorization headers to browser JavaScript.
-- OpenAI-powered explanations default to deterministic local summaries unless `OPENAI_API_KEY` is present and `OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED=true`. Prompts must use capped, redacted, source-labeled structured context and must not include raw account numbers, tokens, cookies, API keys, or brokerage credentials.
+- OpenAI-powered explanations default to deterministic local summaries unless `OPENAI_API_KEY` is present and `OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED=true`. Prompts must use capped, redacted, source-labeled structured context and must not include raw account numbers, tokens, cookies, API keys, or brokerage credentials. The explanation review mode must keep deterministic source facts visible beside optional generated text, list missing context explicitly, redact generated output before display, and avoid buy/sell commands, price targets, return probabilities, hallucinated news, or unsupported causal claims.
 
 ## Signal Discipline
 

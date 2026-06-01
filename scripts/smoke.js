@@ -1307,6 +1307,9 @@ assert(exposureSummary.uniqueTickers.length === new Set(exposureSummary.uniqueTi
 assert(signals.some((signal) => signal.id === "alpha-social-rumor-crdo" && signal.evidenceGrade === "D"), "weak social rumor should be downgraded");
 assert(!/\bfetch\(\s*["'`]https?:\/\//.test(appJs + portfolioViewJs), "frontend should not make direct external fetches");
 assert(appJs.includes('fetch("/api/config", { cache: "no-store" })'), "provider readiness should use same-origin config only");
+assert(appJs.includes('fetch("/api/portfolio/explanation"'), "AI explanation review should call only the local backend endpoint");
+assert(indexHtml.includes("AI explanation review"), "Data Sources should expose the AI explanation review workflow");
+assert(portfolioViewJs.includes("Deterministic source facts") && portfolioViewJs.includes("Optional generated summary"), "AI explanation review should separate deterministic facts from generated text");
 assert(gitignore.includes("screenshots/") && gitignore.includes("test-results/") && gitignore.includes("playwright-report/"), "visual test artifacts should be ignored");
 assert(gitignore.includes(".env") && gitignore.includes(".env.*") && gitignore.includes("!.env.example"), "environment files should be ignored except .env.example");
 assert(gitignore.includes("tucker-dashboard-state-*.json"), "local dashboard state exports should be ignored");

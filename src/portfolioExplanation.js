@@ -131,6 +131,58 @@ export function extractOpenAIResponseText(payload = {}) {
   return parts.join("\n").trim();
 }
 
+export function buildExplanationReviewMode(fallback = {}, options = {}) {
+  const explanation = fallback.explanation || {};
+  const openai = sanitizeObject(options.openai || {});
+  const generatedText = redactSecretLikeText(options.generatedText || "", options.extraSecrets || []).trim();
+  const generatedStatus = generatedText ? "generated" : normalizeGeneratedStatus(options.generatedStatus || openai.status || fallback.status || "not configured");
+  const sourceLabels = uniqueNonEmpty(options.sourceLabels || fallback.dataSources || []);
+  const caveats = uniqueNonEmpty(explanation.caveats || []);
+  const missingContext = uniqueNonEmpty([
+    ...(options.missingContext || []),
+    ...caveats.filter((item) => /missing|unavailable|not configured|sample|stale|error|no /i.test(item))
+  ]);
+  const unavailableReason = generatedText ? "" : options.unavailableReason || generatedUnavailableReason(generatedStatus, openai);
+
+  return {
+    mode: "side-by-side-review",
+    label: "AI explanation review mode",
+    status: generatedText ? "generated" : generatedStatus,
+    deterministic: {
+      label: "Deterministic source facts",
+      sourceMode: fallback.sourceMode || "local deterministic",
+      title: explanation.title || "Local portfolio explanation",
+      summary: explanation.summary || "No deterministic summary is available.",
+      bullets: uniqueNonEmpty(explanation.bullets || []),
+      actionItems: uniqueNonEmpty(explanation.actionItems || []),
+      caveats,
+      sourceLabels
+    },
+    generated: {
+      label: "Optional generated summary",
+      sourceMode: generatedText ? "AI-assisted" : "not generated",
+      provider: "openai",
+      model: generatedText ? options.model || openai.model || null : null,
+      status: generatedStatus,
+      narrative: generatedText || null,
+      unavailableReason,
+      caveats: generatedText
+        ? [
+            "Generated text is optional and must be checked against the deterministic facts.",
+            "The model was asked to use only the supplied dashboard data."
+          ]
+        : []
+    },
+    missingContext,
+    sourceLabels,
+    safetyNotes: [
+      "Deterministic facts remain visible even when generated text is available.",
+      "Missing context is listed instead of inferred.",
+      "No buy/sell commands, price targets, or return predictions are generated."
+    ]
+  };
+}
+
 export function sanitizePortfolioExplanationInput(input = {}) {
   const sanitized = sanitizeValue(input);
   return {
@@ -231,6 +283,28 @@ function missingDataCaveats(input = {}, holdings = []) {
   }
   if (!Array.isArray(input.thesisRows) || !input.thesisRows.length) caveats.push("No thesis rows were provided.");
   return caveats;
+}
+
+function normalizeGeneratedStatus(status = "") {
+  const normalized = String(status || "").toLowerCase().trim();
+  if (["connected", "live", "generated"].includes(normalized)) return "generated";
+  if (["configured-not-connected", "disabled", "live-ready"].includes(normalized)) return "disabled";
+  if (normalized.includes("error")) return "error";
+  if (normalized.includes("not configured")) return "not configured";
+  return normalized || "not configured";
+}
+
+function generatedUnavailableReason(status, openai = {}) {
+  if (status === "error") return openai.lastError || "OpenAI returned an error, so deterministic local text is shown.";
+  if (status === "disabled") return "OpenAI key may be present, but generated explanations are disabled until OPENAI_PORTFOLIO_EXPLANATIONS_ENABLED=true.";
+  if (status === "not configured") return "OpenAI is not configured. Deterministic local explanation remains available.";
+  return "Generated explanation was not requested.";
+}
+
+function uniqueNonEmpty(items = []) {
+  return [...new Set((Array.isArray(items) ? items : [items])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean))];
 }
 
 function portfolioSummaryLine({ totalValue, holdings, risk, alertCount }) {

@@ -14,6 +14,7 @@ Date: 2026-05-24
 
 - GitHub ticket sweep: Fidelity CSV verification, CI checks, provider diagnostics/source labels, and OpenAI/thesis summary work are split into reviewable PRs tied to the open issues.
 - Optional OpenAI portfolio explanations are now backend-only, disabled by default, redacted, source-labeled, and fall back to deterministic local explanations when no key is configured or the provider errors.
+- Data Sources now includes an AI explanation review workflow that shows deterministic source facts beside optional generated wording, lists missing context, and keeps prompts, API keys, and raw provider payloads out of the browser UI.
 - Ticker pages now include a clearer local deterministic thesis/risk summary with review flags, source label, key risks, invalidation criteria, add/trim/review conditions, and guardrail gaps.
 - Portfolio Health Score: Overview and Daily Command Brief now include a compact 0-100 local workflow score that combines import trust, concentration, thesis coverage, target drift, alert load, and market-data freshness. It links directly to the next screen to inspect and stays disabled/honest when only sample or no portfolio data is loaded.
 - Market-data reliability pass: Finnhub remains the preferred free personal-use realtime provider path, with docs now spelling out the boundary between free bounded provider data and paid/exchange-grade market-data entitlements.

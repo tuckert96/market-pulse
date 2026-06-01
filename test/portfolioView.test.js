@@ -23,6 +23,7 @@ import {
   providerStatusDisplay,
   renderAffectedExposureSummary,
   renderLeveragedDrawdownScenarios,
+  renderAIExplanationReview,
   renderDataSourceHealth,
   renderTickerLink,
   safeExternalHref,
@@ -305,6 +306,82 @@ test("data sources health screen renders standardized source labels and freshnes
     assert.match(html, /OpenAI key detected/);
     assert.match(html, /Not configured/);
     assert.match(html, /Deterministic local explanation fallback/);
+    assert.match(html, /AI explanation review mode/);
+    assert.match(html, /Deterministic facts: Always visible/);
+    assert.match(html, /Generated summary: Disabled until enabled/);
+    assert.match(html, /no API keys, raw prompts, buy\/sell commands, price targets, or return predictions/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("AI explanation review panel separates deterministic facts from generated text", () => {
+  const previousDocument = globalThis.document;
+  const elements = new Map([
+    ["aiExplanationReviewPanel", { innerHTML: "", hidden: false }]
+  ]);
+  globalThis.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+
+  try {
+    renderAIExplanationReview({
+      status: "connected",
+      fallbackUsed: false,
+      reviewMode: {
+        label: "AI explanation review mode",
+        deterministic: {
+          label: "Deterministic source facts",
+          summary: "Local explanation covers 3 holdings.",
+          bullets: ["Largest holding: MU at 22%."],
+          actionItems: ["Review concentration."],
+          sourceLabels: ["Portfolio: Imported", "Market data: Live"]
+        },
+        generated: {
+          label: "Optional generated summary",
+          status: "generated",
+          narrative: "Generated wording summarizes concentration without adding news.",
+          caveats: ["Check generated wording against deterministic facts."]
+        },
+        missingContext: ["No thesis rows were provided."],
+        sourceLabels: ["Portfolio: Imported", "Market data: Live"],
+        safetyNotes: ["No buy/sell commands, price targets, or return predictions are generated."]
+      }
+    }, { configured: true, liveProviderCalls: true });
+
+    const html = elements.get("aiExplanationReviewPanel").innerHTML;
+    assert.match(html, /Deterministic source facts/);
+    assert.match(html, /Optional generated summary/);
+    assert.match(html, /Local explanation covers 3 holdings/);
+    assert.match(html, /Generated wording summarizes concentration/);
+    assert.match(html, /No thesis rows were provided/);
+    assert.match(html, /No buy\/sell commands, price targets, or return predictions/);
+    assert.equal(html.includes("api_key="), false);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("AI explanation review panel has a safe pre-run empty state", () => {
+  const previousDocument = globalThis.document;
+  const elements = new Map([
+    ["aiExplanationReviewPanel", { innerHTML: "", hidden: false }]
+  ]);
+  globalThis.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+
+  try {
+    renderAIExplanationReview(null, { configured: false, liveProviderCalls: false });
+    const html = elements.get("aiExplanationReviewPanel").innerHTML;
+    assert.match(html, /Ready for review/);
+    assert.match(html, /Deterministic first/);
+    assert.match(html, /Local fallback/);
+    assert.match(html, /No API keys, prompts, or raw provider payloads/);
   } finally {
     globalThis.document = previousDocument;
   }
