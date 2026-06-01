@@ -848,7 +848,20 @@ export function normalizeMarketQuote(raw = {}, options = {}) {
   });
 }
 
-export function buildMarketDataSnapshot({ provider = createUnconfiguredMarketDataProvider(), quotes = [], asOf, now, error = "", requestedTickers = [] } = {}) {
+export function buildMarketDataSnapshot({
+  provider = createUnconfiguredMarketDataProvider(),
+  quotes = [],
+  asOf,
+  now,
+  error = "",
+  requestedTickers = [],
+  providerAttempts = [],
+  primaryProviderId = "",
+  primaryProviderLabel = "",
+  fallbackProviderId = "",
+  fallbackProviderLabel = "",
+  fallbackReason = ""
+} = {}) {
   const normalizedQuotes = quotes.map((quote) => normalizeMarketQuote(quote, {
     providerId: provider.id,
     providerLabel: provider.label,
@@ -879,9 +892,30 @@ export function buildMarketDataSnapshot({ provider = createUnconfiguredMarketDat
     warnings: missingTickers.length ? [`No normalized quote returned for ${missingTickers.join(", ")}.`] : [],
     error,
     sourceTypes: provider.sourceTypes || ["quote", "price"],
+    primaryProviderId,
+    primaryProviderLabel,
+    fallbackProviderId,
+    fallbackProviderLabel,
+    fallbackReason,
+    providerAttempts: normalizeMarketDataProviderAttempts(providerAttempts, {
+      providerId: provider.id,
+      providerLabel: provider.label,
+      attemptedAt: now || asOf,
+      role: provider.mode === "mock" ? "sample" : "primary"
+    }),
     status: null
   };
   snapshot.status = buildMarketDataStatus(snapshot, { now });
+  if (!snapshot.providerAttempts.length) {
+    snapshot.providerAttempts = [marketDataProviderAttemptFromSnapshot(snapshot, {
+      attemptedAt: now || asOf,
+      role: snapshot.mode === "mock" ? "sample" : "primary"
+    })];
+    snapshot.status = {
+      ...snapshot.status,
+      providerAttempts: snapshot.providerAttempts
+    };
+  }
   return snapshot;
 }
 
@@ -1793,9 +1827,73 @@ function status(statusValue, label, detail, snapshot) {
     truncatedTickers: snapshot.truncatedTickers || [],
     warnings: snapshot.warnings || [],
     fallbackReason: snapshot.fallbackReason || "",
+    primaryProviderId: snapshot.primaryProviderId || "",
+    primaryProviderLabel: snapshot.primaryProviderLabel || "",
+    fallbackProviderId: snapshot.fallbackProviderId || "",
+    fallbackProviderLabel: snapshot.fallbackProviderLabel || "",
+    providerAttempts: normalizeMarketDataProviderAttempts(snapshot.providerAttempts || [], snapshot),
     cache: snapshot.cache || null,
     quoteDiagnostics: marketDataQuoteDiagnostics(snapshot)
   };
+}
+
+export function marketDataProviderAttemptFromSnapshot(snapshot = {}, options = {}) {
+  const statusValue = snapshot.status?.status || snapshot.error && (isRateLimitMessage(snapshot.error) ? MARKET_DATA_PROVIDER_STATUSES.RATE_LIMITED : MARKET_DATA_PROVIDER_STATUSES.ERROR) || snapshot.dataFreshness || "unknown";
+  const detail = snapshot.status?.detail || snapshot.error || snapshot.lastError?.message || "";
+  const cache = snapshot.cache || {};
+  return normalizeMarketDataProviderAttempt({
+    providerId: snapshot.providerId || options.providerId,
+    providerLabel: snapshot.providerLabel || options.providerLabel,
+    role: options.role || (snapshot.fallbackProviderId && snapshot.providerId === snapshot.fallbackProviderId ? "fallback" : "primary"),
+    status: statusValue,
+    timestamp: options.attemptedAt || snapshot.fetchedAt || snapshot.asOf,
+    fetchedAt: snapshot.fetchedAt || null,
+    quoteCount: snapshot.quotes?.length || snapshot.status?.quoteCount || 0,
+    requestedTickerCount: snapshot.requestedTickerCount || snapshot.requestedTickers?.length || 0,
+    missingTickerCount: snapshot.missingTickers?.length || 0,
+    cacheStatus: snapshot.cacheStatus || cache.status || snapshot.dataFreshness || "unknown",
+    dataFreshness: snapshot.dataFreshness || cache.freshness || "unknown",
+    cacheHitCount: cache.hitCount || 0,
+    liveCount: cache.liveCount || 0,
+    staleCount: cache.staleCount || 0,
+    safeErrorReason: snapshot.error || snapshot.lastError?.message || "",
+    detail,
+    fallbackReason: snapshot.fallbackReason || ""
+  }, options);
+}
+
+export function normalizeMarketDataProviderAttempts(attempts = [], defaults = {}) {
+  return (Array.isArray(attempts) ? attempts : [])
+    .filter(Boolean)
+    .map((attempt) => normalizeMarketDataProviderAttempt(attempt, defaults));
+}
+
+function normalizeMarketDataProviderAttempt(attempt = {}, defaults = {}) {
+  const providerId = attempt.providerId || defaults.providerId || "unknown-provider";
+  const providerLabel = attempt.providerLabel || defaults.providerLabel || "Market data provider";
+  const timestamp = attempt.timestamp || attempt.attemptedAt || attempt.fetchedAt || defaults.attemptedAt || new Date().toISOString();
+  const statusValue = attempt.status || "unknown";
+  const safeErrorReason = safeAttemptText(attempt.safeErrorReason || attempt.error || attempt.lastError?.message || "");
+  const detail = safeAttemptText(attempt.detail || safeErrorReason || "");
+  return pruneEmpty({
+    providerId,
+    providerLabel,
+    role: attempt.role || defaults.role || "primary",
+    status: statusValue,
+    timestamp,
+    fetchedAt: attempt.fetchedAt || null,
+    quoteCount: Number(attempt.quoteCount || 0),
+    requestedTickerCount: Number(attempt.requestedTickerCount || 0),
+    missingTickerCount: Number(attempt.missingTickerCount || 0),
+    cacheStatus: attempt.cacheStatus || "unknown",
+    dataFreshness: attempt.dataFreshness || "unknown",
+    cacheHitCount: Number(attempt.cacheHitCount || attempt.hitCount || 0),
+    liveCount: Number(attempt.liveCount || 0),
+    staleCount: Number(attempt.staleCount || 0),
+    fallbackReason: safeAttemptText(attempt.fallbackReason || ""),
+    safeErrorReason,
+    detail
+  });
 }
 
 export function marketDataQuoteDiagnostics(snapshot = {}) {
@@ -1980,6 +2078,11 @@ function safeProviderError(error, apiKey = "") {
   const safe = new Error(message || "market data provider failed");
   safe.name = error?.name || "Error";
   return safe;
+}
+
+function safeAttemptText(value = "") {
+  const text = redactProviderSecret(value);
+  return text.length > 220 ? `${text.slice(0, 220)}...` : text;
 }
 
 function marketDataCacheKey(providerId, type, ticker) {

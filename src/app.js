@@ -4106,6 +4106,24 @@ function buildMarketDataRefreshErrorSnapshot(tickers = [], message = "Market dat
   const requestedTickers = tickers.map((ticker) => String(ticker || "").toUpperCase()).filter(Boolean);
   const liveMode = Boolean(config.configured && config.liveProviderCalls);
   const mode = liveMode ? "live" : "not-configured";
+  const providerAttempts = [{
+    providerId,
+    providerLabel,
+    role: "primary",
+    status: "error",
+    timestamp: now,
+    fetchedAt: now,
+    quoteCount: 0,
+    requestedTickerCount: requestedTickers.length,
+    missingTickerCount: requestedTickers.length,
+    cacheStatus: "error",
+    dataFreshness: "error",
+    cacheHitCount: 0,
+    liveCount: 0,
+    staleCount: 0,
+    safeErrorReason: message,
+    detail: "Browser refresh failed before a provider snapshot could be applied."
+  }];
   return {
     providerId,
     providerLabel,
@@ -4136,6 +4154,7 @@ function buildMarketDataRefreshErrorSnapshot(tickers = [], message = "Market dat
     quotesByTicker: {},
     requestedTickers,
     missingTickers: requestedTickers,
+    providerAttempts,
     warnings: [message],
     error: message,
     sourceTypes: ["quote", "price"],
@@ -4157,6 +4176,7 @@ function buildMarketDataRefreshErrorSnapshot(tickers = [], message = "Market dat
       lastError,
       requestedTickers,
       missingTickers: requestedTickers,
+      providerAttempts,
       warnings: [message],
       quoteDiagnostics: requestedTickers.map((ticker) => ({
         ticker,
@@ -4191,10 +4211,27 @@ function markMarketDataSnapshotStale(snapshot, message) {
     snapshot.quotes.some((quote) => quote.isMock || quote.sourceMode === "mock");
   if (mockSnapshot) return null;
   const lastError = { message, at: new Date().toISOString() };
+  const failedAttempt = {
+    providerId: snapshot.providerId || snapshot.status?.providerId || "market-data",
+    providerLabel: snapshot.providerLabel || snapshot.status?.providerLabel || "Market data provider",
+    role: "primary",
+    status: "error",
+    timestamp: lastError.at,
+    fetchedAt: lastError.at,
+    quoteCount: 0,
+    requestedTickerCount: snapshot.requestedTickers?.length || 0,
+    missingTickerCount: snapshot.requestedTickers?.length || 0,
+    cacheStatus: "error",
+    dataFreshness: "error",
+    safeErrorReason: message,
+    detail: "Refresh failed; continuing to display the last successful cached market data."
+  };
+  const providerAttempts = [...(snapshot.providerAttempts || snapshot.status?.providerAttempts || []), failedAttempt];
   return {
     ...snapshot,
     dataFreshness: "stale",
     lastError,
+    providerAttempts,
     quotes: (snapshot.quotes || []).map((quote) => ({
       ...quote,
       dataFreshness: "stale",
@@ -4217,6 +4254,7 @@ function markMarketDataSnapshotStale(snapshot, message) {
       dataFreshness: "stale",
       cacheStatus: "stale",
       lastError,
+      providerAttempts,
       quoteDiagnostics: (snapshot.status?.quoteDiagnostics || []).map((row) => ({
         ...row,
         status: "stale data",

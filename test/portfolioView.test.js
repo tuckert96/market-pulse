@@ -523,6 +523,10 @@ test("market data freshness line shows provider, timestamps, and last error", ()
 test("market data diagnostics show request budget and deferred enrichment", () => {
   const html = marketDataDiagnosticsHtml({
     requestedTickers: ["MU", "NVDA", "AMD"],
+    providerAttempts: [
+      { providerId: "finnhub", providerLabel: "Finnhub", role: "primary", status: "rate limited", quoteCount: 0, requestedTickerCount: 3, cacheStatus: "error", dataFreshness: "error", timestamp: "2026-05-23T16:00:00.000Z", safeErrorReason: "Finnhub rate limit or quota response." },
+      { providerId: "financialModelingPrep", providerLabel: "Financial Modeling Prep", role: "fallback", status: "connected", quoteCount: 3, requestedTickerCount: 3, cacheStatus: "live", dataFreshness: "live", timestamp: "2026-05-23T16:00:01.000Z" }
+    ],
     quoteDiagnostics: [
       { ticker: "MU", status: "connected", dataFreshness: "live", cacheStatus: "live", quote: "live", profile: "live", metric: "live", history: "live", missingFields: [], fetchedAt: "2026-05-23T16:00:00.000Z" },
       { ticker: "NVDA", status: "partial data", dataFreshness: "live", cacheStatus: "live", quote: "live", profile: "deferred", metric: "deferred", history: "skipped", missingFields: ["history"], fetchedAt: "2026-05-23T16:00:00.000Z" },
@@ -545,6 +549,10 @@ test("market data diagnostics show request budget and deferred enrichment", () =
   assert.match(html, /Deferred enrichment/);
   assert.match(html, /NVDA, AMD/);
   assert.match(html, /Per-ticker provider coverage/);
+  assert.match(html, /Provider attempt audit trail/);
+  assert.match(html, /Finnhub/);
+  assert.match(html, /Financial Modeling Prep/);
+  assert.match(html, /rate limit/);
   assert.match(html, /MU/);
   assert.match(html, /Deferred/);
   assert.match(html, /Missing/);

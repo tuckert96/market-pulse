@@ -19,6 +19,8 @@ import {
   fetchMarketDataSnapshot,
   marketDataCacheTtlConfig,
   marketDataFallbackProviderIds,
+  marketDataProviderAttemptFromSnapshot,
+  normalizeMarketDataProviderAttempts,
   marketDataRequestBudgetConfig
 } from "../src/marketDataProvider.js";
 import {
@@ -224,8 +226,25 @@ export async function apiResponse(method, pathname, searchParams = new URLSearch
         asOf: requestTime,
         now: requestTime
       });
+      const providerAttempts = normalizeMarketDataProviderAttempts([
+        {
+          providerId: marketDataConfig.selectedProvider,
+          providerLabel: marketDataConfig.selectedLabel,
+          role: "primary",
+          status: "configured-not-connected",
+          timestamp: requestTime,
+          quoteCount: 0,
+          requestedTickerCount: tickers.length,
+          missingTickerCount: tickers.length,
+          cacheStatus: "not configured",
+          dataFreshness: "not configured",
+          detail: `${marketDataConfig.selectedLabel} credentials are present, but live quote calls are disabled for this provider.`
+        },
+        marketDataProviderAttemptFromSnapshot(fallback, { role: "sample", attemptedAt: requestTime })
+      ]);
       return ok({
         ...fallback,
+        providerAttempts,
         requestedTickerCount: requestedTickers.length,
         truncatedTickers,
         warnings: [
@@ -238,6 +257,7 @@ export async function apiResponse(method, pathname, searchParams = new URLSearch
           ...fallback.status,
           requestedTickerCount: requestedTickers.length,
           truncatedTickers,
+          providerAttempts,
           status: "configured-not-connected",
           label: "Market data configured, not connected",
           detail: `${marketDataConfig.selectedLabel} credentials are present, but this provider is not enabled for live quote calls. Sample quote data is displayed as fallback.`
@@ -250,8 +270,25 @@ export async function apiResponse(method, pathname, searchParams = new URLSearch
         asOf: requestTime,
         now: requestTime
       });
+      const providerAttempts = normalizeMarketDataProviderAttempts([
+        {
+          providerId: marketDataConfig.selectedProvider,
+          providerLabel: marketDataConfig.selectedLabel,
+          role: "primary",
+          status: "not configured",
+          timestamp: requestTime,
+          quoteCount: 0,
+          requestedTickerCount: tickers.length,
+          missingTickerCount: tickers.length,
+          cacheStatus: "not configured",
+          dataFreshness: "not configured",
+          detail: "No live market data API key is configured in local .env."
+        },
+        marketDataProviderAttemptFromSnapshot(fallback, { role: "sample", attemptedAt: requestTime })
+      ]);
       return ok({
         ...fallback,
+        providerAttempts,
         requestedTickerCount: requestedTickers.length,
         truncatedTickers,
         warnings: [
@@ -263,6 +300,7 @@ export async function apiResponse(method, pathname, searchParams = new URLSearch
           ...fallback.status,
           requestedTickerCount: requestedTickers.length,
           truncatedTickers,
+          providerAttempts,
           detail: "Sample quote data returned because no live market data API key is configured in local .env."
         }
       });
@@ -1124,8 +1162,14 @@ async function marketDataSnapshotWithFallback({ primarySnapshot, env, providerOp
       attempts.push({
         providerId: fallbackProvider.id || providerId,
         providerLabel: fallbackProvider.label || providerId,
+        role: "fallback",
         status: "not configured",
+        timestamp: requestTime,
         quoteCount: 0,
+        requestedTickerCount: tickers.length,
+        missingTickerCount: tickers.length,
+        cacheStatus: "not configured",
+        dataFreshness: "not configured",
         detail: "Fallback provider key is not configured on the local backend."
       });
       continue;
@@ -1137,7 +1181,7 @@ async function marketDataSnapshotWithFallback({ primarySnapshot, env, providerOp
       asOf: requestTime,
       now: requestTime
     });
-    attempts.push(marketDataProviderAttempt(fallbackSnapshot));
+    attempts.push(marketDataProviderAttemptFromSnapshot(fallbackSnapshot, { role: "fallback", attemptedAt: requestTime }));
 
     if (hasUsableMarketDataQuotes(fallbackSnapshot)) {
       const warning = `${primarySnapshot.providerLabel || "Primary provider"} returned ${primarySnapshot.status?.status || "no usable quotes"}; using ${fallbackSnapshot.providerLabel || "fallback provider"} fallback quotes.`;
@@ -1172,17 +1216,13 @@ function hasUsableMarketDataQuotes(snapshot = {}) {
 }
 
 function marketDataProviderAttempt(snapshot = {}) {
-  return {
-    providerId: snapshot.providerId || snapshot.status?.providerId || "unknown-provider",
-    providerLabel: snapshot.providerLabel || snapshot.status?.providerLabel || "Market data provider",
-    status: snapshot.status?.status || "unknown",
-    quoteCount: snapshot.quotes?.length || 0,
-    detail: snapshot.status?.detail || snapshot.error || ""
-  };
+  return marketDataProviderAttemptFromSnapshot(snapshot, {
+    role: snapshot.fallbackProviderId && snapshot.providerId === snapshot.fallbackProviderId ? "fallback" : "primary"
+  });
 }
 
 function attachMarketDataAttempts(snapshot = {}, attempts = []) {
-  const providerAttempts = attempts.filter(Boolean);
+  const providerAttempts = normalizeMarketDataProviderAttempts(attempts);
   if (!providerAttempts.length) return snapshot;
   return {
     ...snapshot,
