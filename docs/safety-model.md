@@ -6,6 +6,7 @@ This dashboard is a local-first research aid for Tucker. It should help identify
 
 - Do not collect or store Fidelity usernames, passwords, MFA codes, cookies, session tokens, or account recovery details.
 - Do not collect or store Seeking Alpha passwords.
+- Do not collect or store Seeking Alpha cookies, session tokens, hidden browser state, or authorization headers.
 - Do not scrape Fidelity, Seeking Alpha Premium, X/Twitter, or paywalled sources.
 - Do not use logged-in browser sessions, cookies, or session tokens for Reddit, X/Twitter, or federal disclosure sources.
 - Do not hardcode API keys.
@@ -19,6 +20,7 @@ This dashboard is a local-first research aid for Tucker. It should help identify
 - Local demo data.
 - Tucker-controlled CSV imports.
 - Tucker-controlled Seeking Alpha `.xlsx` exports.
+- Tucker-pasted or locally imported Seeking Alpha AI text/reports that are visible to him and do not include credentials, cookies, session tokens, or hidden browser state.
 - Tokenized provider flows through approved aggregators such as Plaid Investments or SnapTrade.
 - Licensed APIs or official APIs when keys are stored server-side only.
 - Public static federal disclosure datasets when explicitly enabled, source-labeled, cached, and shown as delayed/partial informational data.

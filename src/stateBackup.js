@@ -22,7 +22,8 @@ const ARRAY_FIELDS = Object.freeze([
   "watchlistIdeas",
   "decisionJournal",
   "eventCalendar",
-  "quantScoreHistory"
+  "quantScoreHistory",
+  "seekingAlphaAiRecords"
 ]);
 
 const OBJECT_FIELDS = Object.freeze([
@@ -155,6 +156,7 @@ export function buildDashboardStateRestorePreview(input, currentState = {}) {
     previewRow("Decision journal", current.decisionJournal, restored.decisionJournal, "Decision journal entries will be restored."),
     previewRow("Calendar events", current.eventCalendar, restored.eventCalendar, "Local event calendar rows will be restored."),
     previewRow("Quant score history", current.quantScoreHistory, restored.quantScoreHistory, "Compact Quant Lens score history will be restored."),
+    previewRow("Seeking Alpha AI records", current.seekingAlphaAiRecords, restored.seekingAlphaAiRecords, "Pasted/imported Seeking Alpha AI report excerpts will be restored as local personal data."),
     previewRow("Local settings", current.localSettings, restored.localSettings, "Account scope and market-data live-mode preferences will be restored.")
   ];
 
@@ -187,6 +189,7 @@ function normalizedRestoreCounts(source = {}) {
     decisionJournal: normalizeJournalEntries(Array.isArray(source.decisionJournal) ? source.decisionJournal : []).length,
     eventCalendar: normalizeCalendarEvents(Array.isArray(source.eventCalendar) ? source.eventCalendar : []).length,
     quantScoreHistory: normalizeQuantScoreHistory(Array.isArray(source.quantScoreHistory) ? source.quantScoreHistory : []).length,
+    seekingAlphaAiRecords: countArray(source.seekingAlphaAiRecords),
     localSettings: [source.accountScope, source.marketDataLiveMode && typeof source.marketDataLiveMode === "object" ? "marketDataLiveMode" : ""]
       .filter(Boolean)
       .length

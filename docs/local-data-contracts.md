@@ -28,6 +28,7 @@ Runtime code still uses lightweight JavaScript normalizers. TypeScript contracts
 - alerts
 - data source statuses
 - optional compact Quant Lens score history
+- optional Seeking Alpha AI personal import records
 
 Validate it with:
 
@@ -133,6 +134,40 @@ Required fields:
 Optional fields include `ticker`, `typeLabel`, `timestamp`, `summary`, `sourceUrl`, `notes`, `importedAt`, `staleAfter`, and `custom`.
 
 Important: sample calendar dates are workflow examples. The UI must label them as Sample and must not present them as live earnings dates. Imported or manual rows should be shown as local data until a future provider is connected.
+
+### SeekingAlphaAiRecord
+
+Local personal import row for user-provided Seeking Alpha AI output. These records support Ask Seeking Alpha, Virtual Analyst Reports, AI Summary Reports, and future manually provided Earnings Call Insights.
+
+Required fields:
+
+- `id`
+- `ticker`
+- `tickers`
+- `sourceType`: ask_seeking_alpha, virtual_analyst_report, summary_report, earnings_call_insight, or unknown
+- `sourceMode`: sample, pasted, imported_file, saved_html, browser_assisted, stale, or error
+- `responseText`: capped redacted visible text only
+- `extractedBullishPoints`
+- `extractedBearishPoints`
+- `extractedFinancialMetrics`
+- `extractedRatings`
+- `citedSourceLabels`
+- `reportDate`
+- `importedAt`
+- `freshnessStatus`: current, stale, or unknown
+- `validationWarnings`
+- `redactionWarnings`
+- `rawTextTruncated`
+- `liveProviderCalls: false`
+- `credentialMaterialStored: false`
+
+Rules:
+
+- Do not store Seeking Alpha credentials, cookies, browser sessions, hidden page state, or authorization headers.
+- Reject content that appears to contain credential material.
+- Redact softer identifiers such as emails, auth query parameters, long opaque strings, and account-like identifiers.
+- Treat AI text as source-labeled context only. It should not become a verified fact, score component, or trade command unless a later sprint adds an explicit, transparent integration path.
+- If `reportDate` is older than the configured freshness window, the record should remain usable but display a stale warning.
 
 ### WhatIfScenario / WhatIfResult
 

@@ -1,4 +1,5 @@
 import { normalizeHolding, normalizeTicker } from "./portfolioSchema.js";
+import { SEEKING_ALPHA_AI_SOURCE_MODES, SEEKING_ALPHA_AI_SOURCE_TYPES } from "./seekingAlphaAi.js";
 
 export const LOCAL_DATA_CONTRACT_VERSION = 1;
 
@@ -34,6 +35,9 @@ const CALENDAR_IMPORTANCE = new Set(["low", "medium", "high"]);
 const CALENDAR_SOURCE_MODES = new Set(["mock", "imported", "manual", "live", "stale", "error"]);
 const QUANT_HISTORY_PORTFOLIO_MODES = new Set(["sample", "imported", "local", "no-data"]);
 const QUANT_SECURITY_KINDS = new Set(["operating-company", "fund-or-etf"]);
+const SEEKING_ALPHA_AI_TYPES = new Set(SEEKING_ALPHA_AI_SOURCE_TYPES);
+const SEEKING_ALPHA_AI_MODES = new Set(SEEKING_ALPHA_AI_SOURCE_MODES);
+const SEEKING_ALPHA_AI_FRESHNESS = new Set(["current", "stale", "unknown"]);
 
 export function parseLocalDataFixtureJson(text = "", fileName = "local-data-fixtures.json") {
   try {
@@ -205,6 +209,40 @@ export function validateLocalDataBundle(bundle = {}) {
     }
   }
 
+  if (bundle.seekingAlphaAiRecords !== undefined) {
+    if (!Array.isArray(bundle.seekingAlphaAiRecords)) {
+      errors.push("seekingAlphaAiRecords must be an array when present");
+    } else {
+      bundle.seekingAlphaAiRecords.forEach((record, index) => {
+        const ticker = normalizeTicker(record.ticker);
+        requireString(record.id, `seekingAlphaAiRecords[${index}].id`, errors);
+        requireString(ticker, `seekingAlphaAiRecords[${index}].ticker`, errors);
+        requireArray(record.tickers, `seekingAlphaAiRecords[${index}].tickers`, errors);
+        requireKnown(record.sourceType, SEEKING_ALPHA_AI_TYPES, `seekingAlphaAiRecords[${index}].sourceType`, errors);
+        requireKnown(record.sourceMode, SEEKING_ALPHA_AI_MODES, `seekingAlphaAiRecords[${index}].sourceMode`, errors);
+        requireString(record.responseText, `seekingAlphaAiRecords[${index}].responseText`, errors);
+        requireArray(record.extractedBullishPoints, `seekingAlphaAiRecords[${index}].extractedBullishPoints`, errors);
+        requireArray(record.extractedBearishPoints, `seekingAlphaAiRecords[${index}].extractedBearishPoints`, errors);
+        requireArray(record.extractedFinancialMetrics, `seekingAlphaAiRecords[${index}].extractedFinancialMetrics`, errors);
+        requireArray(record.citedSourceLabels, `seekingAlphaAiRecords[${index}].citedSourceLabels`, errors);
+        requireString(record.reportDate, `seekingAlphaAiRecords[${index}].reportDate`, errors);
+        requireString(record.importedAt, `seekingAlphaAiRecords[${index}].importedAt`, errors);
+        requireKnown(record.freshnessStatus, SEEKING_ALPHA_AI_FRESHNESS, `seekingAlphaAiRecords[${index}].freshnessStatus`, errors);
+        requireArray(record.validationWarnings, `seekingAlphaAiRecords[${index}].validationWarnings`, errors);
+        requireArray(record.redactionWarnings, `seekingAlphaAiRecords[${index}].redactionWarnings`, errors);
+        requireBoolean(record.rawTextTruncated, `seekingAlphaAiRecords[${index}].rawTextTruncated`, errors);
+        requireBoolean(record.liveProviderCalls, `seekingAlphaAiRecords[${index}].liveProviderCalls`, errors);
+        requireBoolean(record.credentialMaterialStored, `seekingAlphaAiRecords[${index}].credentialMaterialStored`, errors);
+        if (record.credentialMaterialStored === true) errors.push(`seekingAlphaAiRecords[${index}].credentialMaterialStored must be false`);
+        if (record.responseText && String(record.responseText).length > 4001) errors.push(`seekingAlphaAiRecords[${index}].responseText must be capped`);
+        if (record.extractedRatings !== undefined && (typeof record.extractedRatings !== "object" || Array.isArray(record.extractedRatings) || record.extractedRatings === null)) {
+          errors.push(`seekingAlphaAiRecords[${index}].extractedRatings must be an object`);
+        }
+        if (ticker && !holdingTickers.has(ticker)) warnings.push(`seekingAlphaAiRecords[${index}] references ticker ${ticker} not present in holdings`);
+      });
+    }
+  }
+
   bundle.marketDataQuotes.forEach((quote, index) => {
     const ticker = normalizeTicker(quote.ticker);
     requireString(quote.id, `marketDataQuotes[${index}].id`, errors);
@@ -323,7 +361,10 @@ export function validateLocalDataBundle(bundle = {}) {
     ok: errors.length === 0,
     errors,
     warnings,
-    counts: Object.fromEntries(REQUIRED_ARRAYS.map((field) => [field, bundle[field]?.length || 0]))
+    counts: {
+      ...Object.fromEntries(REQUIRED_ARRAYS.map((field) => [field, bundle[field]?.length || 0])),
+      seekingAlphaAiRecords: bundle.seekingAlphaAiRecords?.length || 0
+    }
   };
 }
 

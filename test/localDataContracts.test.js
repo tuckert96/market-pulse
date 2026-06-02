@@ -23,6 +23,7 @@ test("local data fixture validates future integration contracts", () => {
   assert.equal(result.counts.marketDataQuotes >= 1, true);
   assert.equal(result.counts.redditMentions >= 1, true);
   assert.equal(result.counts.politicianTrades >= 1, true);
+  assert.equal(result.counts.seekingAlphaAiRecords >= 1, true);
   assert.equal(result.counts.alerts >= 1, true);
   assert.equal(result.counts.dataSources >= 3, true);
 });
@@ -70,9 +71,13 @@ test("TypeScript data contracts name paper-backed quant plumbing fields", () => 
     "institutionalQuantAcademicCompositeScore",
     "institutionalQuantAcademicFactors",
     "institutionalQuantAcademicValidationWarnings",
-    "institutionalQuantAcademicResearchAnchors"
+    "institutionalQuantAcademicResearchAnchors",
+    "SeekingAlphaAiRecord",
+    "SeekingAlphaAiSourceType",
+    "extractedBullishPoints",
+    "credentialMaterialStored"
   ].forEach((field) => {
-    assert.match(contract, new RegExp(`\\b${field}\\??:`), `${field} should be part of the local data contract`);
+    assert.match(contract, new RegExp(field === "SeekingAlphaAiRecord" || field === "SeekingAlphaAiSourceType" ? `\\b${field}\\b` : `\\b${field}\\??:`), `${field} should be part of the local data contract`);
   });
 });
 
@@ -145,6 +150,26 @@ test("local data contracts reject malformed provider-shaped rows", () => {
       sourceType: "rumor",
       confidenceScore: 0.5
     }],
+    seekingAlphaAiRecords: [{
+      id: "",
+      ticker: "",
+      tickers: "MU",
+      sourceType: "scraped_page",
+      sourceMode: "cookie_session",
+      responseText: "",
+      extractedBullishPoints: "bullish",
+      extractedBearishPoints: [],
+      extractedFinancialMetrics: [],
+      citedSourceLabels: [],
+      reportDate: "",
+      importedAt: "",
+      freshnessStatus: "live",
+      validationWarnings: [],
+      redactionWarnings: [],
+      rawTextTruncated: false,
+      liveProviderCalls: false,
+      credentialMaterialStored: true
+    }],
     alerts: [{ id: "bad-alert", type: "risk", severity: "urgent", title: "", detail: "Bad", score: 1, status: "active" }],
     dataSources: [{ id: "bad-source", name: "Bad", type: "api", status: "live", liveEnabled: false, sourceTypes: [], warnings: [] }]
   });
@@ -188,6 +213,9 @@ test("local data contracts reject malformed provider-shaped rows", () => {
   assert.ok(result.errors.some((error) => error.includes("redditMentions[0].score")));
   assert.ok(result.errors.some((error) => error.includes("amountRange min cannot exceed max")));
   assert.ok(result.errors.some((error) => error.includes("politicianTrades[0].sourceType")));
+  assert.ok(result.errors.some((error) => error.includes("seekingAlphaAiRecords[0].id")));
+  assert.ok(result.errors.some((error) => error.includes("seekingAlphaAiRecords[0].sourceType")));
+  assert.ok(result.errors.some((error) => error.includes("seekingAlphaAiRecords[0].credentialMaterialStored must be false")));
   assert.ok(result.errors.some((error) => error.includes("alerts[0].severity")));
   assert.ok(result.errors.some((error) => error.includes("alerts[0].title")));
   assert.ok(result.errors.some((error) => error.includes("dataSources[0].status")));

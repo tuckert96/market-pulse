@@ -31,6 +31,9 @@ export type ThesisImpact =
   | "introduces new risk"
   | "requires review"
   | "no thesis impact / noise";
+export type SeekingAlphaAiSourceType = "ask_seeking_alpha" | "virtual_analyst_report" | "summary_report" | "earnings_call_insight" | "unknown";
+export type SeekingAlphaAiSourceMode = "sample" | "pasted" | "imported_file" | "saved_html" | "browser_assisted" | "stale" | "error";
+export type SeekingAlphaAiFreshnessStatus = "current" | "stale" | "unknown";
 
 export interface Account {
   id: string;
@@ -195,6 +198,45 @@ export interface CalendarEvent {
   importedAt?: string;
   staleAfter?: string;
   custom?: boolean;
+}
+
+export interface SeekingAlphaAiRecord {
+  schemaVersion: 1;
+  id: string;
+  ticker: string;
+  tickers: string[];
+  sourceType: SeekingAlphaAiSourceType;
+  sourceTypeLabel?: string;
+  sourceMode: SeekingAlphaAiSourceMode;
+  sourceModeLabel?: string;
+  promptText?: string;
+  responseText: string;
+  normalizedExcerpt?: string;
+  extractedBullishPoints: string[];
+  extractedBearishPoints: string[];
+  extractedFinancialMetrics: string[];
+  extractedRatings: {
+    quantRating?: string;
+    valuationGrade?: string;
+    growthGrade?: string;
+    profitabilityGrade?: string;
+    momentumGrade?: string;
+    epsRevisionsGrade?: string;
+    wallStreetRating?: string;
+    saAnalystsRating?: string;
+    [key: string]: string | undefined;
+  };
+  citedSourceLabels: string[];
+  reportDate: string;
+  importedAt: string;
+  freshnessStatus: SeekingAlphaAiFreshnessStatus;
+  validationWarnings: string[];
+  redactionWarnings: string[];
+  rawTextTruncated: boolean;
+  sourceLabel: "Seeking Alpha AI personal import" | string;
+  liveProviderCalls: false;
+  credentialMaterialStored: false;
+  updatedAt?: string;
 }
 
 export interface WhatIfScenario {

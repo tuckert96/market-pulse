@@ -185,6 +185,11 @@ test("file inputs remain keyboard accessible through focusable controls", () => 
   assert.match(appJs, /Backup preview ready/);
   assert.match(indexHtml, /id="redditJsonFile" type="file"[^>]+aria-label="Import Reddit mention JSON file"/);
   assert.match(indexHtml, /id="politicianTradesFile" type="file"[^>]+aria-label="Import federal disclosure CSV or JSON file"/);
+  assert.match(indexHtml, /id="seekingAlphaAiFile" type="file"[^>]+aria-label="Import Seeking Alpha AI JSON, text, markdown, or saved HTML file"/);
+  assert.match(indexHtml, /id="seekingAlphaAiPreviewPanel" class="import-debug-panel" hidden/);
+  assert.match(indexHtml, /id="seekingAlphaStatus" class="connector-status" aria-live="polite"/);
+  assert.match(appJs, /data-sa-ai-action/);
+  assert.match(appJs, /No Seeking Alpha AI preview is ready to save/);
 });
 
 test("sortable holdings columns preserve table header semantics", () => {

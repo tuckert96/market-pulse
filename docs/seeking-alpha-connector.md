@@ -37,6 +37,43 @@ Supported workbook fields include:
 
 No Seeking Alpha credentials are requested, stored, or inferred from the workbook.
 
+## Seeking Alpha AI Personal Import
+
+Market Pulse also supports Tucker-provided Seeking Alpha AI output as local personal context. This is separate from structured Premium ratings and does not imply a live Seeking Alpha connection.
+
+Supported user-provided inputs:
+
+- pasted Ask Seeking Alpha answer text
+- pasted Virtual Analyst Report text
+- AI Summary Report text
+- Earnings Call Insight text when Tucker manually provides it later
+- local JSON records
+- local `.txt`, `.md`, or saved `.html` files that can be parsed without cookies, sessions, or network calls
+
+Normalized fields:
+
+- `ticker` and `tickers`
+- `sourceType`: `ask_seeking_alpha`, `virtual_analyst_report`, `summary_report`, `earnings_call_insight`, or `unknown`
+- `sourceMode`: `pasted`, `imported_file`, `saved_html`, `sample`, `browser_assisted`, `stale`, or `error`
+- optional `promptText`
+- capped `responseText` and `normalizedExcerpt`
+- extracted bullish points
+- extracted bearish points
+- extracted financial metrics
+- extracted ratings mentioned in the text
+- cited source labels
+- `reportDate`, `importedAt`, and freshness status
+- validation and redaction warnings
+
+Safety behavior:
+
+- The app rejects content that appears to include cookies, session tokens, authorization headers, API keys, passwords, or client secrets.
+- Softer identifiers such as emails, auth query parameters, long opaque tokens, and account-like identifiers are redacted.
+- Stored text is capped and source-labeled as local personal import data.
+- Imported AI text is not treated as verified fact or a trade recommendation. It is decision-support context only.
+
+The first version is intentionally manual. It does not store a Seeking Alpha username/password, browser cookies, hidden page state, or session tokens, and it does not perform unattended scraping.
+
 ## Future Backend Contract
 
 The dashboard now calls these endpoints if a backend exists:
@@ -143,3 +180,5 @@ The dashboard now turns imported Premium-style records into:
 - Valuation risk count.
 
 Next step: add per-ticker detail drawers showing factor grades, rating disagreements, stale-data warnings, and "why this pick" reasoning.
+
+Seeking Alpha AI personal imports are not yet included in Alpha Engine ranking. Future work can use these records as a labeled context source after the score model explains freshness, source mode, and parser confidence.

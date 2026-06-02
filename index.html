@@ -462,7 +462,13 @@
         background: var(--warn-bg);
       }
 
+      .import-health.warning {
+        border-color: #f0d49c;
+        background: var(--warn-bg);
+      }
+
       .import-health.failed,
+      .import-health.error,
       .import-health.needs-manual-mapping {
         border-color: #f3b8b3;
         background: var(--bad-bg);
@@ -584,6 +590,34 @@
         margin-top: 18px;
         padding-top: 16px;
         border-top: 1px solid var(--line);
+      }
+
+      .soft-subsection {
+        display: grid;
+        gap: 10px;
+        margin-top: 10px;
+        padding: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.06);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .soft-subsection textarea {
+        min-height: 132px;
+      }
+
+      .sa-ai-preview-table th,
+      .sa-ai-preview-table td {
+        vertical-align: top;
+      }
+
+      .sa-ai-preview-table td:nth-child(5),
+      .sa-ai-preview-table td:nth-child(6) {
+        min-width: 18rem;
+        max-width: 28rem;
+        white-space: normal;
+        overflow-wrap: normal;
+        word-break: normal;
       }
 
       details.connector-zone summary,
@@ -7723,7 +7757,30 @@
                 <div class="connector-zone">
                   <strong>Seeking Alpha Premium ratings</strong>
                   <small class="disclaimer">Import a Premium CSV/XLSX/JSON export or use sample records. The dashboard does not ask for a Seeking Alpha password or scrape premium pages.</small>
-                  <button id="demoSeekingAlphaBtn" type="button" title="Load sample Premium ratings and insights">Sample Premium insights</button>
+                  <div class="import-actions">
+                    <label class="button-label">
+                      <span>Import Premium ratings CSV/XLSX/JSON</span>
+                      <input id="dataSourcesAlphaFile" type="file" accept=".csv,.json,.xlsx,text/csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Import Seeking Alpha Premium ratings file from Data Sources" />
+                    </label>
+                    <button id="demoSeekingAlphaBtn" type="button" title="Load sample Premium ratings and insights">Sample Premium insights</button>
+                  </div>
+                  <div class="soft-subsection" aria-label="Seeking Alpha AI personal import">
+                    <strong>Seeking Alpha AI personal import</strong>
+                    <small class="disclaimer">Paste visible Ask Seeking Alpha, Virtual Analyst, Summary Report, or saved-report text. Do not paste passwords, cookies, session tokens, or hidden browser data.</small>
+                    <label class="control" for="seekingAlphaAiPasteInput">Paste Seeking Alpha AI output
+                      <textarea id="seekingAlphaAiPasteInput" rows="6" placeholder="Example: Ask Seeking Alpha answer for MU, Virtual Analyst Report excerpt, or saved report text you are allowed to view."></textarea>
+                    </label>
+                    <div class="import-actions">
+                      <button id="parseSeekingAlphaAiPasteBtn" type="button">Preview pasted output</button>
+                      <button id="clearSeekingAlphaAiPasteBtn" type="button">Clear paste</button>
+                      <label class="button-label">
+                        <span>Import AI JSON/TXT/HTML</span>
+                        <input id="seekingAlphaAiFile" type="file" accept=".json,.txt,.md,.html,.htm,text/plain,text/markdown,application/json,text/html" aria-label="Import Seeking Alpha AI JSON, text, markdown, or saved HTML file" />
+                      </label>
+                    </div>
+                    <div id="seekingAlphaAiPreviewPanel" class="import-debug-panel" hidden></div>
+                    <ul id="seekingAlphaAiRecordsPanel" class="insight-list" aria-live="polite"></ul>
+                  </div>
                   <p id="seekingAlphaStatus" class="connector-status" aria-live="polite">Not configured.</p>
                   <ul id="seekingAlphaInsights" class="insight-list" aria-live="polite"></ul>
                 </div>
