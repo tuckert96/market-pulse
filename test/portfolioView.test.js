@@ -899,6 +899,43 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
       { ticker: "MU", politicianName: "Older Member", transactionType: "sale", transactionDate: "2026-05-18", disclosureDate: "2026-05-20", amountRangeLow: 1000, amountRangeHigh: 15000, sourceMode: "mock" },
       { ticker: "MU", politicianName: "Imported Member", transactionType: "purchase", transactionDate: "2026-05-21", disclosureDate: "2026-05-22", amountRangeLow: 1000, amountRangeHigh: 15000, sourceMode: "local-file", source: "local-politician-trade-import" }
     ],
+    seekingAlphaAiRecords: [
+      {
+        ticker: "MU",
+        tickers: ["MU"],
+        sourceType: "virtual_analyst_report",
+        sourceMode: "pasted",
+        sourceTypeLabel: "Virtual Analyst Report",
+        sourceModeLabel: "Pasted",
+        reportDate: "2026-05-22",
+        importedAt: "2026-05-23",
+        responseText: "Virtual Analyst Report for MU. Bullish: HBM demand. Bearish: memory pricing risk. Quant Rating: Buy.",
+        normalizedExcerpt: "Bullish: HBM demand. Bearish: memory pricing risk.",
+        extractedBullishPoints: ["HBM demand"],
+        extractedBearishPoints: ["memory pricing risk"],
+        extractedRatings: { quantRating: "Buy" },
+        freshnessStatus: "current",
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      },
+      {
+        ticker: "AVGO",
+        tickers: ["AVGO"],
+        sourceType: "summary_report",
+        sourceMode: "imported_file",
+        sourceTypeLabel: "AI Summary Report",
+        sourceModeLabel: "Imported",
+        reportDate: "2026-05-21",
+        importedAt: "2026-05-23",
+        responseText: "AI Summary Report for AVGO. Bullish: AI networking demand. Bearish: customer concentration.",
+        normalizedExcerpt: "Bullish: AI networking demand. Bearish: customer concentration.",
+        extractedBullishPoints: ["AI networking demand"],
+        extractedBearishPoints: ["customer concentration"],
+        freshnessStatus: "current",
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      }
+    ],
     thesisRows: [{
       ticker: "MU",
       thesisStatus: "Current",
@@ -922,6 +959,7 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   const watchlist = buildTickerDetailModel(analysis, { ...options, selectedTicker: "PLTR" });
   const signalOnly = buildTickerDetailModel(analysis, { ...options, selectedTicker: "TSLA" });
   const signalWithoutQuote = buildTickerDetailModel(analysis, { ...options, selectedTicker: "NQTE" });
+  const seekingAlphaAiOnly = buildTickerDetailModel(analysis, { ...options, selectedTicker: "AVGO" });
 
   assert.equal(owned.ticker, "MU");
   assert.equal(owned.owned, true);
@@ -943,6 +981,10 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(owned.politicianTrades.length, 2);
   assert.equal(owned.politicianTrades[0].politicianName, "Imported Member");
   assert.equal(owned.politicianTrades[0].sourceMode, "local-file");
+  assert.equal(owned.seekingAlphaAiRecords.length, 1);
+  assert.equal(owned.seekingAlphaAiSummary.recordCount, 1);
+  assert.equal(owned.seekingAlphaAiSummary.dataStatus, "Imported");
+  assert.equal(owned.dataQuality.rows.some((row) => row.label === "Seeking Alpha AI context" && row.status === "1 imported"), true);
   assert.equal(owned.calendarEvents.length, 1);
   assert.equal(owned.calendarEvents[0].sourceMode, "imported");
   assert.equal(owned.historicalPrices.length, 3);
@@ -986,6 +1028,13 @@ test("ticker detail model separates owned and watchlist-only ticker states", () 
   assert.equal(signalWithoutQuote.movementExplainer.movementLabel, "Move unavailable");
   assert.equal(signalWithoutQuote.movementExplainer.drivers.some((driver) => driver.id === "price-action"), false);
   assert.equal(signalWithoutQuote.dataQuality.rows.some((row) => row.label === "Quote summary" && row.status === "missing"), true);
+  assert.equal(seekingAlphaAiOnly.ticker, "AVGO");
+  assert.equal(seekingAlphaAiOnly.owned, false);
+  assert.equal(seekingAlphaAiOnly.tracked, true);
+  assert.equal(seekingAlphaAiOnly.externallyDiscovered, true);
+  assert.equal(seekingAlphaAiOnly.seekingAlphaAiRecords.length, 1);
+  assert.equal(seekingAlphaAiOnly.seekingAlphaAiSummary.bullishPoints[0], "AI networking demand");
+  assert.equal(seekingAlphaAiOnly.dataQuality.rows.some((row) => row.label === "Seeking Alpha AI context" && row.status === "1 imported"), true);
 });
 
 test("ticker detail defaults to no real ownership without an explicit imported ui state", () => {

@@ -1,5 +1,6 @@
 import { evidenceScoreForGrade, signalActionCategory } from "./alphaEngine.js";
 import { normalizeTicker } from "./portfolioSchema.js";
+import { buildSeekingAlphaAiTickerSummaries } from "./seekingAlphaAi.js";
 
 export const RECOMMENDATION_TYPES = Object.freeze([
   "investigate",
@@ -46,6 +47,7 @@ export function buildAlphaRecommendations({
   thesisRows = [],
   watchlistIdeas = [],
   calendarEvents = [],
+  seekingAlphaAiRecords = [],
   marketDataStatus = {},
   providerReadiness = {},
   uiState = "SAMPLE_MODE",
@@ -53,11 +55,16 @@ export function buildAlphaRecommendations({
 } = {}) {
   const holdingsByTicker = summarizeHoldingsByTicker(analysis.holdings || []);
   const watchlistByTicker = new Map((watchlistIdeas || []).map((idea) => [normalizeTicker(idea.ticker), idea]));
+  const seekingAlphaAiByTicker = buildSeekingAlphaAiTickerSummaries(seekingAlphaAiRecords, [
+    ...holdingsByTicker.keys(),
+    ...watchlistByTicker.keys()
+  ], { now: asOf });
   const realPortfolio = isRealRecommendationPortfolio(uiState);
-  const context = { holdingsByTicker, watchlistByTicker, asOf, uiState, realPortfolio };
+  const context = { holdingsByTicker, watchlistByTicker, seekingAlphaAiByTicker, asOf, uiState, realPortfolio };
   const recommendations = [
     ...recommendationsFromAlphaSignals(alphaSignals, context),
     ...recommendationsFromTickerSignals(tickerSignals, context),
+    ...recommendationsFromSeekingAlphaAiRecords(seekingAlphaAiByTicker, context),
     ...recommendationsFromAlerts(alerts, context),
     ...recommendationsFromTargetPlan(targetPlan, context),
     ...recommendationsFromThesisRows(thesisRows, context),
@@ -309,6 +316,76 @@ function recommendationsFromTickerSignals(tickerSignals, context) {
         href: ticker ? `#/ticker/${ticker}` : "#market-intelligence",
         createdAt: signal.updatedAt || context.asOf,
         updatedAt: signal.updatedAt || context.asOf
+      });
+    });
+}
+
+function recommendationsFromSeekingAlphaAiRecords(seekingAlphaAiByTicker = new Map(), context = {}) {
+  return [...seekingAlphaAiByTicker.entries()]
+    .filter(([, summary]) => summary?.recordCount)
+    .map(([ticker, summary]) => {
+      const holding = context.holdingsByTicker.get(ticker);
+      const watchlistIdea = context.watchlistByTicker.get(ticker);
+      const staleOnly = summary.staleCount === summary.recordCount;
+      const riskHeavy = summary.bearishPoints.length > summary.bullishPoints.length || summary.riskScore >= 0.58;
+      const ownedReviewContext = Boolean(holding && summary.bearishPoints.length);
+      const dataQualityScore = staleOnly ? 0.34 : summary.validationWarnings.length ? 0.48 : 0.58;
+      const confidenceScore = score01(Math.min(0.58, 0.4 + (staleOnly ? 0 : 0.08) + Math.min(0.06, summary.recordCount * 0.02) + (summary.ratingMentions.length ? 0.03 : 0) - (summary.validationWarnings.length ? 0.04 : 0)));
+      const riskScore = holding ? Math.max(riskForHolding(holding), summary.riskScore) : summary.riskScore;
+      const recommendationType = staleOnly
+        ? "stale data review"
+        : holding && (riskHeavy || ownedReviewContext)
+          ? "review position"
+          : watchlistIdea && summary.supportScore >= 0.58
+            ? "watch"
+            : holding
+              ? "watch"
+              : "investigate";
+      const sourceFreshness = staleOnly ? "stale Seeking Alpha AI personal import" : "imported Seeking Alpha AI personal import";
+      const latestTimestamp = summary.latestRecord?.importedAt || summary.latestRecord?.reportDate || context.asOf;
+
+      return baseRecommendation({
+        id: `recommendation:seeking-alpha-ai:${ticker}`,
+        ticker,
+        recommendationType,
+        title: `${ticker}: Seeking Alpha AI context ${staleOnly ? "needs freshness review" : "is saved"}`,
+        summary: `${summary.summary} Personal imported research context only; verify against primary sources and structured data before changing exposure.`,
+        confidenceScore,
+        recencyScore: recencyScore(latestTimestamp, context.asOf),
+        impactScore: score01((holding ? Math.min(1, Number(holding.portfolioWeight || 0) * 4) : watchlistIdea ? 0.42 : 0.28) + Math.min(0.14, summary.recordCount * 0.025)),
+        urgencyScore: staleOnly ? 0.4 : holding && riskHeavy ? 0.58 : 0.34,
+        dataQualityScore,
+        riskScore,
+        portfolioWeight: holding?.portfolioWeight || 0,
+        ownershipRelevanceScore: ownershipRelevanceScore(holding, watchlistIdea, context.realPortfolio),
+        sourceFreshnessScore: sourceFreshnessScore(sourceFreshness),
+        alertSeverityScore: staleOnly ? 0.38 : riskHeavy ? 0.48 : 0.28,
+        priceMovementScore: 0.5,
+        concentrationRiskScore: riskScore,
+        riskAdjustedFitScore: riskAdjustedFit({ holding, watchlistIdea, recommendationType, riskScore, dataQualityScore, realPortfolio: context.realPortfolio }),
+        supportingSignals: [
+          summary.summary,
+          ...summary.bullishPoints.slice(0, 2).map((point) => `Support: ${point}`),
+          ...summary.ratingMentions.slice(0, 2).map((rating) => `Rating mention: ${rating}`)
+        ],
+        missingWeakSignals: [
+          ...summary.bearishPoints.slice(0, 2).map((point) => `Risk note: ${point}`),
+          staleOnly ? "All saved Seeking Alpha AI reports are stale." : "",
+          ...summary.validationWarnings.slice(0, 2),
+          "Personal import only; not live Seeking Alpha data and not independently verified by the app."
+        ].filter(Boolean),
+        sourceFreshness,
+        relatedHoldingsStatus: relationshipStatus(holding, watchlistIdea, context),
+        sourceModes: ["Seeking Alpha AI personal import", ...summary.sourceModes, ...summary.sourceTypes].filter(Boolean),
+        sourceIds: summary.records.map((record) => record.id),
+        href: `#/ticker/${ticker}`,
+        createdAt: latestTimestamp,
+        updatedAt: summary.latestRecord?.importedAt || context.asOf,
+        rankDrivers: [
+          `SA AI records ${summary.recordCount}`,
+          staleOnly ? "stale freshness penalty" : "imported personal context",
+          `${Math.round(summary.reviewPriorityScore * 100)}/100 context relevance`
+        ]
       });
     });
 }

@@ -131,11 +131,31 @@ const redditJsonImport = importRedditMentionFile(JSON.stringify([
     permalink: "https://example.test/reddit/smoke-mu"
   }
 ]), { fileName: "smoke-reddit.json", asOf: "2026-05-23T12:00:00-04:00" });
+const smokeSeekingAlphaAiRecords = [{
+  ticker: "MU",
+  tickers: ["MU"],
+  sourceType: "virtual_analyst_report",
+  sourceMode: "pasted",
+  sourceTypeLabel: "Virtual Analyst Report",
+  sourceModeLabel: "Pasted",
+  reportDate: "2026-05-22",
+  importedAt: "2026-05-23",
+  responseText: "Virtual Analyst Report for MU. Bullish: HBM demand. Bearish: memory pricing risk. Quant Rating: Buy.",
+  normalizedExcerpt: "Bullish: MU HBM demand. Bearish: Memory pricing risk.",
+  extractedBullishPoints: ["MU HBM demand"],
+  extractedBearishPoints: ["Memory pricing risk"],
+  extractedRatings: { quantRating: "Buy" },
+  freshnessStatus: "current",
+  sourceLabel: "Seeking Alpha AI personal import",
+  liveProviderCalls: false,
+  credentialMaterialStored: false
+}];
 const tickerSignals = buildCombinedTickerSignals({
   holdings: analysis.holdings,
   marketDataSnapshot,
   redditMentions,
   politicianTrades,
+  seekingAlphaAiRecords: smokeSeekingAlphaAiRecords,
   marketEvents: marketDataset.events,
   alphaSignals: signals,
   asOf: "2026-05-23T12:00:00-04:00"
@@ -243,6 +263,7 @@ const localAlerts = buildLocalAlerts({
   tickerSignals,
   politicianTrades,
   redditMentions,
+  seekingAlphaAiRecords: smokeSeekingAlphaAiRecords,
   providerReadiness: {
     providerStatuses: marketDataset.providerStatuses,
     marketDataQuoteProviders: marketDataProviderStatuses
@@ -311,6 +332,7 @@ const dailyBrief = buildDailyCommandBrief({
   tickerSignals,
   redditMentions,
   politicianTrades,
+  seekingAlphaAiRecords: smokeSeekingAlphaAiRecords,
   providerReadiness: {
     providerStatuses: marketDataset.providerStatuses,
     marketDataQuoteProviders: marketDataProviderStatuses
@@ -343,6 +365,7 @@ const alphaRecommendations = buildAlphaRecommendations({
   thesisRows,
   watchlistIdeas,
   calendarEvents: eventCalendar,
+  seekingAlphaAiRecords: smokeSeekingAlphaAiRecords,
   marketDataStatus: marketDataSnapshot.status,
   providerReadiness: {
     providerStatuses: marketDataset.providerStatuses,
@@ -533,6 +556,7 @@ assert(dataContractsTs.includes("politicianBuyScore?: number"), "TickerSignal co
 assert(dataContractsTs.includes("institutionalQuantScore?: number"), "TickerSignal contract should include institutional quant lens score");
 assert(dataContractsTs.includes("institutionalQuantPeerSummary?: string"), "TickerSignal contract should include quant peer context");
 assert(dataContractsTs.includes("institutionalQuantAcademicFactors"), "TickerSignal contract should include academic factor diagnostics");
+assert(dataContractsTs.includes("seekingAlphaAiEvidenceCount?: number"), "TickerSignal contract should include Seeking Alpha AI context fields");
 assert(dataContractsTs.includes("export interface QuantScoreHistoryEntry"), "dataContracts.ts should define compact quant score history");
 assert(dataContractsTs.includes("grossMargin?: number"), "Holding contract should include optional gross margin research input");
 assert(dataContractsTs.includes("freeCashFlow?: number"), "Holding contract should include optional free-cash-flow research input");
@@ -616,6 +640,8 @@ assert(tickerSignals.every((signal) => signal.marketDataStatus === "mock/sample 
 assert(tickerSignals.every((signal) => signal.confluenceScore >= 0 && signal.confluenceScore <= 1), "combined ticker signals should stay bounded");
 assert(tickerSignals.every((signal) => !/buy|sell|trade|enter|exit/i.test(signal.actionCategory)), "combined ticker signal actions should avoid trade-command language");
 assert(tickerSignals.some((signal) => signal.ticker === "MU" && signal.redditMentionScore > 0 && signal.politicianBuyScore > 0), "MU confluence score should combine Reddit and politician mock inputs");
+assert(tickerSignals.some((signal) => signal.ticker === "MU" && signal.seekingAlphaAiEvidenceCount === 1 && /Seeking Alpha AI/.test(signal.seekingAlphaAiEvidenceLabel)), "MU ticker signal should expose Seeking Alpha AI personal import context");
+assert(tickerSignals.some((signal) => signal.ticker === "MU" && signal.sourceTypes.includes("seeking-alpha-ai-personal-import")), "ticker signal source types should label Seeking Alpha AI as personal import context");
 assert(tickerSignals.every((signal) => signal.relativeStrengthScore >= 0 && signal.redditMentionAccelerationScore >= 0 && signal.concentrationRiskScore >= 0), "combined ticker signals should include expanded provider-layer component scores");
 assert(tickerSignals.every((signal) => signal.institutionalQuantScore >= 0 && signal.institutionalQuantScore <= 100), "combined ticker signals should include bounded institutional quant scores");
 assert(tickerSignals.some((signal) => signal.institutionalQuantFactors?.some((factor) => factor.key === "liquidity")), "institutional quant factors should include liquidity/capacity");
@@ -644,6 +670,7 @@ assert(/academic factor diagnostics stay attached to the Quant Lens/.test(ticker
 assert(/Holdings Ranking And Ranked Review Queue/.test(alphaEngineDoc), "Alpha docs should describe the holdings-first ranking UX");
 assert(/Quant And No-Fake-Precision Guardrails/.test(alphaEngineDoc), "Alpha docs should document quant and no-fake-precision guardrails");
 assert(/expected returns, price targets, probabilities, or trade instructions/.test(alphaEngineDoc), "Alpha docs should forbid fake precision and trade-command framing");
+assert(/Seeking Alpha AI personal imports are treated differently from structured Premium ratings/.test(alphaEngineDoc), "Alpha docs should document Seeking Alpha AI personal-import guardrails");
 assert(tickerSignalsWithQuantContext.every((signal) => signal.institutionalQuantPeerSummary), "quant context should add peer summaries to ticker signals");
 assert(tickerSignalsWithQuantContext.some((signal) => signal.institutionalQuantScoreHistoryLabel.includes("from 2026-05-22")), "quant context should add local score history labels");
 assert(tickerSignalsWithQuantContext.some((signal) => signal.institutionalQuantPeerGroup === "Leveraged ETF exposure"), "quant context should separate leveraged ETF exposure peers");
@@ -660,6 +687,7 @@ assert(localAlerts.some((alert) => alert.type === "position-weight"), "local ale
 assert(localAlerts.some((alert) => alert.type === "target-allocation-drift"), "local alerts should include target allocation drift rules");
 assert(localAlerts.filter((alert) => alert.type === "target-allocation-drift").every((alert) => /not a trade command/i.test(alert.detail)), "target drift alerts should use review language");
 assert(localAlerts.some((alert) => alert.type === "ticker-signal"), "local alerts should include ticker signal threshold rules");
+assert(localAlerts.some((alert) => alert.type === "seeking-alpha-ai-risk-context" && alert.ticker === "MU"), "local alerts should include Seeking Alpha AI owned-holding risk context rules");
 assert(localAlerts.some((alert) => alert.type === "politician-trade-match"), "local alerts should include politician disclosure match rules");
 assert(localAlerts.some((alert) => alert.type === "reddit-mention-acceleration"), "local alerts should include Reddit acceleration rules");
 assert(localAlerts.some((alert) => alert.type === "data-source"), "local alerts should include data source status rules");
@@ -990,6 +1018,7 @@ assert(portfolioHealth.nextActions.every((action) => action.href.startsWith("#")
 assert(dailyBrief.groups["Action needed"].length >= 1, "Daily Brief should produce action-needed items from local alerts and drift");
 assert(dailyBrief.groups["Watch closely"].length >= 1, "Daily Brief should produce watch-closely items from movers, signals, disclosures, or social summaries");
 assert(dailyBrief.groups.Informational.length >= 1, "Daily Brief should produce informational source/context items");
+assert(dailyBrief.items.some((row) => row.id === "daily:seeking-alpha-ai:MU" && row.dataStatus === "Imported Seeking Alpha AI"), "Daily Brief should include source-labeled Seeking Alpha AI personal import context");
 assert(indexHtml.includes(".daily-brief-item-top .status-badge"), "Daily Brief badges should have a responsive wrapping rule");
 assert(portfolioViewJs.includes("brief-action") && portfolioViewJs.includes("brief-watch"), "Daily Brief urgency badges should not reuse sample/demo data-mode classes");
 assert(indexHtml.includes(".ticker-section-list > div"), "Ticker movement context rows should override the generic mini-list three-column grid");
@@ -1190,6 +1219,7 @@ assert(alphaRecommendations.length > 0, "Alpha Engine should produce ranked reco
 assert(alphaRecommendations.every((row) => row.compositeRankScore >= 0 && row.compositeRankScore <= 100), "recommendation composite scores should be bounded 0-100");
 assert(alphaRecommendations.map((row) => row.compositeRankScore).every((score, index, rows) => index === 0 || rows[index - 1] >= score), "recommendations should be sorted by composite rank score");
 assert(alphaRecommendations.some((row) => row.id === "recommendation:alpha:alpha-samsung-strike-mu" && row.ticker === "MU"), "Samsung-to-MU signal should become a ranked recommendation");
+assert(alphaRecommendations.some((row) => row.id === "recommendation:seeking-alpha-ai:MU" && /Seeking Alpha AI/.test(row.sourceFreshness)), "Alpha recommendations should include capped Seeking Alpha AI personal import context rows");
 assert(alphaRecommendations.some((row) => row.recommendationType === "stale data review"), "recommendations should include stale/missing data review items");
 assert(filterAlphaRecommendations(alphaRecommendations, "owned").every((row) => row.relatedHoldingsStatus === "owned"), "owned recommendation filter should only return owned rows");
 assert(filterAlphaRecommendations(alphaRecommendations, "data-issues").every((row) => row.recommendationType === "stale data review" || row.dataQualityScore < 0.45 || row.missingWeakSignals.length >= 2), "data issue filter should only return weak/stale rows");

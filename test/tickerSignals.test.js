@@ -179,6 +179,47 @@ test("combined ticker signals preserve mock provenance and conservative confiden
   assert.ok(signal.warnings.some((warning) => /Market data not configured/i.test(warning)));
 });
 
+test("Seeking Alpha AI personal imports appear as ticker context without changing confluence score", () => {
+  const baseInput = {
+    holdings: [{ ticker: "MU", marketValue: 1000, portfolioWeight: 0.08, dailyChange: 10, thesisStatus: "Active", riskLevel: "Medium" }],
+    watchlist: ["MU"],
+    asOf
+  };
+  const [withoutSaAi] = buildCombinedTickerSignals(baseInput);
+  const [withSaAi] = buildCombinedTickerSignals({
+    ...baseInput,
+    seekingAlphaAiRecords: [{
+      ticker: "MU",
+      tickers: ["MU"],
+      sourceType: "virtual_analyst_report",
+      sourceMode: "pasted",
+      reportDate: "2026-05-22",
+      importedAt: "2026-05-23",
+      responseText: "Virtual Analyst Report for MU. Bullish: HBM demand. Bearish: memory pricing risk. Quant Rating: Buy.",
+      extractedBullishPoints: ["HBM demand"],
+      extractedBearishPoints: ["memory pricing risk"],
+      extractedRatings: { quantRating: "Buy" },
+      freshnessStatus: "current",
+      liveProviderCalls: false,
+      credentialMaterialStored: false
+    }]
+  });
+
+  assert.equal(withSaAi.ticker, "MU");
+  assert.equal(withSaAi.combinedScore, withoutSaAi.combinedScore);
+  assert.equal(withSaAi.reviewPriorityScoreKind, "review-priority-not-quality");
+  assert.equal(withSaAi.seekingAlphaAiEvidenceCount, 1);
+  assert.equal(withSaAi.seekingAlphaAiFreshnessStatus, "current");
+  assert.ok(withSaAi.seekingAlphaAiBullishPoints.includes("HBM demand"));
+  assert.ok(withSaAi.seekingAlphaAiBearishPoints.includes("memory pricing risk"));
+  assert.ok(withSaAi.seekingAlphaAiRatingContext.some((item) => /Quant Rating/i.test(item)));
+  assert.ok(withSaAi.sourceTypes.includes("seeking-alpha-ai-personal-import"));
+  assert.match(withSaAi.seekingAlphaAiEvidenceLabel, /Imported Seeking Alpha AI/i);
+  assert.match(withSaAi.formulaLabel, /supporting context only/i);
+  assert.equal(withSaAi.liveProviderCalls, false);
+  assert.doesNotMatch(JSON.stringify(withSaAi), /\b(buy now|sell now|guaranteed|expected return)\b/i);
+});
+
 test("combined ticker signals do not promote Reddit-only false-positive tickers", () => {
   const rows = buildCombinedTickerSignals({
     holdings: [{ ticker: "MU", marketValue: 500, portfolioWeight: 0.02, dailyChange: 0, thesisStatus: "Active", riskLevel: "High" }],

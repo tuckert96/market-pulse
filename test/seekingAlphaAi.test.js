@@ -5,6 +5,8 @@ import {
   mergeSeekingAlphaAiRecords,
   normalizeSeekingAlphaAiRecord,
   redactSeekingAlphaAiText,
+  seekingAlphaAiRecordsForTicker,
+  summarizeSeekingAlphaAiForTicker,
   seekingAlphaAiStatusSummary
 } from "../src/seekingAlphaAi.js";
 
@@ -137,4 +139,37 @@ test("Seeking Alpha AI status summary reports tickers and stale counts", () => {
   assert.equal(summary.records, 1);
   assert.deepEqual(summary.tickers, ["MU"]);
   assert.equal(summary.staleCount, 1);
+});
+
+test("Seeking Alpha AI ticker summary exposes bounded downstream context without live claims", () => {
+  const current = normalizeSeekingAlphaAiRecord({
+    ticker: "MU",
+    sourceType: "virtual_analyst_report",
+    sourceMode: "pasted",
+    reportDate: "2026-05-30",
+    responseText: "Virtual Analyst Report for MU. Bullish: HBM demand. Bearish: cyclical memory risk. Quant Rating: Buy. Growth Grade: A-."
+  }, { now: NOW }).record;
+  const stale = normalizeSeekingAlphaAiRecord({
+    ticker: "MU",
+    sourceType: "summary_report",
+    sourceMode: "imported_file",
+    reportDate: "2026-01-01",
+    responseText: "AI Summary Report for MU. Bullish: memory recovery. Bearish: pricing risk."
+  }, { now: NOW }).record;
+  const summary = summarizeSeekingAlphaAiForTicker([stale, current], "MU", { now: NOW });
+
+  assert.equal(seekingAlphaAiRecordsForTicker([current], "MU").length, 1);
+  assert.equal(summary.recordCount, 2);
+  assert.equal(summary.freshCount, 1);
+  assert.equal(summary.staleCount, 1);
+  assert.equal(summary.dataStatus, "Imported");
+  assert.ok(summary.bullishPoints.some((point) => /HBM/i.test(point)));
+  assert.ok(summary.bearishPoints.some((point) => /cyclical|pricing/i.test(point)));
+  assert.ok(summary.ratingMentions.some((item) => /Quant Rating/i.test(item)));
+  assert.ok(summary.reviewPriorityScore > 0 && summary.reviewPriorityScore <= 1);
+  assert.ok(summary.supportScore > 0 && summary.supportScore <= 1);
+  assert.ok(summary.riskScore > 0 && summary.riskScore <= 1);
+  assert.equal(current.liveProviderCalls, false);
+  assert.equal(current.credentialMaterialStored, false);
+  assert.doesNotMatch(JSON.stringify(summary), /cookie|authorization|access_token|client_secret|password/i);
 });

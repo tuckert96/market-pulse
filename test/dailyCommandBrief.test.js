@@ -164,6 +164,47 @@ test("daily command brief puts real social and disclosure updates in Watch, not 
   assert.doesNotMatch(JSON.stringify([redditItem, disclosureItem]), /\b(buy now|sell now|trade command|place order)\b/i);
 });
 
+test("daily command brief surfaces Seeking Alpha AI context as imported research, not action commands", () => {
+  const brief = buildDailyCommandBrief({
+    analysis: { ...analysis, alerts: [] },
+    tickerSignals: [{ ticker: "MU", combinedScore: 50, portfolioOwnershipFlag: true }],
+    seekingAlphaAiRecords: [
+      {
+        ticker: "MU",
+        tickers: ["MU"],
+        sourceType: "virtual_analyst_report",
+        sourceMode: "pasted",
+        sourceTypeLabel: "Virtual Analyst Report",
+        sourceModeLabel: "Pasted",
+        reportDate: "2026-05-22",
+        importedAt: asOf,
+        responseText: "Virtual Analyst Report for MU. Bullish: HBM demand. Bearish: memory pricing risk. Quant Rating: Buy.",
+        extractedBullishPoints: ["HBM demand"],
+        extractedBearishPoints: ["memory pricing risk"],
+        extractedRatings: { quantRating: "Buy" },
+        freshnessStatus: "current",
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      }
+    ],
+    targetPlan: { rows: [] },
+    providerReadiness: { providerStatuses: {} },
+    marketDataStatus: { status: "connected" },
+    portfolioDataQuality: { status: "clean" },
+    uiState: "IMPORTED_CLEAN",
+    asOf
+  });
+  const item = brief.items.find((row) => row.id === "daily:seeking-alpha-ai:MU");
+
+  assert.ok(item);
+  assert.equal(item.group, DAILY_BRIEF_GROUPS.WATCH);
+  assert.equal(item.href, "#/ticker/MU");
+  assert.equal(item.dataStatus, "Imported Seeking Alpha AI");
+  assert.match(item.reason, /personal research context/i);
+  assert.doesNotMatch(JSON.stringify(item), /\b(buy now|sell now|place order|guaranteed|predicts)\b/i);
+  assert.equal(brief.groups[DAILY_BRIEF_GROUPS.ACTION].some((row) => row.id === item.id), false);
+});
+
 test("daily command brief links source-labeled Market Drivers into the daily workflow", () => {
   const brief = buildDailyCommandBrief({
     analysis: { ...analysis, alerts: [] },

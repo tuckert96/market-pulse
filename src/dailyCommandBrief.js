@@ -4,6 +4,7 @@ import { summarizeRedditMentions } from "./redditSignals.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
 import { eventSourceLabel, eventTypeLabel, upcomingCalendarEvents } from "./eventCalendar.js";
 import { DATA_MODES, dataModeLabel, marketDataMode } from "./dataModes.js";
+import { buildSeekingAlphaAiTickerSummaries } from "./seekingAlphaAi.js";
 
 export const DAILY_BRIEF_GROUPS = Object.freeze({
   ACTION: "Action needed",
@@ -24,6 +25,7 @@ export function buildDailyCommandBrief({
   xUpdates = [],
   redditMentions = [],
   politicianTrades = [],
+  seekingAlphaAiRecords = [],
   providerReadiness = {},
   marketDataStatus = {},
   targetPlan = null,
@@ -47,6 +49,7 @@ export function buildDailyCommandBrief({
         ...xAccelerationItems(xUpdates, analysis, asOf),
         ...redditAccelerationItems(redditMentions, analysis, asOf),
         ...politicianTradeItems(politicianTrades, analysis, tickerSignals),
+        ...seekingAlphaAiItems(seekingAlphaAiRecords, analysis, tickerSignals, asOf),
         ...(calendarItems.length ? calendarItems : earningsItems(analysis.holdings || [], thesisRows, asOf)),
         ...dataSourceItems(providerReadiness, marketDataStatus, portfolioDataQuality)
       ]
@@ -440,6 +443,32 @@ function politicianTradeItems(politicianTrades = [], analysis = {}, tickerSignal
         actionLabel: realUpdate ? "Review disclosure" : "Log disclosure",
         dataStatus: source.label,
         priority: (realUpdate ? 62 : 34) - index + score * (realUpdate ? 25 : 8)
+      });
+    });
+}
+
+function seekingAlphaAiItems(records = [], analysis = {}, tickerSignals = [], asOf) {
+  const tracked = trackedTickerSet(analysis, tickerSignals);
+  const summaries = buildSeekingAlphaAiTickerSummaries(records, [...tracked], { now: asOf });
+  return [...summaries.entries()]
+    .filter(([ticker, summary]) => tracked.has(ticker) && summary.recordCount)
+    .sort((a, b) => (b[1].reviewPriorityScore || 0) - (a[1].reviewPriorityScore || 0) || a[0].localeCompare(b[0]))
+    .slice(0, 3)
+    .map(([ticker, summary], index) => {
+      const staleOnly = summary.staleCount === summary.recordCount;
+      const hasRiskContext = summary.bearishPoints.length > 0;
+      return briefItem({
+        id: `daily:seeking-alpha-ai:${ticker}`,
+        group: staleOnly ? DAILY_BRIEF_GROUPS.INFO : hasRiskContext ? DAILY_BRIEF_GROUPS.WATCH : DAILY_BRIEF_GROUPS.INFO,
+        kind: "seeking-alpha-ai",
+        title: `${ticker} has imported Seeking Alpha AI context`,
+        detail: summary.summary,
+        reason: "This is Tucker-imported Seeking Alpha AI personal research context. It is not live data, not independently verified by the app, and not a trading recommendation.",
+        href: tickerHref(ticker),
+        ticker,
+        actionLabel: staleOnly ? "Check freshness" : "Review context",
+        dataStatus: staleOnly ? "Stale Seeking Alpha AI import" : "Imported Seeking Alpha AI",
+        priority: (staleOnly ? 38 : hasRiskContext ? 63 : 44) - index + (summary.reviewPriorityScore || 0) * 12
       });
     });
 }

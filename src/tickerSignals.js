@@ -1,6 +1,7 @@
 import { normalizeTicker } from "./portfolioSchema.js";
 import { summarizeRedditMentions } from "./redditSignals.js";
 import { buildInstitutionalQuantLens } from "./scoringModel.js";
+import { buildSeekingAlphaAiTickerSummaries } from "./seekingAlphaAi.js";
 import { buildStockPredictionModel } from "./stockPredictionModel.js";
 
 export const DEFAULT_TICKER_SIGNAL_WATCHLIST = Object.freeze(["MU", "NVDA", "AMD", "SOXL", "UPRO", "VGT", "CRDO", "QQQ"]);
@@ -21,6 +22,7 @@ export function buildCombinedTickerSignals({
   politicianTrades = [],
   marketEvents = [],
   alphaSignals = [],
+  seekingAlphaAiRecords = [],
   marketDataSnapshot = null,
   watchlist = DEFAULT_TICKER_SIGNAL_WATCHLIST,
   uiState = "IMPORTED_CLEAN",
@@ -33,12 +35,14 @@ export function buildCombinedTickerSignals({
   const politicianByTicker = summarizePoliticianTrades(politicianTrades);
   const marketCounts = summarizeMarketItems(marketEvents, alphaSignals);
   const marketDataByTicker = quoteMapFromSnapshot(marketDataSnapshot);
+  const seekingAlphaAiByTicker = buildSeekingAlphaAiTickerSummaries(seekingAlphaAiRecords, [], { now: asOf });
   const watchlistSet = new Set((watchlist || []).map((ticker) => normalizeTicker(ticker)).filter(Boolean));
   const allowedTickers = new Set([
     ...holdingsByTicker.keys(),
     ...politicianByTicker.keys(),
     ...marketCounts.keys(),
     ...marketDataByTicker.keys(),
+    ...seekingAlphaAiByTicker.keys(),
     ...watchlistSet
   ]);
   const tickers = unique([
@@ -53,6 +57,7 @@ export function buildCombinedTickerSignals({
       const politician = politicianByTicker.get(ticker) || { buyScore: 0, sellScore: 0, tradeCount: 0 };
       const marketItemCount = marketCounts.get(ticker) || 0;
       const marketDataQuote = marketDataByTicker.get(ticker);
+      const seekingAlphaAiSummary = seekingAlphaAiByTicker.get(ticker) || null;
       const liveMarketDataInput = Boolean(marketDataQuote && !marketDataQuote.isMock && marketDataQuote.liveProviderCalls);
       const benchmarkDailyChangePercent = benchmarkDailyChangePercentFromSnapshot(marketDataSnapshot, ticker);
       const priceMomentumPlaceholder = scorePriceMomentumPlaceholder(holding, marketItemCount, marketDataQuote);
@@ -119,7 +124,8 @@ export function buildCombinedTickerSignals({
         market: marketItemCount,
         marketData: marketDataQuote ? 1 : 0,
         reddit: reddit?.sevenDayMentions || 0,
-        politician: politician.tradeCount || 0
+        politician: politician.tradeCount || 0,
+        seekingAlphaAi: seekingAlphaAiSummary?.recordCount || 0
       };
       const rawConfluenceScore = roundScore(
         priceMomentumScore * TICKER_SIGNAL_WEIGHTS.priceMomentumScore +
@@ -157,7 +163,7 @@ export function buildCombinedTickerSignals({
         benchmarkDailyChangePercent
       });
       const materialityScore = scoreMateriality(holding, marketItemCount);
-      const confidenceScore = scoreTickerSignalConfidence({ marketItemCount, sourceCounts, marketDataQuote, reddit, politician });
+      const confidenceScore = scoreTickerSignalConfidence({ marketItemCount, sourceCounts, marketDataQuote, reddit, politician, seekingAlphaAiSummary });
       const actionCategory = actionForConfluence(confluenceScore);
       const holdingQualityScore = scoreHoldingQuality({ holding, institutionalQuant });
       const explanation = buildScoreExplanation({
@@ -176,7 +182,8 @@ export function buildCombinedTickerSignals({
         politicianActivityScore,
         ownershipWatchlistScore,
         thesisConvictionRiskScore,
-        concentrationRiskScore
+        concentrationRiskScore,
+        seekingAlphaAiSummary
       });
 
       return {
@@ -277,7 +284,31 @@ export function buildCombinedTickerSignals({
         sourceMode: liveMarketDataInput ? "local-model-live-market-data" : "mock-local-only",
         liveProviderCalls: liveMarketDataInput,
         dataMode: liveMarketDataInput ? "local-score-live-market-data" : "placeholder",
-        sourceTypes: [marketDataQuote?.isMock ? "mock-market-data" : marketDataQuote ? "market-data" : "price-placeholder", "social", "disclosure", "thesis-placeholder"],
+        seekingAlphaAiEvidenceCount: seekingAlphaAiSummary?.recordCount || 0,
+        seekingAlphaAiFreshnessStatus: seekingAlphaAiSummary?.freshnessStatus || "missing",
+        seekingAlphaAiSourceModes: seekingAlphaAiSummary?.sourceModes || [],
+        seekingAlphaAiSourceTypes: seekingAlphaAiSummary?.sourceTypes || [],
+        seekingAlphaAiBullishPoints: seekingAlphaAiSummary?.bullishPoints || [],
+        seekingAlphaAiBearishPoints: seekingAlphaAiSummary?.bearishPoints || [],
+        seekingAlphaAiRatingContext: seekingAlphaAiSummary?.ratingMentions || [],
+        seekingAlphaAiReviewPriorityScore: seekingAlphaAiSummary?.reviewPriorityScore || 0,
+        seekingAlphaAiSupportScore: seekingAlphaAiSummary?.supportScore || 0,
+        seekingAlphaAiRiskScore: seekingAlphaAiSummary?.riskScore || 0,
+        seekingAlphaAiEvidenceLabel: seekingAlphaAiSummary?.recordCount
+          ? `${seekingAlphaAiSummary.freshnessLabel}: ${seekingAlphaAiSummary.summary}`
+          : "No Seeking Alpha AI personal import context",
+        seekingAlphaAiWarnings: [
+          ...(seekingAlphaAiSummary?.validationWarnings || []),
+          ...(seekingAlphaAiSummary?.redactionWarnings || []),
+          seekingAlphaAiSummary?.staleCount ? `${seekingAlphaAiSummary.staleCount} Seeking Alpha AI report${seekingAlphaAiSummary.staleCount === 1 ? "" : "s"} stale` : ""
+        ].filter(Boolean),
+        sourceTypes: [
+          marketDataQuote?.isMock ? "mock-market-data" : marketDataQuote ? "market-data" : "price-placeholder",
+          "social",
+          "disclosure",
+          "thesis-placeholder",
+          seekingAlphaAiSummary?.recordCount ? "seeking-alpha-ai-personal-import" : ""
+        ].filter(Boolean),
         sourceCounts,
         sector: holding?.sector || marketDataQuote?.sector || "",
         industry: holding?.marketDataIndustry || marketDataQuote?.industry || "",
@@ -345,7 +376,7 @@ export function buildCombinedTickerSignals({
         whyScoreIsHigh: explanation.whyScoreIsHigh,
         missingData: explanation.missingData,
         dataModeDetails: explanation.dataModeDetails,
-        formulaLabel: "Review priority formula: 22% price momentum, 14% relative strength, 16% Reddit acceleration, 8% Reddit sentiment, 16% politician activity, 8% ownership/watchlist, 10% thesis review need, 6% concentration risk. Quality context is reported separately."
+        formulaLabel: "Review priority formula: 22% price momentum, 14% relative strength, 16% Reddit acceleration, 8% Reddit sentiment, 16% politician activity, 8% ownership/watchlist, 10% thesis review need, 6% concentration risk. Seeking Alpha AI personal imports are supporting context only in this pass; Quality context is reported separately."
       };
     })
     .sort((a, b) => b.confluenceScore - a.confluenceScore || b.holdingsValue - a.holdingsValue || a.ticker.localeCompare(b.ticker));
@@ -560,14 +591,15 @@ function sourceTrustGuardrail({
   };
 }
 
-function scoreTickerSignalConfidence({ marketItemCount = 0, sourceCounts = {}, marketDataQuote = null, reddit = null, politician = {} } = {}) {
+function scoreTickerSignalConfidence({ marketItemCount = 0, sourceCounts = {}, marketDataQuote = null, reddit = null, politician = {}, seekingAlphaAiSummary = null } = {}) {
   const base = 0.18;
   const marketData = marketDataQuote ? 0.08 : 0;
   const marketContext = Math.min(0.1, marketItemCount * 0.035);
   const redditContext = Math.min(0.08, (sourceCounts.reddit || 0) * 0.018);
   const disclosureContext = Math.min(0.08, (politician.tradeCount || 0) * 0.04);
+  const seekingAlphaAiContext = Math.min(0.04, (seekingAlphaAiSummary?.freshCount || 0) * 0.02 + (seekingAlphaAiSummary?.staleCount || 0) * 0.008);
   const importedBoost = reddit?.sourceIds?.length ? 0.02 : 0;
-  return roundScore(Math.min(0.58, base + marketData + marketContext + redditContext + disclosureContext + importedBoost));
+  return roundScore(Math.min(0.58, base + marketData + marketContext + redditContext + disclosureContext + seekingAlphaAiContext + importedBoost));
 }
 
 function buildScoreExplanation(context = {}) {
@@ -579,6 +611,7 @@ function buildScoreExplanation(context = {}) {
     marketItemCount = 0,
     marketDataQuote,
     watchlistSet,
+    seekingAlphaAiSummary,
     priceMomentumScore,
     relativeStrengthScore,
     redditMentionAccelerationScore,
@@ -601,11 +634,13 @@ function buildScoreExplanation(context = {}) {
   if (thesisConvictionRiskScore >= 0.62) whyScoreIsHigh.push("thesis review need or risk flag");
   if (concentrationRiskScore >= 0.62) whyScoreIsHigh.push("position concentration or leverage risk");
   if (marketItemCount) whyScoreIsHigh.push(`${marketItemCount} linked market/Alpha placeholder item${marketItemCount === 1 ? "" : "s"}`);
+  if (seekingAlphaAiSummary?.recordCount) whyScoreIsHigh.push(`${seekingAlphaAiSummary.recordCount} Seeking Alpha AI personal import context row${seekingAlphaAiSummary.recordCount === 1 ? "" : "s"}`);
 
   const missingData = [];
   if (!marketDataQuote || marketDataQuote.isMock) missingData.push("live market quote and history");
   if (!reddit?.sevenDayMentions) missingData.push("Reddit mention confirmation");
   if (!politician?.tradeCount) missingData.push("politician disclosure confirmation");
+  if (!seekingAlphaAiSummary?.recordCount) missingData.push("Seeking Alpha AI personal import context");
   if (!holding || !realPortfolio) missingData.push("imported portfolio ownership context");
   if (holding && (!holding.thesisStatus || /missing|needs/i.test(holding.thesisStatus))) missingData.push("current thesis conviction");
 
@@ -613,6 +648,7 @@ function buildScoreExplanation(context = {}) {
     liveMarketDataInput ? "provider market data input" : marketDataQuote?.isMock ? "sample market data" : marketDataQuote ? "provider-shaped market data" : "no market quote",
     reddit?.sourceIds?.length ? "sample/local Reddit mentions" : "no Reddit rows",
     politician?.tradeCount ? "sample/local politician disclosures" : "no politician disclosure rows",
+    seekingAlphaAiSummary?.recordCount ? "Seeking Alpha AI personal import context" : "no Seeking Alpha AI personal import",
     liveMarketDataInput ? "market quote provider calls happened server-side before scoring" : "no live provider calls"
   ];
 
