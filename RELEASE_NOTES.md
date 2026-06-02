@@ -126,6 +126,7 @@ Date: 2026-05-24
 - Security/privacy hardening: no detected committed keys, tokens, passwords, private keys, brokerage credentials, or account-number exports; account-number labels are masked; Reddit usernames are omitted; rejected-row reports redact secret-like values.
 - Fidelity CSV import hardening now maps additional production-style headers, converts per-share cost basis into total cost basis, blocks applying previews with malformed holding rows, keeps harmless Fidelity footer rows as skipped non-holding rows, and prevents default sample research tickers from appearing as portfolio action items after a real import.
 - Transparent Prediction Model v1 adds a bounded 20-trading-day model-implied outlook for ticker pages and Alpha context. It shows factor weights, confidence, top drivers, weak signals, source freshness, and caveats while explicitly avoiding target, guarantee, or trade-order language.
+- Seeking Alpha AI personal import lets Tucker paste or locally import Ask Seeking Alpha, Virtual Analyst, AI Summary Report, JSON/text, or saved-HTML report content through a preview-before-save workflow. The app stores only capped/redacted local report context, labels it as personal import data, rejects cookies/session/token-like content, and does not ask for or store Seeking Alpha credentials.
 
 ## Verification
 

@@ -293,6 +293,39 @@
       "notes": "Demo shape only. Not a live disclosure feed."
     }
   ],
+  "seekingAlphaAiRecords": [
+    {
+      "schemaVersion": 1,
+      "id": "sa-ai-mu-virtual-analyst-20260523",
+      "ticker": "MU",
+      "tickers": ["MU"],
+      "sourceType": "virtual_analyst_report",
+      "sourceTypeLabel": "Virtual Analyst Report",
+      "sourceMode": "pasted",
+      "sourceModeLabel": "Pasted",
+      "promptText": "Review MU using Seeking Alpha Premium context.",
+      "responseText": "Virtual Analyst Report for MU. Bullish: HBM demand and improving memory pricing support the cycle. Bearish: Memory pricing can weaken if supply expands too quickly. Quant Rating: Buy. Growth Grade: A-. Profitability Grade: B+. Sources: Seeking Alpha Quant Rating, Factor Grades.",
+      "normalizedExcerpt": "Bullish: HBM demand and improving memory pricing support the cycle. Bearish: Memory pricing can weaken if supply expands too quickly. Ratings mentioned: quantRating Buy; growthGrade A-; profitabilityGrade B+",
+      "extractedBullishPoints": ["HBM demand and improving memory pricing support the cycle"],
+      "extractedBearishPoints": ["Memory pricing can weaken if supply expands too quickly"],
+      "extractedFinancialMetrics": ["Quant Rating: Buy", "Growth Grade: A-", "Profitability Grade: B+"],
+      "extractedRatings": {
+        "quantRating": "Buy",
+        "growthGrade": "A-",
+        "profitabilityGrade": "B+"
+      },
+      "citedSourceLabels": ["Seeking Alpha Quant Rating", "Seeking Alpha Factor Grades"],
+      "reportDate": "2026-05-23",
+      "importedAt": "2026-05-23",
+      "freshnessStatus": "current",
+      "validationWarnings": [],
+      "redactionWarnings": [],
+      "rawTextTruncated": false,
+      "sourceLabel": "Seeking Alpha AI personal import",
+      "liveProviderCalls": false,
+      "credentialMaterialStored": false
+    }
+  ],
   "alerts": [
     {
       "id": "alert-soxl-leverage",

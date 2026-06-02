@@ -6,6 +6,12 @@ import {
   buildSeekingAlphaInsights,
   demoSeekingAlphaPremiumData
 } from "./seekingAlphaConnector.js";
+import {
+  buildSeekingAlphaAiImportPreview,
+  mergeSeekingAlphaAiRecords,
+  normalizeSeekingAlphaAiRecords,
+  seekingAlphaAiStatusSummary
+} from "./seekingAlphaAi.js";
 import { actionCategorySeverity, buildAlphaSignals, buildDecisionBrief, demoAlphaEvents, demoThesisProfiles, signalActionCategory } from "./alphaEngine.js";
 import { selectMarketDataTickers } from "./marketDataSelection.js";
 import { buildMarketDriverReport, MARKET_DRIVER_DEFAULT_TICKERS } from "./marketDrivers.js";
@@ -131,6 +137,7 @@ import {
 const storageKey = "growthDashboardHoldings";
 const fidelityStatusKey = "growthDashboardFidelityStatus";
 const seekingAlphaStatusKey = "growthDashboardSeekingAlphaStatus";
+const seekingAlphaAiRecordsKey = "growthDashboardSeekingAlphaAiRecords";
 const marketEventsKey = "growthDashboardMarketEvents";
 const alphaEventsKey = "growthDashboardAlphaEvents";
 const thesisProfilesKey = "growthDashboardThesisProfiles";
@@ -232,6 +239,7 @@ const state = {
   holdings: loadHoldings(),
   fidelityStatus: loadFidelityStatus(),
   seekingAlphaStatus: loadSeekingAlphaStatus(),
+  seekingAlphaAiRecords: loadSeekingAlphaAiRecords(),
   marketEvents: loadMarketEvents(),
   alphaEvents: loadAlphaEvents(),
   thesisProfiles: loadThesisProfiles(),
@@ -272,6 +280,7 @@ const state = {
 };
 
 let pendingCsvImport = null;
+let pendingSeekingAlphaAiImport = null;
 let activeRoute = null;
 let lastHoldingSortStatusText = "";
 let latestTickerSignals = [];
@@ -472,6 +481,18 @@ function loadSeekingAlphaStatus() {
 
 function saveSeekingAlphaStatus() {
   safeSetLocalStorage(seekingAlphaStatusKey, JSON.stringify(state.seekingAlphaStatus));
+}
+
+function loadSeekingAlphaAiRecords() {
+  try {
+    return normalizeSeekingAlphaAiRecords(JSON.parse(localStorage.getItem(seekingAlphaAiRecordsKey)) || []);
+  } catch {
+    return [];
+  }
+}
+
+function saveSeekingAlphaAiRecords() {
+  safeSetLocalStorage(seekingAlphaAiRecordsKey, JSON.stringify(state.seekingAlphaAiRecords));
 }
 
 function loadMarketEvents() {
@@ -964,6 +985,7 @@ function render() {
     latestImportReport: state.latestImportReport,
     fidelityStatus: state.fidelityStatus,
     seekingAlphaStatus: state.seekingAlphaStatus,
+    seekingAlphaAiRecords: state.seekingAlphaAiRecords,
     providerReadiness: state.providerReadiness,
     politicianTrades: state.politicianTrades,
     politicianTradeImportReport: state.politicianTradeImportReport,
@@ -1949,6 +1971,176 @@ function renderSeekingAlphaInsights(insights) {
   target.innerHTML = insights.messages.map((message) => `<li>${escapeHtml(message)}</li>`).join("");
 }
 
+function seekingAlphaAiKnownTickers() {
+  return [
+    ...state.holdings.map((holding) => holding.ticker),
+    ...state.watchlistIdeas.map((item) => item.ticker),
+    ...DEFAULT_TICKER_SIGNAL_WATCHLIST
+  ].map((ticker) => normalizeTicker(ticker)).filter(Boolean);
+}
+
+function parseSeekingAlphaAiPaste() {
+  const input = $("seekingAlphaAiPasteInput");
+  const value = String(input?.value || "").trim();
+  const preview = buildSeekingAlphaAiImportPreview(value, {
+    inputType: "paste",
+    sourceMode: "pasted",
+    knownTickers: seekingAlphaAiKnownTickers()
+  });
+  pendingSeekingAlphaAiImport = preview;
+  renderSeekingAlphaAiPreview(preview);
+  showSeekingAlphaStatus(preview.importReport.health.message, preview.importReport.health.tone);
+}
+
+function clearSeekingAlphaAiPaste() {
+  pendingSeekingAlphaAiImport = null;
+  const input = $("seekingAlphaAiPasteInput");
+  if (input) input.value = "";
+  renderSeekingAlphaAiPreview(null);
+  renderSeekingAlphaStatus();
+}
+
+function importSeekingAlphaAiFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const name = file.name || "seeking-alpha-ai-import";
+    const inputType = /\.json$/i.test(name) || file.type === "application/json"
+      ? "json"
+      : /\.html?$/i.test(name) || /html/i.test(file.type || "")
+      ? "saved_html"
+      : "text";
+    const preview = buildSeekingAlphaAiImportPreview(String(reader.result || ""), {
+      inputType,
+      fileName: name,
+      sourceMode: inputType === "saved_html" ? "saved_html" : "imported_file",
+      knownTickers: seekingAlphaAiKnownTickers()
+    });
+    pendingSeekingAlphaAiImport = preview;
+    renderSeekingAlphaAiPreview(preview);
+    showSeekingAlphaStatus(preview.importReport.health.message, preview.importReport.health.tone);
+  };
+  reader.onerror = () => {
+    pendingSeekingAlphaAiImport = null;
+    renderSeekingAlphaAiPreview(null);
+    showSeekingAlphaStatus("Seeking Alpha AI import failed: file could not be read.", "error");
+  };
+  reader.readAsText(file);
+}
+
+function applySeekingAlphaAiPreview() {
+  if (!pendingSeekingAlphaAiImport?.records?.length) {
+    showSeekingAlphaStatus("No Seeking Alpha AI preview is ready to save.", "error");
+    return;
+  }
+  const merged = mergeSeekingAlphaAiRecords(state.seekingAlphaAiRecords, pendingSeekingAlphaAiImport.records);
+  state.seekingAlphaAiRecords = merged.records;
+  saveSeekingAlphaAiRecords();
+  const summary = seekingAlphaAiStatusSummary(state.seekingAlphaAiRecords);
+  state.seekingAlphaStatus = {
+    ...state.seekingAlphaStatus,
+    aiLoaded: true,
+    aiRecords: summary.records,
+    aiTickers: summary.tickers,
+    aiStaleRecords: summary.staleCount,
+    aiLastImport: new Date().toISOString(),
+    aiSourceModes: summary.sourceModes,
+    message: `${summary.records} Seeking Alpha AI personal import${summary.records === 1 ? "" : "s"} saved locally.`
+  };
+  saveSeekingAlphaStatus();
+  pendingSeekingAlphaAiImport = null;
+  renderSeekingAlphaAiPreview(null);
+  renderSeekingAlphaStatus();
+  render();
+}
+
+function cancelSeekingAlphaAiPreview() {
+  pendingSeekingAlphaAiImport = null;
+  renderSeekingAlphaAiPreview(null);
+  showSeekingAlphaStatus("Seeking Alpha AI preview canceled. No records were saved.", "pending");
+}
+
+function renderSeekingAlphaAiPreview(preview) {
+  const target = $("seekingAlphaAiPreviewPanel");
+  if (!target) return;
+  if (!preview) {
+    target.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  target.hidden = false;
+  const report = preview.importReport || {};
+  const rows = (preview.records || []).slice(0, 6).map((record) => `
+    <tr>
+      <td>${escapeHtml((record.tickers || []).join(", ") || record.ticker || "Unknown")}</td>
+      <td>${escapeHtml(record.sourceTypeLabel || record.sourceType)}</td>
+      <td>${escapeHtml(record.sourceModeLabel || record.sourceMode)}</td>
+      <td>${escapeHtml(record.reportDate || "Unknown")}</td>
+      <td>${escapeHtml([...(record.extractedBullishPoints || []), ...(record.extractedBearishPoints || [])].slice(0, 2).join(" · ") || record.normalizedExcerpt || "No clear theme detected")}</td>
+      <td>${escapeHtml([...(record.validationWarnings || []), ...(record.redactionWarnings || [])].slice(0, 2).join(" · ") || "None")}</td>
+    </tr>
+  `).join("");
+  const rejected = (report.rejectedRows || []).slice(0, 5).map((row) => `
+    <li>Row ${escapeHtml(row.rowNumber)}: ${escapeHtml((row.reasons || []).join(" "))}</li>
+  `).join("");
+  const warnings = (report.warnings || []).slice(0, 6).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
+  target.innerHTML = `
+    <div class="import-health ${escapeHtml((report.health?.tone || "pending").toLowerCase())}">
+      <b>${escapeHtml(report.health?.status || "Seeking Alpha AI preview")}</b>
+      <span>${escapeHtml(report.health?.message || "Review the extracted records before saving.")}</span>
+    </div>
+    <div class="import-debug-grid">
+      <div><b>Source</b><span>${escapeHtml(report.fileName || preview.fileName || "Pasted text")}</span></div>
+      <div><b>Rows parsed</b><span>${escapeHtml(report.rowsParsed || 0)}</span></div>
+      <div><b>Accepted records</b><span>${escapeHtml(report.acceptedRows || preview.records?.length || 0)}</span></div>
+      <div><b>Rejected rows</b><span>${escapeHtml((report.rejectedRows || []).length)}</span></div>
+      <div><b>Tickers detected</b><span>${escapeHtml((report.tickersDetected || []).join(", ") || "none")}</span></div>
+      <div><b>Source mode</b><span>${escapeHtml(report.sourceMode || preview.sourceMode || "pasted")}</span></div>
+    </div>
+    <div class="table-wrap preview-table-wrap">
+      <table class="preview-table sa-ai-preview-table">
+        <caption>Seeking Alpha AI personal import preview</caption>
+        <thead>
+          <tr>
+            <th scope="col">Ticker</th>
+            <th scope="col">Report type</th>
+            <th scope="col">Mode</th>
+            <th scope="col">Report date</th>
+            <th scope="col">Detected themes</th>
+            <th scope="col">Warnings</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="6">No saveable Seeking Alpha AI records found.</td></tr>'}</tbody>
+      </table>
+    </div>
+    ${warnings ? `<details open><summary>Warnings</summary><ul class="quality-warnings">${warnings}</ul></details>` : ""}
+    ${rejected ? `<details open><summary>Rejected rows</summary><ul class="quality-warnings">${rejected}</ul></details>` : ""}
+    <div class="connector-actions">
+      <button type="button" class="primary" data-sa-ai-action="apply" ${preview.records?.length ? "" : "disabled"}>Save personal import</button>
+      <button type="button" data-sa-ai-action="cancel">Cancel preview</button>
+    </div>
+  `;
+}
+
+function renderSeekingAlphaAiSavedRecords() {
+  const target = $("seekingAlphaAiRecordsPanel");
+  if (!target) return;
+  const summary = seekingAlphaAiStatusSummary(state.seekingAlphaAiRecords);
+  if (!summary.records) {
+    target.innerHTML = '<li>No Seeking Alpha AI personal imports saved yet.</li>';
+    return;
+  }
+  const latest = state.seekingAlphaAiRecords.slice(0, 5).map((record) => {
+    const warnings = [...(record.validationWarnings || []), ...(record.redactionWarnings || [])];
+    return `<li><b>${escapeHtml((record.tickers || []).join(", ") || record.ticker)}</b> ${escapeHtml(record.sourceTypeLabel || record.sourceType)} · ${escapeHtml(record.sourceModeLabel || record.sourceMode)} · ${escapeHtml(record.freshnessStatus)}${warnings.length ? ` · ${escapeHtml(warnings[0])}` : ""}</li>`;
+  }).join("");
+  target.innerHTML = `
+    <li>${escapeHtml(summary.records)} saved personal import${summary.records === 1 ? "" : "s"} covering ${escapeHtml(summary.tickers.join(", ") || "no tickers")}.</li>
+    ${summary.staleCount ? `<li>${escapeHtml(summary.staleCount)} stale report${summary.staleCount === 1 ? "" : "s"} should be reviewed before relying on them.</li>` : ""}
+    ${latest}
+  `;
+}
+
 function exportDashboardState() {
   const payload = buildDashboardStateBackupPayload(dashboardStateBackupSlice());
   showStateStatus("State JSON exported. Treat it as sensitive because it contains holdings.", "success");
@@ -1981,6 +2173,7 @@ function dashboardStateBackupSlice() {
     eventCalendar: state.eventCalendar,
     eventCalendarImportReport: state.eventCalendarImportReport,
     quantScoreHistory: state.quantScoreHistory,
+    seekingAlphaAiRecords: state.seekingAlphaAiRecords,
     latestImportReport: state.latestImportReport,
     accountScope: state.accountScope,
     marketDataLiveMode: state.marketDataLiveMode
@@ -2168,6 +2361,7 @@ function applyImportedState(payload) {
   state.eventCalendar = Array.isArray(payload.eventCalendar) ? normalizeCalendarEvents(payload.eventCalendar) : loadEventCalendar();
   state.eventCalendarImportReport = safeObject(payload.eventCalendarImportReport, null);
   state.quantScoreHistory = normalizeQuantScoreHistory(payload.quantScoreHistory || []);
+  state.seekingAlphaAiRecords = Array.isArray(payload.seekingAlphaAiRecords) ? normalizeSeekingAlphaAiRecords(payload.seekingAlphaAiRecords) : loadSeekingAlphaAiRecords();
   state.marketDataLiveMode = normalizeMarketDataLiveMode(payload.marketDataLiveMode || state.marketDataLiveMode || {});
   state.marketDataSnapshot = null;
   latestTickerSignals = [];
@@ -2196,6 +2390,7 @@ function applyImportedState(payload) {
   saveEventCalendar();
   saveEventCalendarImportReport();
   saveQuantScoreHistory();
+  saveSeekingAlphaAiRecords();
   saveAccountScope();
   saveMarketDataLiveMode();
 }
@@ -3739,6 +3934,11 @@ async function unlinkPlaidFidelity() {
 function renderSeekingAlphaStatus() {
   const status = state.seekingAlphaStatus;
   renderSeekingAlphaInsights(status.insights);
+  renderSeekingAlphaAiSavedRecords();
+  const aiSummary = seekingAlphaAiStatusSummary(state.seekingAlphaAiRecords);
+  const aiText = aiSummary.records
+    ? ` ${aiSummary.records} Seeking Alpha AI personal import${aiSummary.records === 1 ? "" : "s"} saved locally${aiSummary.staleCount ? `; ${aiSummary.staleCount} stale` : ""}.`
+    : "";
   if (status.restoredFromBackup) {
     showSeekingAlphaStatus(status.message || "Seeking Alpha status restored from backup. Revalidate before treating it as connected.", "pending");
     return;
@@ -3752,7 +3952,9 @@ function renderSeekingAlphaStatus() {
       : status.connected && status.mode === "live"
       ? "Seeking Alpha connector synced"
       : "Seeking Alpha local data loaded";
-    showSeekingAlphaStatus(`${label}: ${status.records || 0} records at ${synced}.`, "success");
+    showSeekingAlphaStatus(`${label}: ${status.records || 0} rating record${status.records === 1 ? "" : "s"} at ${synced}.${aiText}`, "success");
+  } else if (aiSummary.records) {
+    showSeekingAlphaStatus(`Seeking Alpha AI personal imports loaded: ${aiSummary.records} record${aiSummary.records === 1 ? "" : "s"} covering ${aiSummary.tickers.join(", ")}. Data is local/imported, not live.`, aiSummary.staleCount ? "pending" : "success");
   } else {
     showSeekingAlphaStatus("Not configured.", "pending");
   }
@@ -3778,6 +3980,21 @@ function wireEvents() {
   $("alphaFile").addEventListener("change", (event) => {
     importFile(event.target.files[0], "seekingAlpha");
     event.target.value = "";
+  });
+  $("dataSourcesAlphaFile")?.addEventListener("change", (event) => {
+    importFile(event.target.files[0], "seekingAlpha");
+    event.target.value = "";
+  });
+  $("seekingAlphaAiFile")?.addEventListener("change", (event) => {
+    importSeekingAlphaAiFile(event.target.files[0]);
+    event.target.value = "";
+  });
+  $("parseSeekingAlphaAiPasteBtn")?.addEventListener("click", parseSeekingAlphaAiPaste);
+  $("clearSeekingAlphaAiPasteBtn")?.addEventListener("click", clearSeekingAlphaAiPaste);
+  $("seekingAlphaAiPreviewPanel")?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-sa-ai-action]")?.dataset.saAiAction;
+    if (action === "apply") applySeekingAlphaAiPreview();
+    if (action === "cancel") cancelSeekingAlphaAiPreview();
   });
   $("importDebugPanel").addEventListener("click", (event) => {
     if (event.target.closest("[data-import-action='apply-mapping']")) applyManualImportMapping();
@@ -3904,6 +4121,7 @@ function loadSampleData() {
   state.eventCalendarImportReport = null;
   state.marketDataSnapshot = null;
   state.quantScoreHistory = [];
+  state.seekingAlphaAiRecords = [];
   latestTickerSignals = [];
   saveHoldings();
   saveFidelityStatus();
@@ -3930,6 +4148,7 @@ function loadSampleData() {
   saveEventCalendar();
   saveEventCalendarImportReport();
   saveQuantScoreHistory();
+  saveSeekingAlphaAiRecords();
   saveAccountScope();
   showImportStatus({ validation: { ok: true }, summary: { message: "Sample data loaded. Import a Fidelity CSV to use Tucker’s real portfolio." } });
   render();

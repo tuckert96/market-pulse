@@ -82,7 +82,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
     redditMentions: options.redditMentions || [],
     xUpdates: options.xUpdates || []
   });
-  renderDataSourceHealth(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.latestImportReport, options.marketDataStatus, options.politicianTradeImportReport, options.politicianTrades || [], options.redditImportReport, options.redditMentions || [], options.portfolioStatus, options.accountScope, options.xUpdateImportReport, options.xUpdates || []);
+  renderDataSourceHealth(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.latestImportReport, options.marketDataStatus, options.politicianTradeImportReport, options.politicianTrades || [], options.redditImportReport, options.redditMentions || [], options.portfolioStatus, options.accountScope, options.xUpdateImportReport, options.xUpdates || [], options.seekingAlphaAiRecords || []);
   renderRedditSourceStatus(options.redditMentions || [], options.redditImportReport, options.redditSettings, options.providerReadiness);
   renderXSourceStatus(options.xUpdates || [], options.xUpdateImportReport, options.xSettings, options.providerReadiness);
   renderPoliticianTrades(options.politicianTrades || [], options.politicianTradeImportReport);
@@ -3798,7 +3798,8 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .filter((row) => normalizeTickerSymbol(row.ticker) === ticker)
     .sort((a, b) => timestampSortValue(b.dateTime) - timestampSortValue(a.dateTime))
     .slice(0, 6);
-  const redditSummary = summarizeRedditMentions(options.redditMentions || [])
+  const socialSummaryAsOf = options.asOf || latestRecordTimestamp([...(options.redditMentions || []), ...(options.xUpdates || [])], ["createdAt", "detectedAt", "sourceAsOf"]);
+  const redditSummary = summarizeRedditMentions(options.redditMentions || [], { asOf: socialSummaryAsOf })
     .find((row) => normalizeTickerSymbol(row.ticker) === ticker) || null;
   const redditMentions = (options.redditMentions || [])
     .filter((record) => redditMentionTickers(record).includes(ticker))
@@ -5117,6 +5118,14 @@ function timestampSortValue(value) {
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
+function latestRecordTimestamp(records = [], fields = []) {
+  const latest = records.reduce((max, record) => {
+    const value = fields.map((field) => record?.[field]).find(Boolean);
+    return Math.max(max, timestampSortValue(value));
+  }, 0);
+  return latest ? new Date(latest).toISOString() : undefined;
+}
+
 function tickerSignalSummary(model) {
   const signal = model.tickerSignal;
   if (!signal) return '<div><span>Ticker signal</span><b>No confluence row</b><small>Future watchlist/data signals will populate this row.</small></div>';
@@ -6207,7 +6216,7 @@ function renderProviderReadiness(readiness = {}) {
   `;
 }
 
-export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = []) {
+export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seekingAlphaStatus = {}, report = {}, marketDataStatus = {}, politicianReport = null, politicianTrades = [], redditReport = null, redditMentions = [], portfolioStatus = null, accountScope = null, xReport = null, xUpdates = [], seekingAlphaAiRecords = []) {
   const target = byId("dataSourceHealthPanel");
   if (!target) return;
   const providerStatuses = Object.values(readiness.providerStatuses || {});
@@ -6237,6 +6246,10 @@ export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seek
   const politicianError = politicianSource.limitedOrError;
   const fidelityOverview = connectorOverviewStatus("Fidelity", fidelityStatus, "CSV import works. Plaid account linking runs through the local backend when configured.");
   const seekingAlphaOverview = connectorOverviewStatus("Seeking Alpha", seekingAlphaStatus, "Use authorized CSV/XLSX exports or a future licensed API.");
+  const seekingAlphaAiCount = seekingAlphaAiRecords.length;
+  const seekingAlphaAiTickers = [...new Set(seekingAlphaAiRecords.flatMap((record) => record.tickers || record.ticker || []).filter(Boolean))];
+  const seekingAlphaAiStaleCount = seekingAlphaAiRecords.filter((record) => record.freshnessStatus === "stale").length;
+  const seekingAlphaConfigured = Boolean(seekingAlphaStatus.connected || seekingAlphaAiCount);
   const fidelityImported = /csv|import|local-file/i.test(String(fidelityStatus.mode || ""));
   const plaidReadiness = readiness.connectors?.plaid || {};
   const plaidLinked = Boolean(plaidReadiness.linked);
@@ -6368,17 +6381,23 @@ export function renderDataSourceHealth(readiness = {}, fidelityStatus = {}, seek
     },
     {
       label: "Seeking Alpha",
-      status: seekingAlphaOverview.value,
-      detail: seekingAlphaOverview.detail,
-      configured: Boolean(seekingAlphaStatus.connected),
+      status: seekingAlphaStatus.connected
+        ? seekingAlphaOverview.value
+        : seekingAlphaAiCount
+        ? `${seekingAlphaAiCount} AI personal import${seekingAlphaAiCount === 1 ? "" : "s"} saved`
+        : seekingAlphaOverview.value,
+      detail: seekingAlphaAiCount
+        ? `${seekingAlphaOverview.detail} AI report context covers ${seekingAlphaAiTickers.slice(0, 6).join(", ") || "detected tickers"}${seekingAlphaAiTickers.length > 6 ? ` +${seekingAlphaAiTickers.length - 6} more` : ""}. ${seekingAlphaAiStaleCount ? `${seekingAlphaAiStaleCount} stale report${seekingAlphaAiStaleCount === 1 ? "" : "s"} should be refreshed manually.` : "AI context is local personal import only."}`
+        : seekingAlphaOverview.detail,
+      configured: seekingAlphaConfigured,
       demoReady: /demo/i.test(String(seekingAlphaStatus.mode || "")),
-      availabilityLabel: seekingAlphaStatus.connected ? dataModeLabel(DATA_MODES.IMPORTED) : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
-      guidance: seekingAlphaStatus.connected ? "Authorized export/import data is available locally." : "Use authorized exports or a licensed API later; no scraping or password collection.",
+      availabilityLabel: seekingAlphaStatus.connected || seekingAlphaAiCount ? dataModeLabel(DATA_MODES.IMPORTED) : /demo/i.test(String(seekingAlphaStatus.mode || "")) ? dataModeLabel(DATA_MODES.SAMPLE) : dataModeLabel(DATA_MODES.NOT_CONFIGURED),
+      guidance: seekingAlphaConfigured ? "Authorized local import data is available. No Seeking Alpha password, cookies, or browser session tokens are stored." : "Use authorized exports, paste visible report text, or a licensed API later; no scraping or password collection.",
       className: seekingAlphaStatus.connected && /csv|xlsx|import/i.test(String(seekingAlphaStatus.mode || "")) ? "imported-local" : undefined,
       providerBacked: false,
-      sourceType: "Manual premium-rating import",
-      lastSuccessfulAt: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt,
-      fallbackReason: seekingAlphaStatus.connected ? "" : "No authorized Seeking Alpha import is loaded."
+      sourceType: seekingAlphaAiCount ? "Manual ratings + AI personal import" : "Manual premium-rating import",
+      lastSuccessfulAt: seekingAlphaStatus.lastSync || seekingAlphaStatus.importedAt || seekingAlphaStatus.aiLastImport || seekingAlphaAiRecords.map((record) => record.importedAt).sort().at(-1),
+      fallbackReason: seekingAlphaConfigured ? "" : "No authorized Seeking Alpha import is loaded."
     },
     {
       label: "Fidelity",

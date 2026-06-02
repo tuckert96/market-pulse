@@ -22,6 +22,7 @@ import { buildAffectedExposureSummary } from "../src/portfolioView.js";
 import { buildRedditProviderConfig, createRedditProvider, demoRedditMentions, extractTickerMentions, fetchRedditApiMentions, importRedditMentionFile, redditProviderStatuses, summarizeRedditMentions } from "../src/redditSignals.js";
 import { buildAlphaRecommendations, filterAlphaRecommendations } from "../src/recommendationEngine.js";
 import { buildInstitutionalQuantLens } from "../src/scoringModel.js";
+import { buildSeekingAlphaAiImportPreview } from "../src/seekingAlphaAi.js";
 import { normalizeSeekingAlphaRecord } from "../src/seekingAlphaConnector.js";
 import { buildTargetAllocationPlan, defaultTargetAllocations, normalizeTargetAllocations } from "../src/targetAllocations.js";
 import { buildTechnicalAnalysisSnapshot } from "../src/technicalAnalysis.js";
@@ -466,11 +467,20 @@ const snapRows = normalizeSnapTradeHoldings({
   positions: [{ symbol: "VGT", quantity: 1, price: 600, account_name: "Fidelity Roth IRA", account_type: "ira" }]
 });
 const alpha = normalizeSeekingAlphaRecord({ ticker: "NVDA", quant: "4.92", growth: "A+" });
+const seekingAlphaAiPreview = buildSeekingAlphaAiImportPreview("Ask Seeking Alpha\nPrompt: Review MU.\nReport Date: 2026-05-30\nBullish:\n- MU HBM demand.\nBearish:\n- Memory pricing risk.\nQuant Rating: Buy.", {
+  now: "2026-06-02T12:00:00.000Z",
+  knownTickers: ["MU"]
+});
+const seekingAlphaAiSecretPreview = buildSeekingAlphaAiImportPreview("Virtual Analyst Report for MU. cookie: sa_session=secret-value; Quant Rating: Buy.", {
+  now: "2026-06-02T12:00:00.000Z",
+  knownTickers: ["MU"]
+});
 
 assert(existsSync("index.html"), "index.html should exist");
 assert(existsSync("src/app.js"), "src/app.js should exist");
 assert(existsSync("src/fidelityConnector.js"), "Fidelity connector module should exist");
 assert(existsSync("src/seekingAlphaConnector.js"), "Seeking Alpha connector module should exist");
+assert(existsSync("src/seekingAlphaAi.js"), "Seeking Alpha AI personal import module should exist");
 assert(existsSync("src/dataContracts.ts"), "TypeScript local data contracts should exist");
 assert(existsSync("src/localDataContracts.js"), "runtime local data contract validator should exist");
 assert(existsSync("src/politicianTrades.js"), "politician trade ingestion skeleton should exist");
@@ -510,6 +520,10 @@ assert(dataContractsTs.includes("export interface DecisionJournalEntry"), "dataC
 assert(dataContractsTs.includes("export interface TickerSignal"), "dataContracts.ts should define TickerSignal");
 assert(dataContractsTs.includes("export interface MarketDataQuote"), "dataContracts.ts should define MarketDataQuote");
 assert(dataContractsTs.includes("export interface MarketDataProviderConfig"), "dataContracts.ts should define MarketDataProviderConfig");
+assert(dataContractsTs.includes("export interface SeekingAlphaAiRecord"), "dataContracts.ts should define SeekingAlphaAiRecord");
+assert(localDataContractsJs.includes("seekingAlphaAiRecords"), "runtime local data contract should validate Seeking Alpha AI records");
+assert(readFileSync("docs/seeking-alpha-connector.md", "utf8").includes("Seeking Alpha AI Personal Import"), "Seeking Alpha docs should describe AI personal import workflow");
+assert(readFileSync("docs/seeking-alpha-connector.md", "utf8").includes("rejects content that appears to include cookies"), "Seeking Alpha docs should document credential-content rejection");
 assert(dataContractsTs.includes("confluenceScore?: number"), "TickerSignal contract should include confluence score");
 assert(dataContractsTs.includes("redditMentionScore?: number"), "TickerSignal contract should include Reddit score");
 assert(dataContractsTs.includes("relativeStrengthScore?: number"), "TickerSignal contract should include relative strength score");
@@ -1079,6 +1093,13 @@ assert(appJs.includes("activePortfolioStatus"), "app.js should derive active por
 assert(appJs.includes("state.marketDataSnapshot = null"), "portfolio load/reset paths should invalidate stale market data snapshots");
 assert(appJs.includes("state.alertState = emptyAlertState()"), "portfolio load/reset paths should clear stale reviewed/hidden alert state");
 assert(indexHtml.includes("Fidelity portfolio import"), "Data Sources should focus Fidelity on the working local import path");
+assert(indexHtml.includes("Seeking Alpha AI personal import"), "Data Sources should expose Seeking Alpha AI personal import");
+assert(indexHtml.includes("Paste Seeking Alpha AI output"), "Data Sources should allow pasted Seeking Alpha AI output preview");
+assert(indexHtml.includes("Do not paste passwords, cookies, session tokens"), "Seeking Alpha AI UI should warn against credential material");
+assert(appJs.includes("buildSeekingAlphaAiImportPreview"), "app.js should wire Seeking Alpha AI preview before save");
+assert(appJs.includes("pendingSeekingAlphaAiImport"), "app.js should hold Seeking Alpha AI imports as pending previews before applying");
+assert(seekingAlphaAiPreview.records.length === 1 && seekingAlphaAiPreview.importReport.health.status === "Preview ready", "Seeking Alpha AI preview should parse safe pasted output");
+assert(seekingAlphaAiSecretPreview.records.length === 0 && seekingAlphaAiSecretPreview.importReport.rejectedRows.length === 1, "Seeking Alpha AI preview should reject cookie/session-like content");
 assert(!indexHtml.includes("Start Fidelity connector") && !indexHtml.includes("Sync holdings"), "no-op Fidelity connector controls should not remain visible before a backend exists");
 assert(indexHtml.includes("clearPortfolioBtn"), "Settings should expose a local clear portfolio control");
 assert(portfolioViewJs.includes("Signal / not owned"), "ticker pages should distinguish signal-only tickers from watchlist-only tickers");
