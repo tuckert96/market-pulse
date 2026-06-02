@@ -261,6 +261,138 @@ export function seekingAlphaAiStatusSummary(records = []) {
   };
 }
 
+export function seekingAlphaAiRecordsForTicker(records = [], ticker = "") {
+  const normalizedTicker = normalizeTicker(ticker);
+  if (!normalizedTicker) return [];
+  return normalizeSeekingAlphaAiRecords(records)
+    .filter((record) => (record.tickers || []).map(normalizeTicker).includes(normalizedTicker))
+    .sort(compareSeekingAlphaAiRecords);
+}
+
+export function summarizeSeekingAlphaAiForTicker(records = [], ticker = "", options = {}) {
+  const rows = seekingAlphaAiRecordsForTicker(records, ticker);
+  const now = options.now || new Date().toISOString();
+  const latest = rows[0] || null;
+  const freshRows = rows.filter((record) => record.freshnessStatus !== "stale");
+  const staleRows = rows.filter((record) => record.freshnessStatus === "stale");
+  const bullishPoints = dedupe(rows.flatMap((record) => record.extractedBullishPoints || [])).slice(0, MAX_THEME_COUNT);
+  const bearishPoints = dedupe(rows.flatMap((record) => record.extractedBearishPoints || [])).slice(0, MAX_THEME_COUNT);
+  const financialMetrics = dedupe(rows.flatMap((record) => record.extractedFinancialMetrics || [])).slice(0, MAX_THEME_COUNT);
+  const ratingMentions = mergeRatingMentions(rows);
+  const warningCount = rows.reduce((total, record) => total + (record.validationWarnings || []).length + (record.redactionWarnings || []).length, 0);
+  const supportScore = scoreSeekingAlphaAiSupport({ rows, bullishPoints, bearishPoints, ratingMentions });
+  const riskScore = scoreSeekingAlphaAiRisk({ rows, bearishPoints, staleRows, warningCount });
+  const reviewPriorityScore = scoreSeekingAlphaAiReviewPriority({ rows, freshRows, staleRows, bullishPoints, bearishPoints, financialMetrics, ratingMentions, warningCount });
+  const latestDate = latest?.reportDate || latest?.importedAt || "";
+  const ageDays = ageInDays(latestDate, now);
+  return {
+    ticker: normalizeTicker(ticker),
+    records: rows,
+    recordCount: rows.length,
+    freshCount: freshRows.length,
+    staleCount: staleRows.length,
+    sourceTypes: dedupe(rows.map((record) => record.sourceTypeLabel || SOURCE_TYPE_LABELS[record.sourceType] || record.sourceType)),
+    sourceModes: dedupe(rows.map((record) => record.sourceModeLabel || SOURCE_MODE_LABELS[record.sourceMode] || record.sourceMode)),
+    latestRecord: latest,
+    latestDate,
+    latestAgeDays: ageDays,
+    freshnessStatus: rows.length ? staleRows.length === rows.length ? "stale" : "current" : "missing",
+    freshnessLabel: rows.length ? staleRows.length === rows.length ? "Stale imported Seeking Alpha AI" : "Imported Seeking Alpha AI" : "Missing Seeking Alpha AI",
+    dataStatus: rows.length ? "Imported" : "Missing",
+    bullishPoints,
+    bearishPoints,
+    financialMetrics,
+    ratingMentions,
+    citedSourceLabels: dedupe(rows.flatMap((record) => record.citedSourceLabels || [])).slice(0, 8),
+    validationWarnings: dedupe(rows.flatMap((record) => record.validationWarnings || [])).slice(0, 8),
+    redactionWarnings: dedupe(rows.flatMap((record) => record.redactionWarnings || [])).slice(0, 8),
+    supportScore,
+    riskScore,
+    reviewPriorityScore,
+    summary: summarizeSeekingAlphaAiText({ rows, bullishPoints, bearishPoints, staleRows })
+  };
+}
+
+export function buildSeekingAlphaAiTickerSummaries(records = [], tickers = [], options = {}) {
+  const knownTickers = normalizeTickerList(tickers);
+  const tickerSet = new Set([
+    ...knownTickers,
+    ...normalizeSeekingAlphaAiRecords(records).flatMap((record) => record.tickers || [])
+  ].map(normalizeTicker).filter(Boolean));
+  return new Map([...tickerSet].map((ticker) => [ticker, summarizeSeekingAlphaAiForTicker(records, ticker, options)]));
+}
+
+function mergeRatingMentions(records = []) {
+  const pairs = [];
+  records.forEach((record) => {
+    Object.entries(record.extractedRatings || {}).forEach(([label, value]) => {
+      if (value) pairs.push(`${humanizeField(label)}: ${value}`);
+    });
+  });
+  return dedupe(pairs).slice(0, MAX_THEME_COUNT);
+}
+
+function scoreSeekingAlphaAiReviewPriority({ rows = [], freshRows = [], staleRows = [], bullishPoints = [], bearishPoints = [], financialMetrics = [], ratingMentions = [], warningCount = 0 } = {}) {
+  if (!rows.length) return 0;
+  const evidenceBreadth = Math.min(1, (bullishPoints.length + bearishPoints.length + financialMetrics.length + ratingMentions.length) / 10);
+  const freshComponent = freshRows.length ? 0.16 : 0;
+  const staleComponent = staleRows.length ? 0.08 : 0;
+  const riskComponent = Math.min(0.12, bearishPoints.length * 0.025);
+  const warningPenalty = Math.min(0.08, warningCount * 0.01);
+  return roundScore(clamp01(0.42 + evidenceBreadth * 0.22 + freshComponent + staleComponent + riskComponent - warningPenalty));
+}
+
+function scoreSeekingAlphaAiSupport({ rows = [], bullishPoints = [], bearishPoints = [], ratingMentions = [] } = {}) {
+  if (!rows.length) return 0;
+  const bullish = Math.min(0.22, bullishPoints.length * 0.035);
+  const ratings = Math.min(0.12, ratingMentions.length * 0.025);
+  const riskOffset = Math.min(0.14, bearishPoints.length * 0.025);
+  return roundScore(clamp01(0.48 + bullish + ratings - riskOffset));
+}
+
+function scoreSeekingAlphaAiRisk({ rows = [], bearishPoints = [], staleRows = [], warningCount = 0 } = {}) {
+  if (!rows.length) return 0;
+  const risk = Math.min(0.28, bearishPoints.length * 0.045);
+  const stale = staleRows.length ? 0.1 : 0;
+  const warning = Math.min(0.1, warningCount * 0.012);
+  return roundScore(clamp01(0.34 + risk + stale + warning));
+}
+
+function summarizeSeekingAlphaAiText({ rows = [], bullishPoints = [], bearishPoints = [], staleRows = [] } = {}) {
+  if (!rows.length) return "No imported Seeking Alpha AI personal output is saved for this ticker.";
+  const pieces = [];
+  if (bullishPoints.length) pieces.push(`${bullishPoints.length} supportive point${bullishPoints.length === 1 ? "" : "s"}`);
+  if (bearishPoints.length) pieces.push(`${bearishPoints.length} risk point${bearishPoints.length === 1 ? "" : "s"}`);
+  if (!pieces.length) pieces.push(`${rows.length} imported report${rows.length === 1 ? "" : "s"}`);
+  const staleNote = staleRows.length === rows.length ? " All saved reports are stale." : staleRows.length ? ` ${staleRows.length} saved report${staleRows.length === 1 ? "" : "s"} stale.` : "";
+  return `${pieces.join(" and ")} from Tucker-imported Seeking Alpha AI output.${staleNote}`;
+}
+
+function humanizeField(value = "") {
+  return String(value || "")
+    .replace(/([A-Z])/g, " $1")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+    .trim();
+}
+
+function ageInDays(dateValue, nowValue) {
+  const date = new Date(dateValue);
+  const now = new Date(nowValue);
+  if (Number.isNaN(date.getTime()) || Number.isNaN(now.getTime())) return null;
+  return Math.max(0, Math.round((now.getTime() - date.getTime()) / 86_400_000));
+}
+
+function clamp01(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(1, number));
+}
+
+function roundScore(value) {
+  return Math.round(clamp01(value) * 1000) / 1000;
+}
+
 function seekingAlphaAiInputRows(inputText, options = {}) {
   const inputType = String(options.inputType || options.sourceMode || "").toLowerCase();
   const text = String(inputText || "").trim();

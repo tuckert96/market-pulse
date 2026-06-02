@@ -64,6 +64,7 @@ Each ticker signal includes:
 - `institutionalQuantMissingData`: missing data that lowers confidence in the stock-quality view
 - `institutionalQuantPeerSummary`: peer-relative rank context within comparable tracked names
 - `institutionalQuantScoreHistoryLabel`: local change context since the prior score in the same portfolio mode
+- `seekingAlphaAiEvidenceLabel`: Tucker-imported Seeking Alpha AI personal context; displayed for review but not merged into the confluence formula in this pass
 
 See `docs/quantitative-engine.md` for the stock-quality model. The ticker confluence score remains a review-priority score; the Institutional Quant Lens is a separate “good stock setup” lens.
 

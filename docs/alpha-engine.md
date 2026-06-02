@@ -167,6 +167,7 @@ Recommendation inputs currently include:
 - Institutional Quant Lens stock-quality scores
 - active portfolio weight and ownership/watchlist status
 - provider quote price movement and source freshness, including Finnhub when configured through the local backend
+- Tucker-imported Seeking Alpha AI personal context, capped by source freshness and parser confidence
 - concentration and leverage risk
 - alert severity
 - local portfolio alerts
@@ -174,6 +175,8 @@ Recommendation inputs currently include:
 - thesis tracker stale/missing/contradicted flags
 - event calendar items
 - market-data source health
+
+Seeking Alpha AI personal imports are treated differently from structured Premium ratings. They can add labeled support/risk context, modest recommendation rows, stale-data reviews, and ticker-page notes. They do not directly change the combined ticker confluence formula in this pass, and they must always carry "personal import", freshness, and verification caveats.
 
 Filters are available for All, Owned, Watchlist, Risk, Opportunities, Data issues, Recent, and High confidence. Each holding row exposes an `Explain score` control with the weighted quality-score math, review-priority math, missing-data handling, and the "Why this rank?" drivers such as high portfolio impact, recency, low data quality, or elevated concentration risk. These are calculated local scores, not AI explanations.
 

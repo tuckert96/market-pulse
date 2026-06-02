@@ -6,6 +6,7 @@ import { buildTickerMovementExplainer } from "./movementExplainer.js";
 import { normalizeTicker } from "./portfolioSchema.js";
 import { countHoldingRowsNeedingReview, isRealPortfolioUiState } from "./portfolioState.js";
 import { summarizeRedditMentions } from "./redditSignals.js";
+import { seekingAlphaAiRecordsForTicker, summarizeSeekingAlphaAiForTicker } from "./seekingAlphaAi.js";
 import { buildTechnicalAnalysisSnapshot } from "./technicalAnalysis.js";
 import { buildThesisRiskSummary } from "./thesisTracker.js";
 import { compareThesisSnapshotToProfile, thesisSnapshotsForTicker } from "./thesisSnapshots.js";
@@ -80,6 +81,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
     politicianTrades: options.politicianTrades || [],
     providerReadiness: options.providerReadiness || {},
     redditMentions: options.redditMentions || [],
+    seekingAlphaAiRecords: options.seekingAlphaAiRecords || [],
     xUpdates: options.xUpdates || []
   });
   renderDataSourceHealth(options.providerReadiness, options.fidelityStatus, options.seekingAlphaStatus, options.latestImportReport, options.marketDataStatus, options.politicianTradeImportReport, options.politicianTrades || [], options.redditImportReport, options.redditMentions || [], options.portfolioStatus, options.accountScope, options.xUpdateImportReport, options.xUpdates || [], options.seekingAlphaAiRecords || []);
@@ -3814,6 +3816,8 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
   const politicianTrades = (options.politicianTrades || [])
     .filter((trade) => normalizeTickerSymbol(trade.ticker) === ticker)
     .sort((a, b) => String(b.disclosureDate || b.disclosedAt || "").localeCompare(String(a.disclosureDate || a.disclosedAt || "")));
+  const seekingAlphaAiRecords = seekingAlphaAiRecordsForTicker(options.seekingAlphaAiRecords || [], ticker);
+  const seekingAlphaAiSummary = summarizeSeekingAlphaAiForTicker(options.seekingAlphaAiRecords || [], ticker, { now: options.asOf });
   const alerts = (analysis.alerts || [])
     .filter((alert) => normalizeTickerSymbol(alert.ticker) === ticker || RegExp(`\\b${escapeRegExp(ticker)}\\b`, "i").test(`${alert.title || ""} ${alert.detail || ""}`))
     .slice(0, 10);
@@ -3839,7 +3843,7 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
   const accounts = aggregateTickerAccounts(holdings);
   const firstHolding = holdings[0] || {};
   const historicalPrices = normalizeHistoricalPrices(quote?.historicalPrices || firstHolding.marketDataHistoricalPrices || []);
-  const tracked = Boolean(holdings.length || quote || tickerSignal || watchlistIdea || journalEntries.length || redditSummary || xSummary || politicianTrades.length || alerts.length || alphaSignals.length || marketEvents.length || calendarEvents.length);
+  const tracked = Boolean(holdings.length || quote || tickerSignal || watchlistIdea || journalEntries.length || redditSummary || xSummary || politicianTrades.length || seekingAlphaAiRecords.length || alerts.length || alphaSignals.length || marketEvents.length || calendarEvents.length);
   const samplePosition = Boolean(holdings.length && !realPortfolio);
   const owned = Boolean(holdings.length && realPortfolio);
   const savedWatchlistIdea = isSavedWatchlistIdea(watchlistIdea);
@@ -3873,6 +3877,8 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     xSummary,
     xUpdates,
     politicianTrades,
+    seekingAlphaAiRecords,
+    seekingAlphaAiSummary,
     alerts,
     alphaSignals,
     marketEvents,
@@ -4019,6 +4025,7 @@ function renderTickerDetailPage(analysis = {}, options = {}) {
       </div>
     </div>
     ${renderTickerResearchOverview(model)}
+    ${renderTickerSeekingAlphaAiContext(model)}
     <div class="grid-two">
       ${renderTickerPositionExposure(model)}
       ${renderTickerPriceTrend(model)}
@@ -4089,7 +4096,8 @@ function renderTickerRecentExternalUpdates(model) {
     model.xUpdates.length ? `${model.xUpdates.length} X/social` : "X: Not configured or no rows",
     model.redditMentions.length ? `${model.redditMentions.length} Reddit/social` : "Reddit: Not configured or no rows",
     model.alphaSignals.length || model.marketEvents.length ? `${model.alphaSignals.length + model.marketEvents.length} news/read-through` : "News/read-throughs: none linked",
-    model.politicianTrades.length ? `${model.politicianTrades.length} federal disclosure` : "Federal disclosures: none linked"
+    model.politicianTrades.length ? `${model.politicianTrades.length} federal disclosure` : "Federal disclosures: none linked",
+    model.seekingAlphaAiRecords.length ? `${model.seekingAlphaAiRecords.length} SA AI import` : "SA AI: none linked"
   ].join(" · ");
   return `
     <section class="panel">
@@ -4201,7 +4209,18 @@ function buildTickerRecentExternalUpdateRows(model = {}) {
       tone: "news"
     };
   });
-  return [...xRows, ...redditRows, ...disclosureRows, ...alphaRows, ...marketRows]
+  const seekingAlphaAiRows = (model.seekingAlphaAiRecords || []).map((record) => ({
+    kind: "Seeking Alpha AI",
+    status: `${record.sourceModeLabel || "Imported"} · ${record.freshnessStatus === "stale" ? "Stale" : "Current"}`,
+    title: record.sourceTypeLabel || "Seeking Alpha AI output",
+    detail: record.normalizedExcerpt || "Imported personal research context. Verify against primary sources before using it in a thesis review.",
+    href: "#data-sources",
+    linkLabel: "Manage import",
+    timestamp: timestampSortValue(record.importedAt || record.reportDate),
+    dateLabel: shortDateTime(record.importedAt || record.reportDate),
+    tone: record.freshnessStatus === "stale" ? "research stale" : "research"
+  }));
+  return [...xRows, ...redditRows, ...disclosureRows, ...alphaRows, ...marketRows, ...seekingAlphaAiRows]
     .sort((a, b) => b.timestamp - a.timestamp || a.kind.localeCompare(b.kind));
 }
 
@@ -4268,6 +4287,78 @@ function renderTickerResearchOverview(model) {
             </div>
           </div>
           <p>This panel does not calculate intrinsic value, owner earnings, or a buy/sell signal unless the required source data is imported or provided.</p>
+        </details>
+      </div>
+    </section>
+  `;
+}
+
+function renderTickerSeekingAlphaAiContext(model = {}) {
+  const summary = model.seekingAlphaAiSummary || {};
+  const rows = model.seekingAlphaAiRecords || [];
+  if (!rows.length) {
+    return `
+      <section class="panel">
+        <div class="panel-head">
+          <div><h2>Seeking Alpha AI Context</h2><p>Personal imported Ask Seeking Alpha or Virtual Analyst output.</p></div>
+          <span class="status-badge">Missing</span>
+        </div>
+        <div class="body-pad">
+          <div class="empty"><strong>No Seeking Alpha AI context saved for ${escapeHtml(model.ticker)}.</strong><span>Paste or import visible Seeking Alpha AI output from Data Sources. The app never stores SA passwords, cookies, or session tokens.</span></div>
+        </div>
+      </section>
+    `;
+  }
+  const latest = summary.latestRecord || rows[0] || {};
+  const badgeClass = summary.freshnessStatus === "stale" ? "sample" : "safe";
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Seeking Alpha AI Context</h2>
+          <p>Imported personal research context. Useful for thesis review, not a live rating or trading instruction.</p>
+        </div>
+        <div class="badge-row">
+          <span class="status-badge ${badgeClass}">${escapeHtml(summary.freshnessLabel || "Imported Seeking Alpha AI")}</span>
+          <span class="status-badge">${escapeHtml(`${rows.length} record${rows.length === 1 ? "" : "s"}`)}</span>
+        </div>
+      </div>
+      <div class="body-pad">
+        <div class="research-quote-grid">
+          <article class="research-summary-card">
+            <span>Latest report</span>
+            <b>${escapeHtml(latest.sourceTypeLabel || "Seeking Alpha AI output")}</b>
+            <p>${escapeHtml(summary.summary || "Imported personal report context is available.")}</p>
+            <small>${escapeHtml([latest.sourceModeLabel || "Imported", latest.reportDate ? `report ${latest.reportDate}` : "", latest.importedAt ? `imported ${latest.importedAt}` : ""].filter(Boolean).join(" · "))}</small>
+          </article>
+          <article class="research-summary-card">
+            <span>Supportive points</span>
+            <b>${escapeHtml(String(summary.bullishPoints?.length || 0))}</b>
+            <p>${escapeHtml((summary.bullishPoints || [])[0] || "No clear supportive point extracted.")}</p>
+          </article>
+          <article class="research-summary-card">
+            <span>Risk points</span>
+            <b>${escapeHtml(String(summary.bearishPoints?.length || 0))}</b>
+            <p>${escapeHtml((summary.bearishPoints || [])[0] || "No clear risk point extracted.")}</p>
+          </article>
+        </div>
+        <details class="signal-details">
+          <summary>Imported details and caveats</summary>
+          <div class="grid-two">
+            <div>
+              <h3>Support</h3>
+              ${(summary.bullishPoints || []).length ? list(summary.bullishPoints.slice(0, 6)) : "<p>No extracted support bullets.</p>"}
+              <h3>Ratings / metrics mentioned</h3>
+              ${(summary.ratingMentions || summary.financialMetrics || []).length ? list([...(summary.ratingMentions || []), ...(summary.financialMetrics || [])].slice(0, 6)) : "<p>No rating or metric mentions extracted.</p>"}
+            </div>
+            <div>
+              <h3>Risks</h3>
+              ${(summary.bearishPoints || []).length ? list(summary.bearishPoints.slice(0, 6)) : "<p>No extracted risk bullets.</p>"}
+              <h3>Caveats</h3>
+              ${[...(summary.validationWarnings || []), ...(summary.redactionWarnings || [])].length ? list([...(summary.validationWarnings || []), ...(summary.redactionWarnings || [])].slice(0, 6)) : "<p>No parser caveats recorded.</p>"}
+            </div>
+          </div>
+          <p>Seeking Alpha AI personal imports are source-labeled local context. The dashboard does not verify every claim, access your SA account, scrape pages, or store credentials.</p>
         </details>
       </div>
     </section>
@@ -5020,6 +5111,7 @@ function buildTickerDataQuality(model) {
     tickerCoverageRow("Owner earnings inputs", !ownerMissing.some((item) => /free-cash-flow|cash flow|capex|debt|interest|owner earnings/i.test(item)), ownerMissing.some((item) => /free-cash-flow|cash flow|capex|debt|interest|owner earnings/i.test(item)) ? "missing" : "present", "Buffett-style owner earnings need operating cash flow, capex, debt/cash, and multi-year fundamentals before intrinsic value work.", ownerMissing.some((item) => /free-cash-flow|cash flow|capex|debt|interest|owner earnings/i.test(item)) ? "warn" : "good"),
     tickerCoverageRow("Sector / industry", model.sector !== "Unknown" || model.industry !== "Unknown", `${model.sector} / ${model.industry}`, "Classification context used by risk and concentration views.", model.sector === "Unknown" && model.industry === "Unknown" ? "warn" : "good"),
     tickerCoverageRow("Thesis notes", Boolean(model.thesisRow), model.thesisRow ? model.thesisStatus : "missing", model.thesisRow ? "Thesis tracker has a local profile for this ticker." : "No local thesis profile is documented yet.", model.thesisRow ? "good" : "warn"),
+    tickerCoverageRow("Seeking Alpha AI context", Boolean(model.seekingAlphaAiRecords?.length), model.seekingAlphaAiRecords?.length ? `${model.seekingAlphaAiRecords.length} imported` : "missing", model.seekingAlphaAiRecords?.length ? `${model.seekingAlphaAiSummary?.freshnessLabel || "Imported Seeking Alpha AI"}; local personal research context only.` : "No personal Seeking Alpha AI output is saved for this ticker.", model.seekingAlphaAiSummary?.freshnessStatus === "stale" ? "warn" : model.seekingAlphaAiRecords?.length ? "neutral" : "warn"),
     tickerCoverageRow("Reddit mentions", Boolean(model.redditSummary || model.redditMentions.length), model.redditSummary ? `${model.redditSummary.sevenDayMentions || 0} / 7d` : "none", "Lower-trust social context; use as a monitoring input, not evidence by itself.", model.redditSummary ? "neutral" : "warn"),
     tickerCoverageRow("Politician trades", Boolean(model.politicianTrades.length), model.politicianTrades.length ? `${model.politicianTrades.length} records` : "none", "Sample, Imported, or configured public disclosure records with source attribution.", model.politicianTrades.length ? "neutral" : "warn"),
     tickerCoverageRow("Alert history", Boolean(model.alerts.length), model.alerts.length ? `${model.alerts.length} alerts` : "none", "Local alert rules connected to this ticker.", model.alerts.length ? "neutral" : "good")
@@ -6079,6 +6171,10 @@ function buildMarketEventSourceContext(event = {}, options = {}) {
     .filter((trade) => tickers.has(normalizeTickerSymbol(trade.ticker)))
     .sort((a, b) => String(b.disclosureDate || b.disclosedAt || b.transactionDate || "").localeCompare(String(a.disclosureDate || a.disclosedAt || a.transactionDate || "")))
     .slice(0, 2);
+  const matchingSeekingAlphaAi = (options.seekingAlphaAiRecords || [])
+    .filter((record) => (record.tickers || [record.ticker]).some((ticker) => tickers.has(normalizeTickerSymbol(ticker))))
+    .sort((a, b) => String(b.reportDate || b.importedAt || "").localeCompare(String(a.reportDate || a.importedAt || "")))
+    .slice(0, 2);
   const matchingSocial = (options.alphaSignals || [])
     .filter((signal) =>
       String(signal.sourceType || "").toLowerCase() === "social" &&
@@ -6137,10 +6233,27 @@ function buildMarketEventSourceContext(event = {}, options = {}) {
     });
   }
 
+  if (matchingSeekingAlphaAi.length) {
+    const staleCount = matchingSeekingAlphaAi.filter((record) => record.freshnessStatus === "stale").length;
+    badges.push({ label: `SA AI ${matchingSeekingAlphaAi.length}`, className: staleCount ? "sample" : "" });
+    rows.push({
+      label: "Seeking Alpha AI",
+      detail: matchingSeekingAlphaAi.map((record) =>
+        `${(record.tickers || [record.ticker]).map(normalizeTickerSymbol).filter(Boolean).slice(0, 3).join("/")}: ${record.sourceTypeLabel || "AI output"} · ${record.freshnessStatus === "stale" ? "Stale" : "Imported"}`
+      ).join("; ")
+    });
+  } else {
+    rows.push({
+      label: "Seeking Alpha AI",
+      detail: "No matching personal Seeking Alpha AI imports for the affected tickers."
+    });
+  }
+
   const linkedPieces = [
     matchingSocial.length ? `${matchingSocial.length} lower-trust X/social signal${matchingSocial.length === 1 ? "" : "s"}` : "",
     matchingReddit.length ? `${matchingReddit.reduce((total, row) => total + (Number(row.sevenDayMentions) || 0), 0)} Reddit mention${matchingReddit.reduce((total, row) => total + (Number(row.sevenDayMentions) || 0), 0) === 1 ? "" : "s"} / 7d` : "",
-    matchingDisclosures.length ? `${matchingDisclosures.length} federal disclosure row${matchingDisclosures.length === 1 ? "" : "s"}` : ""
+    matchingDisclosures.length ? `${matchingDisclosures.length} federal disclosure row${matchingDisclosures.length === 1 ? "" : "s"}` : "",
+    matchingSeekingAlphaAi.length ? `${matchingSeekingAlphaAi.length} Seeking Alpha AI personal import${matchingSeekingAlphaAi.length === 1 ? "" : "s"}` : ""
   ].filter(Boolean);
 
   return {

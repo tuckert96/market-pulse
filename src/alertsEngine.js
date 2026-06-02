@@ -1,5 +1,6 @@
 import { normalizeTicker } from "./portfolioSchema.js";
 import { summarizeRedditMentions } from "./redditSignals.js";
+import { buildSeekingAlphaAiTickerSummaries } from "./seekingAlphaAi.js";
 
 export const DEFAULT_ALERT_THRESHOLDS = Object.freeze({
   maxPositionWeight: 0.12,
@@ -32,6 +33,7 @@ export function buildLocalAlerts({
   tickerSignals = [],
   politicianTrades = [],
   redditMentions = [],
+  seekingAlphaAiRecords = [],
   providerReadiness = {},
   marketDataStatus = {},
   targetPlan = null,
@@ -48,6 +50,7 @@ export function buildLocalAlerts({
     ...buildTickerSignalAlerts(tickerSignals, settings, asOf, analysis),
     ...buildPoliticianTradeAlerts(analysis, politicianTrades, watchlist, settings, asOf),
     ...buildRedditAccelerationAlerts(analysis, redditMentions, watchlist, settings, asOf),
+    ...buildSeekingAlphaAiAlerts(analysis, seekingAlphaAiRecords, settings, asOf),
     ...buildDataSourceAlerts(providerReadiness, marketDataStatus, settings, asOf)
   ];
 
@@ -267,6 +270,72 @@ function buildRedditAccelerationAlerts(analysis, redditMentions, watchlist, thre
         sentiment: row.sentiment || "unknown"
       }
     }));
+}
+
+function buildSeekingAlphaAiAlerts(analysis = {}, records = [], thresholds, asOf) {
+  const ownedTickers = new Set((analysis.holdings || [])
+    .filter((holding) => Number(holding.marketValue) > 0)
+    .map((holding) => normalizeTicker(holding.ticker))
+    .filter(Boolean));
+  if (!ownedTickers.size || !records?.length) return [];
+  const holdingsByTicker = new Map((analysis.holdings || [])
+    .map((holding) => [normalizeTicker(holding.ticker), holding])
+    .filter(([ticker]) => ticker));
+  const summaries = buildSeekingAlphaAiTickerSummaries(records, [...ownedTickers], { now: asOf });
+  const rows = [];
+  summaries.forEach((summary, ticker) => {
+    if (!ownedTickers.has(ticker) || !summary.recordCount) return;
+    const holding = holdingsByTicker.get(ticker) || {};
+    const portfolioWeight = Number(holding.portfolioWeight) || 0;
+    const staleOnly = summary.staleCount === summary.recordCount;
+    const concentratedBearishContext = summary.bearishPoints.length && portfolioWeight >= 0.08;
+    if (staleOnly) {
+      rows.push(alert({
+        id: `alert:seeking-alpha-ai-stale:${ticker}`,
+        type: "seeking-alpha-ai-stale",
+        ruleId: "seeking-alpha-ai-stale-owned",
+        severity: "watch",
+        actionCategory: "Monitor",
+        title: `${ticker} Seeking Alpha AI context is stale`,
+        detail: `${summary.recordCount} saved Seeking Alpha AI personal import${summary.recordCount === 1 ? "" : "s"} for ${ticker} ${summary.recordCount === 1 ? "is" : "are"} stale. Use this as a source freshness review, not a trade command.`,
+        ticker,
+        source: "local-alert-engine",
+        score: 58,
+        createdAt: asOf,
+        sourceMode: "Imported Seeking Alpha AI",
+        metadata: {
+          sourceMode: "imported",
+          freshnessStatus: summary.freshnessStatus,
+          recordCount: summary.recordCount,
+          staleCount: summary.staleCount
+        }
+      }));
+    }
+    if (concentratedBearishContext) {
+      rows.push(alert({
+        id: `alert:seeking-alpha-ai-risk-context:${ticker}`,
+        type: "seeking-alpha-ai-risk-context",
+        ruleId: "seeking-alpha-ai-bearish-owned",
+        severity: portfolioWeight >= 0.14 ? "warning" : "watch",
+        actionCategory: "Review",
+        title: `${ticker} has imported Seeking Alpha AI risk context`,
+        detail: `${summary.bearishPoints.length} risk point${summary.bearishPoints.length === 1 ? "" : "s"} in Tucker-imported Seeking Alpha AI output while ${ticker} is ${formatPct(portfolioWeight)} of the portfolio. Review the thesis context; this is not a prediction or trade instruction.`,
+        ticker,
+        source: "local-alert-engine",
+        score: portfolioWeight >= 0.14 ? 74 : 62,
+        createdAt: asOf,
+        sourceMode: "Imported Seeking Alpha AI",
+        metadata: {
+          sourceMode: "imported",
+          freshnessStatus: summary.freshnessStatus,
+          recordCount: summary.recordCount,
+          bearishPoints: summary.bearishPoints.length,
+          portfolioWeight
+        }
+      }));
+    }
+  });
+  return rows;
 }
 
 function buildDataSourceAlerts(providerReadiness, marketDataStatus, thresholds, asOf) {

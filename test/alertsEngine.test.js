@@ -88,6 +88,71 @@ test("local alert thresholds suppress rules until values cross the configured bo
   assert.equal(overThreshold.some((alert) => alert.type === "sector-concentration"), true);
 });
 
+test("Seeking Alpha AI review alerts stay local, owned-holding scoped, and non-executory", () => {
+  const analysis = analyzePortfolio([
+    { ticker: "MU", name: "Micron", account: "Taxable", marketValue: 16000, costBasis: 10000, assetClass: "Equity", sector: "Semiconductors", sourceAsOf: asOf },
+    { ticker: "CASH", name: "Cash", account: "Taxable", marketValue: 84000, assetClass: "Cash", sector: "Cash", sourceAsOf: asOf }
+  ], { skipPortfolioThresholdAlerts: true });
+  const alerts = buildLocalAlerts({
+    analysis,
+    seekingAlphaAiRecords: [
+      {
+        ticker: "MU",
+        tickers: ["MU"],
+        sourceType: "virtual_analyst_report",
+        sourceMode: "pasted",
+        reportDate: "2026-05-20",
+        importedAt: asOf,
+        responseText: "Virtual Analyst Report for MU. Bearish: memory pricing risk. Bullish: HBM demand.",
+        extractedBearishPoints: ["memory pricing risk"],
+        extractedBullishPoints: ["HBM demand"],
+        freshnessStatus: "current",
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      },
+      {
+        ticker: "PLTR",
+        tickers: ["PLTR"],
+        sourceType: "summary_report",
+        sourceMode: "pasted",
+        reportDate: "2026-05-20",
+        importedAt: asOf,
+        responseText: "Summary Report for PLTR. Bullish: software demand.",
+        extractedBullishPoints: ["software demand"],
+        freshnessStatus: "current",
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      },
+      {
+        ticker: "MU",
+        tickers: ["MU"],
+        sourceType: "summary_report",
+        sourceMode: "imported_file",
+        reportDate: "2026-01-01",
+        importedAt: asOf,
+        responseText: "Summary Report for MU. Bearish: old pricing risk.",
+        extractedBearishPoints: ["old pricing risk"],
+        freshnessStatus: "stale",
+        validationWarnings: ["Report is stale based on the imported or detected report date."],
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      }
+    ],
+    thresholds: normalizeAlertThresholds({ maxPositionWeight: 1, maxSectorWeight: 1 }),
+    marketDataStatus: { status: "connected" },
+    asOf
+  });
+  const saAlerts = alerts.filter((alert) => alert.type.startsWith("seeking-alpha-ai"));
+
+  assert.ok(saAlerts.some((alert) => alert.type === "seeking-alpha-ai-risk-context" && alert.ticker === "MU"));
+  assert.equal(saAlerts.some((alert) => alert.ticker === "PLTR"), false);
+  assert.ok(saAlerts.every((alert) => alert.sourceMode === "Imported Seeking Alpha AI"));
+  assert.ok(saAlerts.every((alert) => alert.metadata?.sourceMode === "imported"));
+  assert.ok(saAlerts.every((alert) => ["watch", "warning"].includes(alert.severity)));
+  assert.ok(saAlerts.every((alert) => /review|source freshness|not a prediction|not a trade command|not a prediction or trade instruction/i.test(alert.detail)));
+  assert.doesNotMatch(JSON.stringify(saAlerts), /\b(email|text|push|buy now|sell now|place order|guaranteed)\b/i);
+});
+
 test("target allocation drift alerts cover overweight and underweight rows", () => {
   const analysis = analyzePortfolio([
     { ticker: "MU", name: "Micron", account: "Taxable", marketValue: 1000, assetClass: "Equity", sector: "Semiconductors", sourceAsOf: asOf },

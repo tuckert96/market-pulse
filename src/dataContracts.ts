@@ -373,6 +373,18 @@ export interface TickerSignal {
   institutionalQuantSourceFreshness?: string;
   institutionalQuantModelGovernance?: Record<string, unknown>;
   institutionalQuantCaveat?: string;
+  seekingAlphaAiEvidenceCount?: number;
+  seekingAlphaAiFreshnessStatus?: SeekingAlphaAiFreshnessStatus | "missing";
+  seekingAlphaAiSourceModes?: string[];
+  seekingAlphaAiSourceTypes?: string[];
+  seekingAlphaAiBullishPoints?: string[];
+  seekingAlphaAiBearishPoints?: string[];
+  seekingAlphaAiRatingContext?: string[];
+  seekingAlphaAiReviewPriorityScore?: number;
+  seekingAlphaAiSupportScore?: number;
+  seekingAlphaAiRiskScore?: number;
+  seekingAlphaAiEvidenceLabel?: string;
+  seekingAlphaAiWarnings?: string[];
   portfolioOwnershipFlag?: boolean;
   watchlistFlag?: boolean;
   confluenceScore?: number;

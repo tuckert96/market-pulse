@@ -1,6 +1,6 @@
 # Project Plan
 
-Last updated: 2026-05-28
+Last updated: 2026-06-02
 Lead: Codie
 Human owner: Tucker
 Team name: Dream Team
@@ -74,6 +74,7 @@ Active priority:
 - Keep the Portfolio Health Score compact and source-aware: it should summarize import trust, concentration, thesis coverage, target discipline, alert load, and market-data freshness, then route Tucker to the next review screen without becoming a new isolated data island or trade recommendation.
 - P1 Market Drivers issue #7 is now the top implementation track: explain broader market and AI/tech moves separately using market-data proxies, source-labeled X/Reddit/news/event context, federal disclosure context, and active portfolio exposure. It must show missing data instead of invented causality and link Tucker to Daily Brief, Risk, Market Intelligence, Data Sources, or ticker pages for the next inspection.
 - GitHub ticket sweep checkpoint: issue #1 is covered by PR #8, issue #6 by PR #9, issues #2/#5 by PR #10, and issues #3/#4 now have a backend-only OpenAI explanation route plus deterministic thesis/risk summary work ready for PR. Issue #7 has existing implementation and passing focused tests; no extra code was required.
+- Seeking Alpha AI personal-import integration checkpoint: the next three sprint slice moves Tucker-imported SA AI context beyond Data Sources into ticker pages, Daily Command Brief, Market Intelligence source context, Alpha Engine recommendation rows, local alerts, ticker-signal explanations, docs, smoke coverage, and regression tests. It remains local/imported context only: no SA credentials, no cookies, no scraping, no live/predictive claims, and no direct change to the ticker confluence formula.
 
 Prior Week 5 stability context retained below for continuity:
 
@@ -1004,5 +1005,6 @@ Expected intentional result: `.env.example` only.
 - current transparent prediction model checkpoint - stock prediction v1 adds a bounded 20-trading-day model-implied outlook sidecar with transparent factors, confidence, source labels, ticker-page display, Alpha context, docs, smoke coverage, and no trade-command framing; use `git log` for the exact hash
 - current Market Drivers checkpoint - P1 issue #7 adds broad-market and AI/tech movement explanation scaffolding, source-labeled driver rows, Daily Brief/Overview integration, market-driver proxy quote selection, docs, smoke coverage, and no fake-causality/no-trade-command guardrails; use `git log` for the exact hash
 - current Seeking Alpha AI personal import checkpoint - P0 issues #75/#76/#77 add a redacted local source contract, paste/JSON/text/saved-HTML preview-before-save workflow, deterministic Ask SA / Virtual Analyst parsing, local persistence, docs, and tests while refusing credentials, cookies, session tokens, hidden browser state, and scraping; use `git log` for the exact hash
+- current Seeking Alpha AI product integration checkpoint - Tucker-imported SA AI context now appears on ticker pages, Daily Brief, Market Intelligence source context, Alpha Engine recommendations, local alerts, ticker-signal context, docs, smoke coverage, and tests without storing credentials or changing the core confluence formula; use `git log` for the exact hash
 
 Next checkpoint should keep the release-candidate posture: Plaid sandbox/development dry-run with Tucker's approved Plaid app, browser-level smoke tests, and an encrypted local token-storage plan before any additional brokerage/provider expansion.

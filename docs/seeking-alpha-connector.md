@@ -179,6 +179,12 @@ The dashboard now turns imported Premium-style records into:
 - Positive revisions count.
 - Valuation risk count.
 
-Next step: add per-ticker detail drawers showing factor grades, rating disagreements, stale-data warnings, and "why this pick" reasoning.
+Seeking Alpha AI personal imports now appear as labeled decision-support context in ticker pages, Market Intelligence source context, the Daily Command Brief, local alert review rows, and Alpha Engine recommendation rows.
 
-Seeking Alpha AI personal imports are not yet included in Alpha Engine ranking. Future work can use these records as a labeled context source after the score model explains freshness, source mode, and parser confidence.
+Guardrails:
+
+- Imported Seeking Alpha AI text is personal local context, not a live Seeking Alpha feed.
+- It can create modest `watch`, `review position`, or `stale data review` rows, but it does not create trade commands.
+- It does not directly change the combined ticker confluence score in the current pass.
+- It carries freshness, source mode, parser warnings, and "personal import only" caveats.
+- Stale or low-confidence extracted text is visible and penalized instead of hidden.

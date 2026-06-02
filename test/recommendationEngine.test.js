@@ -112,6 +112,66 @@ test("alpha recommendations generate ranked decision-support rows from existing 
   assert.ok(recommendations.some((row) => (row.supportingSignals || []).some((text) => /Institutional Quant Lens \d+\/100/.test(text))));
 });
 
+test("Seeking Alpha AI personal imports create capped Alpha Engine context rows", () => {
+  const fixture = recommendationFixture();
+  const recommendations = buildAlphaRecommendations({
+    ...fixture,
+    seekingAlphaAiRecords: [
+      {
+        ticker: "MU",
+        tickers: ["MU"],
+        sourceType: "virtual_analyst_report",
+        sourceMode: "pasted",
+        sourceTypeLabel: "Virtual Analyst Report",
+        sourceModeLabel: "Pasted",
+        reportDate: "2026-05-22",
+        importedAt: "2026-05-23",
+        responseText: "Virtual Analyst Report for MU. Bullish: HBM demand. Bearish: memory pricing risk. Quant Rating: Buy.",
+        extractedBullishPoints: ["HBM demand"],
+        extractedBearishPoints: ["memory pricing risk"],
+        extractedRatings: { quantRating: "Buy" },
+        freshnessStatus: "current",
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      },
+      {
+        ticker: "AMD",
+        tickers: ["AMD"],
+        sourceType: "summary_report",
+        sourceMode: "imported_file",
+        sourceTypeLabel: "AI Summary Report",
+        sourceModeLabel: "Imported",
+        reportDate: "2026-01-01",
+        importedAt: "2026-05-23",
+        responseText: "AI Summary Report for AMD. Bullish: AI accelerator demand. Bearish: margin pressure.",
+        extractedBullishPoints: ["AI accelerator demand"],
+        extractedBearishPoints: ["margin pressure"],
+        freshnessStatus: "stale",
+        validationWarnings: ["Report is stale based on the imported or detected report date."],
+        liveProviderCalls: false,
+        credentialMaterialStored: false
+      }
+    ],
+    marketDataStatus: fixture.marketDataSnapshot.status,
+    uiState: "IMPORTED_CLEAN",
+    asOf
+  });
+  const mu = recommendations.find((row) => row.id === "recommendation:seeking-alpha-ai:MU");
+  const amd = recommendations.find((row) => row.id === "recommendation:seeking-alpha-ai:AMD");
+
+  assert.ok(mu);
+  assert.ok(amd);
+  assert.equal(mu.recommendationType, "review position");
+  assert.equal(amd.recommendationType, "stale data review");
+  assert.equal(mu.confidenceScore <= 0.58, true);
+  assert.match(mu.sourceFreshness, /imported Seeking Alpha AI/i);
+  assert.match(amd.sourceFreshness, /stale Seeking Alpha AI/i);
+  assert.ok(mu.supportingSignals.some((text) => /Personal|Support|Rating/i.test(text)));
+  assert.ok(mu.missingWeakSignals.some((text) => /Personal import only/i.test(text)));
+  assert.ok(amd.missingWeakSignals.some((text) => /stale/i.test(text)));
+  assert.doesNotMatch(JSON.stringify([mu, amd]), /\b(buy now|sell now|place order|guaranteed|predicts)\b/i);
+});
+
 test("owned, watchlist, risk, opportunity, data issue, recent, and high-confidence filters work", () => {
   const fixture = recommendationFixture();
   const recommendations = buildAlphaRecommendations({
