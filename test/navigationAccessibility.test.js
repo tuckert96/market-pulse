@@ -170,7 +170,7 @@ test("mobile navigation keeps secondary research routes reachable", () => {
   assert.doesNotMatch(indexHtml, /aside \.nav-more,\s*\.sidebar-card/s);
   assert.match(indexHtml, /@media \(max-width: 720px\)[\s\S]*aside \.nav-more\s*\{\s*display: contents;/);
   assert.match(indexHtml, /@media \(max-width: 720px\)[\s\S]*aside \.nav-more summary\s*\{\s*display: none;/);
-  for (const route of ["#calendar", "#what-if", "#targets", "#thesis", "#watchlist", "#journal", "#market-drivers", "#market-intelligence", "#signal-review", "#settings"]) {
+  for (const route of ["#calendar", "#what-if", "#targets", "#thesis", "#research-coverage", "#watchlist", "#journal", "#market-drivers", "#market-intelligence", "#signal-review", "#settings"]) {
     assert.match(indexHtml, new RegExp(`<a href="${route}">`), `${route} should remain present in mobile nav source`);
   }
 });

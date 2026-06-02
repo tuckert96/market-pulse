@@ -139,6 +139,8 @@ Important: sample calendar dates are workflow examples. The UI must label them a
 
 Local personal import row for user-provided Seeking Alpha AI output. These records support Ask Seeking Alpha, Virtual Analyst Reports, AI Summary Reports, and future manually provided Earnings Call Insights.
 
+These records are not a direct ticker confluence-score ingredient. They may be used for source-labeled context, Research Coverage freshness/change queues, capped confidence/context, stale-data review, local alerts, and Alpha Engine explanation rows.
+
 Required fields:
 
 - `id`

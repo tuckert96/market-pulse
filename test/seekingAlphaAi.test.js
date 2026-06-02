@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildSeekingAlphaAiImportPreview,
+  buildSeekingAlphaAiDeltaSummary,
+  compareSeekingAlphaAiRecords,
   mergeSeekingAlphaAiRecords,
   normalizeSeekingAlphaAiRecord,
   redactSeekingAlphaAiText,
@@ -172,4 +174,29 @@ test("Seeking Alpha AI ticker summary exposes bounded downstream context without
   assert.equal(current.liveProviderCalls, false);
   assert.equal(current.credentialMaterialStored, false);
   assert.doesNotMatch(JSON.stringify(summary), /cookie|authorization|access_token|client_secret|password/i);
+});
+
+test("Seeking Alpha AI delta detects changed support, risk, and rating mentions", () => {
+  const prior = normalizeSeekingAlphaAiRecord({
+    ticker: "MU",
+    sourceType: "virtual_analyst_report",
+    reportDate: "2026-05-01",
+    responseText: "Virtual Analyst Report for MU. Bullish: DRAM recovery. Bearish: customer inventory risk. Quant Rating: Hold."
+  }, { now: NOW }).record;
+  const latest = normalizeSeekingAlphaAiRecord({
+    ticker: "MU",
+    sourceType: "virtual_analyst_report",
+    reportDate: "2026-05-30",
+    responseText: "Virtual Analyst Report for MU. Bullish: HBM demand. Bearish: memory pricing risk. Quant Rating: Buy. Growth Grade: A-."
+  }, { now: NOW }).record;
+  const rawDelta = compareSeekingAlphaAiRecords(prior, latest);
+  const summary = buildSeekingAlphaAiDeltaSummary([prior, latest], "MU", { now: NOW });
+
+  assert.ok(rawDelta.addedSupport.some((item) => /HBM/i.test(item)));
+  assert.ok(rawDelta.removedSupport.some((item) => /DRAM/i.test(item)));
+  assert.ok(rawDelta.addedRisks.some((item) => /pricing/i.test(item)));
+  assert.ok(rawDelta.ratingChanges.some((change) => change.label === "Quant Rating" && change.direction === "stronger"));
+  assert.equal(summary.changeStatus, "mixed-context");
+  assert.match(summary.summary, /changed since/i);
+  assert.doesNotMatch(JSON.stringify(summary), /\b(buy now|sell now|guaranteed|predicts)\b/i);
 });

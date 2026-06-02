@@ -65,6 +65,7 @@ Each ticker signal includes:
 - `institutionalQuantPeerSummary`: peer-relative rank context within comparable tracked names
 - `institutionalQuantScoreHistoryLabel`: local change context since the prior score in the same portfolio mode
 - `seekingAlphaAiEvidenceLabel`: Tucker-imported Seeking Alpha AI personal context; displayed for review but not merged into the confluence formula in this pass
+- Research Coverage uses the same imported context to flag missing, stale, warning, changed, conflicting, and unlinked research rows. That queue can affect review visibility and explanation copy, but it does not directly change the confluence formula or the `combinedScore` math.
 
 See `docs/quantitative-engine.md` for the stock-quality model. The ticker confluence score remains a review-priority score; the Institutional Quant Lens is a separate “good stock setup” lens.
 

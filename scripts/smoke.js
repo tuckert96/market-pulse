@@ -23,6 +23,7 @@ import { buildRedditProviderConfig, createRedditProvider, demoRedditMentions, ex
 import { buildAlphaRecommendations, filterAlphaRecommendations } from "../src/recommendationEngine.js";
 import { buildInstitutionalQuantLens } from "../src/scoringModel.js";
 import { buildSeekingAlphaAiImportPreview } from "../src/seekingAlphaAi.js";
+import { buildSeekingAlphaAiCoverageQueue } from "../src/seekingAlphaAiCoverage.js";
 import { normalizeSeekingAlphaRecord } from "../src/seekingAlphaConnector.js";
 import { buildTargetAllocationPlan, defaultTargetAllocations, normalizeTargetAllocations } from "../src/targetAllocations.js";
 import { buildTechnicalAnalysisSnapshot } from "../src/technicalAnalysis.js";
@@ -498,12 +499,40 @@ const seekingAlphaAiSecretPreview = buildSeekingAlphaAiImportPreview("Virtual An
   now: "2026-06-02T12:00:00.000Z",
   knownTickers: ["MU"]
 });
+const smokeSeekingAlphaAiCoverageQueue = buildSeekingAlphaAiCoverageQueue({
+  holdings: analysis.holdings,
+  watchlistIdeas: watchlistIdeaRows,
+  tickerSignals,
+  seekingAlphaAiRecords: [
+    {
+      ...smokeSeekingAlphaAiRecords[0],
+      reportDate: "2026-05-22",
+      importedAt: "2026-05-23T12:00:00.000Z",
+      extractedBullishPoints: ["MU HBM demand"],
+      extractedBearishPoints: ["Memory pricing risk"],
+      extractedRatings: { quantRating: "Buy" }
+    },
+    {
+      ...smokeSeekingAlphaAiRecords[0],
+      reportDate: "2026-05-10",
+      importedAt: "2026-05-10T12:00:00.000Z",
+      responseText: "Virtual Analyst Report for MU. Bullish: legacy server demand. Bearish: capex digestion. Quant Rating: Hold.",
+      normalizedExcerpt: "Bullish: legacy server demand. Bearish: capex digestion.",
+      extractedBullishPoints: ["Legacy server demand"],
+      extractedBearishPoints: ["Capex digestion"],
+      extractedRatings: { quantRating: "Hold" }
+    }
+  ],
+  uiState: "IMPORTED_CLEAN",
+  asOf: "2026-05-23T12:00:00-04:00"
+});
 
 assert(existsSync("index.html"), "index.html should exist");
 assert(existsSync("src/app.js"), "src/app.js should exist");
 assert(existsSync("src/fidelityConnector.js"), "Fidelity connector module should exist");
 assert(existsSync("src/seekingAlphaConnector.js"), "Seeking Alpha connector module should exist");
 assert(existsSync("src/seekingAlphaAi.js"), "Seeking Alpha AI personal import module should exist");
+assert(existsSync("src/seekingAlphaAiCoverage.js"), "Seeking Alpha AI research coverage module should exist");
 assert(existsSync("src/dataContracts.ts"), "TypeScript local data contracts should exist");
 assert(existsSync("src/localDataContracts.js"), "runtime local data contract validator should exist");
 assert(existsSync("src/politicianTrades.js"), "politician trade ingestion skeleton should exist");
@@ -547,6 +576,8 @@ assert(dataContractsTs.includes("export interface SeekingAlphaAiRecord"), "dataC
 assert(localDataContractsJs.includes("seekingAlphaAiRecords"), "runtime local data contract should validate Seeking Alpha AI records");
 assert(readFileSync("docs/seeking-alpha-connector.md", "utf8").includes("Seeking Alpha AI Personal Import"), "Seeking Alpha docs should describe AI personal import workflow");
 assert(readFileSync("docs/seeking-alpha-connector.md", "utf8").includes("rejects content that appears to include cookies"), "Seeking Alpha docs should document credential-content rejection");
+assert(readFileSync("docs/seeking-alpha-connector.md", "utf8").includes("Research Coverage"), "Seeking Alpha docs should describe the research coverage queue");
+assert(readFileSync("docs/ticker-signal-scoring.md", "utf8").includes("does not directly change the confluence formula"), "ticker scoring docs should keep Seeking Alpha AI coverage out of direct confluence scoring");
 assert(dataContractsTs.includes("confluenceScore?: number"), "TickerSignal contract should include confluence score");
 assert(dataContractsTs.includes("redditMentionScore?: number"), "TickerSignal contract should include Reddit score");
 assert(dataContractsTs.includes("relativeStrengthScore?: number"), "TickerSignal contract should include relative strength score");
@@ -884,6 +915,12 @@ assert(appJs.includes("decisionJournal: state.decisionJournal"), "dashboard JSON
 assert(appJs.includes("normalizeJournalEntries(payload.decisionJournal)"), "dashboard JSON import should normalize Decision Journal entries");
 assert(portfolioViewJs.includes("renderDecisionJournal"), "global Decision Journal screen should render journal entries");
 assert(portfolioViewJs.includes("renderTickerJournalHistory"), "ticker detail pages should render recent Decision Journal entries");
+assert(portfolioViewJs.includes("renderSeekingAlphaAiCoverage"), "Portfolio view should render the Seeking Alpha AI research coverage queue");
+assert(portfolioViewJs.includes("Change since prior import") && portfolioViewJs.includes("Source alignment"), "ticker pages should show Seeking Alpha AI delta and source-alignment context");
+assert(smokeSeekingAlphaAiCoverageQueue.summary.ownedCount >= 1, "Seeking Alpha AI research coverage queue should include owned tickers");
+assert(smokeSeekingAlphaAiCoverageQueue.rows.some((row) => row.ticker === "MU" && row.coverageStatus !== "missing" && row.changeStatus !== "insufficient-history"), "Research Coverage should detect MU imported context and change history");
+assert(smokeSeekingAlphaAiCoverageQueue.rows.some((row) => row.relationshipStatus === "owned" && row.coverageStatus === "missing"), "Research Coverage should surface owned tickers missing imported context");
+assert(!/\b(buy now|sell now|place trade|guaranteed|predicts returns)\b/i.test(JSON.stringify(smokeSeekingAlphaAiCoverageQueue)), "Research Coverage output should avoid trade commands and predictive claims");
 assert(portfolioViewJs.includes("renderTickerMovementExplainer"), "ticker detail pages should render a movement explainer section");
 assert(portfolioViewJs.includes("Why Is This Moving?"), "ticker detail page should label the movement explainer plainly");
 assert(movementExplainerJs.includes("does not infer news causation"), "movement explainer should avoid hallucinated news causation");
@@ -899,11 +936,15 @@ assert(indexHtml.includes("not brokerage execution records") && portfolioViewJs.
 assert(indexHtml.includes('id="daily"'), "index.html should include Daily Brief section");
 assert(indexHtml.includes('id="imports"'), "index.html should include Imports section");
 assert(indexHtml.includes('id="alpha"'), "index.html should include Alpha Engine section");
+assert(indexHtml.includes('id="research-coverage"'), "index.html should include Research Coverage section");
+assert(indexHtml.includes('id="researchCoveragePanel"'), "Research Coverage route should expose the queue panel");
+assert(indexHtml.includes('id="researchCoverageFilter"'), "Research Coverage route should include coverage filters");
 assert(indexHtml.includes('id="market-intelligence"'), "index.html should include Market Intelligence section anchor");
 assert(indexHtml.includes('href="#thesis"'), "sidebar should include Thesis navigation");
 assert(indexHtml.includes('href="#watchlist"'), "sidebar should include Watchlist navigation");
 assert(indexHtml.includes('href="#risk"'), "sidebar should include Risk navigation");
 assert(indexHtml.includes('href="#market-intelligence"'), "sidebar should include Market Intelligence navigation");
+assert(indexHtml.includes('href="#research-coverage"'), "sidebar should include Research Coverage navigation");
 assert(indexHtml.includes('href="#signal-review"'), "sidebar should include Signal Review navigation");
 assert(indexHtml.includes('href="#daily"'), "sidebar should include Daily Brief navigation");
 assert(indexHtml.includes('href="#data-sources"'), "sidebar should include Data Sources navigation");
@@ -921,10 +962,13 @@ assert(indexHtml.includes('data-screen="ticker"'), "index.html should define a f
 assert(indexHtml.includes('id="tickerDetailPanel"'), "Ticker route should expose a detail panel");
 assert(indexHtml.includes('data-screen="alpha"'), "index.html should define a focused Alpha Engine screen");
 assert(indexHtml.includes('data-screen="market-intelligence"'), "index.html should define a focused Market Intelligence screen");
+assert(indexHtml.includes('data-screen="research-coverage"'), "index.html should define a focused Research Coverage screen");
 assert(indexHtml.includes('data-screen="signal-review"'), "index.html should define a focused Signal Review screen");
 assert(indexHtml.includes('data-screen="data-sources"'), "index.html should define a focused Data Sources screen");
 assert(indexHtml.includes('data-screen="settings"'), "index.html should define a focused Settings screen");
 assert(routerJs.includes('"alpha-engine": "alpha"'), "router should support the Alpha Engine route alias from dashboard docs");
+assert(routerJs.includes('"research-coverage"'), "router should support the Research Coverage route");
+assert(routerJs.includes('"research-queue": "research-coverage"'), "router should support Research Coverage aliases");
 assert(routerJs.includes('replace(/^\\/+/, "")'), "router should normalize slash-style local routes into focused hash screens");
 assert(indexHtml.includes("nav-more"), "secondary research/planning tools should be grouped instead of competing with the main nav");
 assert(indexHtml.includes('<details class="nav-more" open>'), "secondary research/planning tools should stay reachable on mobile");

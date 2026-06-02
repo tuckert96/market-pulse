@@ -71,6 +71,8 @@ Safety behavior:
 - Softer identifiers such as emails, auth query parameters, long opaque tokens, and account-like identifiers are redacted.
 - Stored text is capped and source-labeled as local personal import data.
 - Imported AI text is not treated as verified fact or a trade recommendation. It is decision-support context only.
+- Research Coverage compares current and prior local imports to flag missing, stale, changed, warning, conflicting, and unlinked research context.
+- Safe refresh prompts are copy-ready text Tucker can use manually inside his own Seeking Alpha account; the app still does not automate browser access.
 
 The first version is intentionally manual. It does not store a Seeking Alpha username/password, browser cookies, hidden page state, or session tokens, and it does not perform unattended scraping.
 
@@ -179,12 +181,20 @@ The dashboard now turns imported Premium-style records into:
 - Positive revisions count.
 - Valuation risk count.
 
-Seeking Alpha AI personal imports now appear as labeled decision-support context in ticker pages, Market Intelligence source context, the Daily Command Brief, local alert review rows, and Alpha Engine recommendation rows.
+Seeking Alpha AI personal imports now appear as labeled decision-support context in:
+
+- Ticker pages: imported report context, prior-import changes, source alignment, and caveats.
+- Research Coverage: missing/stale/warning/changed/conflicting/unlinked research queue with safe refresh prompts.
+- Market Intelligence: source context attached to matching event/read-through tickers.
+- Daily Command Brief: at most a few high-signal imported-context items.
+- Local alerts and Alpha Engine: capped review/stale-data context rows.
+- Data Sources: preview-before-save import, diagnostics, saved-record counts, and stale counts.
 
 Guardrails:
 
 - Imported Seeking Alpha AI text is personal local context, not a live Seeking Alpha feed.
 - It can create modest `watch`, `review position`, or `stale data review` rows, but it does not create trade commands.
 - It does not directly change the combined ticker confluence score in the current pass.
+- It may affect labeled context, capped confidence, recommendation rows, stale-data review, and Research Coverage priority.
 - It carries freshness, source mode, parser warnings, and "personal import only" caveats.
 - Stale or low-confidence extracted text is visible and penalized instead of hidden.

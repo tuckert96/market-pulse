@@ -6,7 +6,8 @@ import { buildTickerMovementExplainer } from "./movementExplainer.js";
 import { normalizeTicker } from "./portfolioSchema.js";
 import { countHoldingRowsNeedingReview, isRealPortfolioUiState } from "./portfolioState.js";
 import { summarizeRedditMentions } from "./redditSignals.js";
-import { seekingAlphaAiRecordsForTicker, summarizeSeekingAlphaAiForTicker } from "./seekingAlphaAi.js";
+import { buildSeekingAlphaAiDeltaSummary, seekingAlphaAiRecordsForTicker, summarizeSeekingAlphaAiForTicker } from "./seekingAlphaAi.js";
+import { buildSeekingAlphaAiSourceAlignment, filterSeekingAlphaAiCoverageRows } from "./seekingAlphaAiCoverage.js";
 import { buildTechnicalAnalysisSnapshot } from "./technicalAnalysis.js";
 import { buildThesisRiskSummary } from "./thesisTracker.js";
 import { compareThesisSnapshotToProfile, thesisSnapshotsForTicker } from "./thesisSnapshots.js";
@@ -52,6 +53,7 @@ export function renderPortfolioCommandCenter(analysis, options = {}) {
   renderRebalancePlan(options.targetPlan || options.rebalancePlan, options.uiState);
   renderSleeves(options.sleeves || [], options.uiState);
   renderThesisTracker(options.thesisRows || [], options.thesisSummary, options.thesisSnapshots || []);
+  renderSeekingAlphaAiCoverage(options.seekingAlphaAiCoverage, options.researchCoverageFilter || "all", options.uiState);
   renderWatchlistIdeas(options.watchlistIdeaRows || [], options.watchlistIdeaSummary || {}, options.watchlistFilters || {});
   renderDecisionJournal(options.journalRows || [], options.journalSummary || {}, options.journalFilters || {});
   renderCalendarEvents(options.calendarEvents || [], options.calendarSummary || {}, options.calendarFilters || {}, options.eventCalendarImportReport);
@@ -2935,6 +2937,103 @@ function renderThesisSnapshotCard(snapshot = {}, currentRow = null) {
   `;
 }
 
+function renderSeekingAlphaAiCoverage(coverage = {}, activeFilter = "all", uiState = "SAMPLE_MODE") {
+  const target = byId("researchCoveragePanel");
+  if (!target) return;
+  const summary = coverage?.summary || {};
+  const allRows = coverage?.rows || [];
+  const rows = filterSeekingAlphaAiCoverageRows(allRows, activeFilter);
+  if (!isImportedState(uiState) && !allRows.length) {
+    target.innerHTML = `
+      <div class="empty">
+        <strong>No research coverage queue yet.</strong>
+        <span>Import holdings or save Seeking Alpha AI personal output to see coverage gaps. Sample data is not treated as Tucker's real research queue.</span>
+      </div>
+    `;
+    return;
+  }
+  target.innerHTML = `
+    <div class="risk-grid">
+      <div class="risk-stat"><span>Owned covered</span><b>${escapeHtml(summary.ownedCoveredCount || 0)}/${escapeHtml(summary.ownedCount || 0)}</b></div>
+      <div class="risk-stat"><span>Owned missing</span><b>${escapeHtml(summary.ownedMissingCount || 0)}</b></div>
+      <div class="risk-stat"><span>Stale reports</span><b>${escapeHtml(summary.staleCount || 0)}</b></div>
+      <div class="risk-stat"><span>Warnings</span><b>${escapeHtml(summary.warningCount || 0)}</b></div>
+      <div class="risk-stat"><span>Changed</span><b>${escapeHtml(summary.changedCount || 0)}</b></div>
+      <div class="risk-stat"><span>Conflicts</span><b>${escapeHtml(summary.conflictingCount || 0)}</b></div>
+    </div>
+    <p class="section-note">Research Coverage ranks local Seeking Alpha AI personal imports by freshness, parser warnings, change since prior import, and agreement with other local signals. It does not connect to Seeking Alpha, scrape pages, or issue trade commands.</p>
+    <div class="thesis-list research-coverage-list">
+      ${rows.length ? rows.map(renderSeekingAlphaAiCoverageRow).join("") : `<div class="empty"><strong>No rows match ${escapeHtml(researchCoverageFilterLabel(activeFilter))}.</strong><span>Try All tickers, Missing coverage, Stale, or Changed since prior import.</span></div>`}
+    </div>
+  `;
+}
+
+function renderSeekingAlphaAiCoverageRow(row = {}) {
+  return `
+    <article class="thesis-card research-coverage-card ${escapeHtml(researchCoverageTone(row))}">
+      <div class="thesis-card-head">
+        <div class="badge-row">
+          <span class="status-badge ${escapeHtml(researchCoverageBadgeClass(row.coverageStatus))}">${escapeHtml(row.coverageLabel)}</span>
+          <span class="status-badge">${escapeHtml(row.relationshipLabel)}</span>
+          <span class="status-badge ${escapeHtml(row.alignmentStatus === "conflicting" ? "sample" : row.alignmentStatus === "aligned-risk" ? "demo" : "")}">${escapeHtml(row.alignment?.alignmentLabel || "Alignment pending")}</span>
+          <span class="status-badge">${escapeHtml(row.changeLabel || "No change")}</span>
+        </div>
+        <b>${renderTickerLink(row.ticker)}</b>
+        <small>${row.marketValue ? `${formatCurrency(row.marketValue)} · ${formatPct(row.portfolioWeight)}` : escapeHtml(row.relationshipLabel)} · priority ${escapeHtml(row.priorityScore || 0)}/100</small>
+      </div>
+      <p>${escapeHtml(row.reason)}</p>
+      <div class="thesis-card-grid">
+        <div><b>Latest report</b><span>${escapeHtml(row.latestReportType || "No report")}${row.latestDate ? ` · ${escapeHtml(row.latestDate)}` : ""}${Number.isFinite(row.ageDays) ? ` · ${escapeHtml(row.ageDays)}d old` : ""}</span></div>
+        <div><b>Extracted context</b><span>${escapeHtml(row.bullishCount || 0)} support · ${escapeHtml(row.bearishCount || 0)} risk · ${escapeHtml(row.warningCount || 0)} warnings</span></div>
+        <div><b>Change since prior import</b><span>${escapeHtml(row.delta?.summary || "Needs another import to compare.")}</span></div>
+        <div><b>Source alignment</b><span>${escapeHtml(row.alignment?.summary || "Not enough sources to compare.")}</span></div>
+      </div>
+      <details class="signal-details">
+        <summary>Safe refresh prompt and next steps</summary>
+        <p><b>Copy-ready prompt:</b> ${escapeHtml(row.refreshPrompt)}</p>
+        ${row.alignment?.agreementPoints?.length ? `<h3>Agreement</h3>${list(row.alignment.agreementPoints.slice(0, 4))}` : ""}
+        ${row.alignment?.disagreementPoints?.length ? `<h3>Disagreement</h3>${list(row.alignment.disagreementPoints.slice(0, 4))}` : ""}
+        ${row.delta?.ratingChanges?.length ? `<h3>Rating mention changes</h3>${list(row.delta.ratingChanges.slice(0, 4).map((change) => change.summary))}` : ""}
+        ${row.delta?.addedRisks?.length ? `<h3>New risk points</h3>${list(row.delta.addedRisks.slice(0, 4))}` : ""}
+        <p>Use your own Seeking Alpha account manually, then paste only visible report text into Data Sources. Never paste cookies, session tokens, passwords, or hidden browser data.</p>
+      </details>
+      <div class="connector-actions compact-actions">
+        <a class="button-link compact-link" href="${escapeHtml(row.href || tickerDetailHash(row.ticker))}">Open ticker</a>
+        <a class="button-link compact-link" href="#data-sources">Import context</a>
+        <a class="button-link compact-link" href="#alpha">Open Alpha Engine</a>
+      </div>
+    </article>
+  `;
+}
+
+function researchCoverageFilterLabel(filter = "all") {
+  return ({
+    all: "All tickers",
+    owned: "Owned",
+    watchlist: "Watchlist",
+    missing: "Missing coverage",
+    stale: "Stale",
+    "risk-context": "Risk context",
+    "parser-warnings": "Parser warnings",
+    changed: "Changed since prior import",
+    conflicting: "Conflicting sources",
+    unlinked: "Unlinked imports"
+  })[filter] || "All tickers";
+}
+
+function researchCoverageBadgeClass(status = "") {
+  if (status === "imported") return "safe";
+  if (status === "stale" || status === "warning") return "sample";
+  return "";
+}
+
+function researchCoverageTone(row = {}) {
+  if (row.alignmentStatus === "conflicting" || row.coverageStatus === "stale") return "warning";
+  if (row.coverageStatus === "missing" && row.relationshipStatus === "owned") return "stale";
+  if (row.bearishCount > 0 || row.changeStatus === "deteriorating-context") return "watch";
+  return "active";
+}
+
 function renderWatchlistIdeas(rows = [], summary = {}, filters = {}) {
   const target = byId("watchlistIdeasPanel");
   const summaryTarget = byId("watchlistSummaryPanel");
@@ -3818,6 +3917,8 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     .sort((a, b) => String(b.disclosureDate || b.disclosedAt || "").localeCompare(String(a.disclosureDate || a.disclosedAt || "")));
   const seekingAlphaAiRecords = seekingAlphaAiRecordsForTicker(options.seekingAlphaAiRecords || [], ticker);
   const seekingAlphaAiSummary = summarizeSeekingAlphaAiForTicker(options.seekingAlphaAiRecords || [], ticker, { now: options.asOf });
+  const seekingAlphaAiDelta = buildSeekingAlphaAiDeltaSummary(options.seekingAlphaAiRecords || [], ticker, { now: options.asOf });
+  const seekingAlphaAiAlignment = buildSeekingAlphaAiSourceAlignment({ summary: seekingAlphaAiSummary, signal: tickerSignal || {}, holding: holdings[0] || null });
   const alerts = (analysis.alerts || [])
     .filter((alert) => normalizeTickerSymbol(alert.ticker) === ticker || RegExp(`\\b${escapeRegExp(ticker)}\\b`, "i").test(`${alert.title || ""} ${alert.detail || ""}`))
     .slice(0, 10);
@@ -3879,6 +3980,8 @@ export function buildTickerDetailModel(analysis = {}, options = {}) {
     politicianTrades,
     seekingAlphaAiRecords,
     seekingAlphaAiSummary,
+    seekingAlphaAiDelta,
+    seekingAlphaAiAlignment,
     alerts,
     alphaSignals,
     marketEvents,
@@ -4310,6 +4413,8 @@ function renderTickerSeekingAlphaAiContext(model = {}) {
     `;
   }
   const latest = summary.latestRecord || rows[0] || {};
+  const delta = model.seekingAlphaAiDelta || {};
+  const alignment = model.seekingAlphaAiAlignment || {};
   const badgeClass = summary.freshnessStatus === "stale" ? "sample" : "safe";
   return `
     <section class="panel">
@@ -4341,6 +4446,16 @@ function renderTickerSeekingAlphaAiContext(model = {}) {
             <b>${escapeHtml(String(summary.bearishPoints?.length || 0))}</b>
             <p>${escapeHtml((summary.bearishPoints || [])[0] || "No clear risk point extracted.")}</p>
           </article>
+          <article class="research-summary-card">
+            <span>Change since prior import</span>
+            <b>${escapeHtml(delta.changeLabel || "Needs another import")}</b>
+            <p>${escapeHtml(delta.summary || "Save another report for this ticker to compare changes over time.")}</p>
+          </article>
+          <article class="research-summary-card">
+            <span>Source alignment</span>
+            <b>${escapeHtml(alignment.alignmentLabel || "Insufficient data")}</b>
+            <p>${escapeHtml(alignment.summary || "Not enough local signal context to compare sources.")}</p>
+          </article>
         </div>
         <details class="signal-details">
           <summary>Imported details and caveats</summary>
@@ -4356,6 +4471,8 @@ function renderTickerSeekingAlphaAiContext(model = {}) {
               ${(summary.bearishPoints || []).length ? list(summary.bearishPoints.slice(0, 6)) : "<p>No extracted risk bullets.</p>"}
               <h3>Caveats</h3>
               ${[...(summary.validationWarnings || []), ...(summary.redactionWarnings || [])].length ? list([...(summary.validationWarnings || []), ...(summary.redactionWarnings || [])].slice(0, 6)) : "<p>No parser caveats recorded.</p>"}
+              ${(alignment.disagreementPoints || []).length ? `<h3>Source disagreements</h3>${list(alignment.disagreementPoints.slice(0, 4))}` : ""}
+              ${(delta.ratingChanges || []).length ? `<h3>Rating mention changes</h3>${list(delta.ratingChanges.slice(0, 4).map((change) => change.summary))}` : ""}
             </div>
           </div>
           <p>Seeking Alpha AI personal imports are source-labeled local context. The dashboard does not verify every claim, access your SA account, scrape pages, or store credentials.</p>

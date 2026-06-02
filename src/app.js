@@ -12,6 +12,7 @@ import {
   normalizeSeekingAlphaAiRecords,
   seekingAlphaAiStatusSummary
 } from "./seekingAlphaAi.js";
+import { buildSeekingAlphaAiCoverageQueue } from "./seekingAlphaAiCoverage.js";
 import { actionCategorySeverity, buildAlphaSignals, buildDecisionBrief, demoAlphaEvents, demoThesisProfiles, signalActionCategory } from "./alphaEngine.js";
 import { selectMarketDataTickers } from "./marketDataSelection.js";
 import { buildMarketDriverReport, MARKET_DRIVER_DEFAULT_TICKERS } from "./marketDrivers.js";
@@ -821,6 +822,14 @@ function render() {
     thesisRows,
     marketDataSnapshot
   });
+  const seekingAlphaAiCoverage = buildSeekingAlphaAiCoverageQueue({
+    holdings: analysis.holdings,
+    watchlistIdeas: watchlistIdeaRows,
+    tickerSignals,
+    seekingAlphaAiRecords: state.seekingAlphaAiRecords,
+    uiState,
+    asOf: renderAsOf
+  });
   syncWatchlistFilterOptions(watchlistIdeaRows);
   const watchlistFilters = readWatchlistFilters();
   const filteredWatchlistIdeaRows = filterWatchlistIdeaRows(watchlistIdeaRows, watchlistFilters);
@@ -963,6 +972,8 @@ function render() {
     alphaRecommendations: filteredAlphaRecommendations,
     allAlphaRecommendations: alphaRecommendations,
     alphaRecommendationFilter,
+    seekingAlphaAiCoverage,
+    researchCoverageFilter: $("researchCoverageFilter")?.value || "all",
     tickerSignals,
     signalReviewRows,
     signalReviewFilter: $("signalReviewFilter")?.value || "all",
@@ -3965,7 +3976,7 @@ function renderSeekingAlphaStatus() {
 }
 
 function wireEvents() {
-  ["query", "holdingViewMode", "portfolioGroup", "portfolioGroupValue", "riskFilter", "thesisFilter", "rebalanceMode", "hideTinyCash", "signalReviewFilter", "alphaRecommendationFilter", "riskGuardrailFilter", "watchlistQuery", "watchlistStatusFilter", "watchlistSectorFilter", "watchlistSourceFilter", "watchlistConvictionFilter", "journalQuery", "journalTickerFilter", "journalDecisionFilter", "journalConvictionFilter", "journalFromDate", "journalToDate", "calendarTickerFilter", "calendarTypeFilter", "calendarImportanceFilter", "calendarSourceFilter", "calendarWindowFilter", "whatIfAction", "whatIfTicker", "whatIfAmount", "whatIfPercent", "whatIfTargetWeight", "whatIfFundingMode"].forEach((id) => $(id)?.addEventListener("input", render));
+  ["query", "holdingViewMode", "portfolioGroup", "portfolioGroupValue", "riskFilter", "thesisFilter", "rebalanceMode", "hideTinyCash", "signalReviewFilter", "alphaRecommendationFilter", "riskGuardrailFilter", "researchCoverageFilter", "watchlistQuery", "watchlistStatusFilter", "watchlistSectorFilter", "watchlistSourceFilter", "watchlistConvictionFilter", "journalQuery", "journalTickerFilter", "journalDecisionFilter", "journalConvictionFilter", "journalFromDate", "journalToDate", "calendarTickerFilter", "calendarTypeFilter", "calendarImportanceFilter", "calendarSourceFilter", "calendarWindowFilter", "whatIfAction", "whatIfTicker", "whatIfAmount", "whatIfPercent", "whatIfTargetWeight", "whatIfFundingMode"].forEach((id) => $(id)?.addEventListener("input", render));
   $("fidelityFile").addEventListener("change", (event) => {
     importFile(event.target.files[0], "fidelity");
     event.target.value = "";
