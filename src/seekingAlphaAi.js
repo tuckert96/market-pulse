@@ -241,7 +241,7 @@ export function mergeSeekingAlphaAiRecords(existing = [], incoming = [], options
     });
   });
   return {
-    records: [...map.values()].sort(compareSeekingAlphaAiRecords),
+    records: [...map.values()].sort(compareSeekingAlphaAiRecordsForSort),
     added,
     updated
   };
@@ -266,7 +266,7 @@ export function seekingAlphaAiRecordsForTicker(records = [], ticker = "") {
   if (!normalizedTicker) return [];
   return normalizeSeekingAlphaAiRecords(records)
     .filter((record) => (record.tickers || []).map(normalizeTicker).includes(normalizedTicker))
-    .sort(compareSeekingAlphaAiRecords);
+    .sort(compareSeekingAlphaAiRecordsForSort);
 }
 
 export function summarizeSeekingAlphaAiForTicker(records = [], ticker = "", options = {}) {
@@ -322,6 +322,118 @@ export function buildSeekingAlphaAiTickerSummaries(records = [], tickers = [], o
   return new Map([...tickerSet].map((ticker) => [ticker, summarizeSeekingAlphaAiForTicker(records, ticker, options)]));
 }
 
+export function buildSeekingAlphaAiDeltaSummary(records = [], ticker = "", options = {}) {
+  const rows = seekingAlphaAiRecordsForTicker(records, ticker);
+  const summary = summarizeSeekingAlphaAiForTicker(records, ticker, options);
+  if (!rows.length) {
+    return {
+      ticker: normalizeTicker(ticker),
+      latestRecord: null,
+      previousRecord: null,
+      changeStatus: "missing",
+      changeLabel: "Missing research",
+      addedSupport: [],
+      removedSupport: [],
+      addedRisks: [],
+      removedRisks: [],
+      ratingChanges: [],
+      newFinancialMetrics: [],
+      warnings: ["No Seeking Alpha AI personal import is saved for this ticker."],
+      summary: "No prior Seeking Alpha AI personal import exists for this ticker."
+    };
+  }
+  const latestRecord = rows[0] || null;
+  const previousRecord = rows[1] || null;
+  const staleOnly = summary.staleCount === summary.recordCount;
+  if (!previousRecord) {
+    return {
+      ticker: summary.ticker,
+      latestRecord,
+      previousRecord: null,
+      changeStatus: staleOnly ? "stale-only" : "new",
+      changeLabel: staleOnly ? "Stale only" : "New import",
+      addedSupport: summary.bullishPoints,
+      removedSupport: [],
+      addedRisks: summary.bearishPoints,
+      removedRisks: [],
+      ratingChanges: [],
+      newFinancialMetrics: summary.financialMetrics,
+      warnings: summary.validationWarnings,
+      summary: staleOnly
+        ? "Only stale Seeking Alpha AI personal-import context is saved for this ticker."
+        : "First saved Seeking Alpha AI personal-import context for this ticker."
+    };
+  }
+  const delta = compareSeekingAlphaAiRecords(previousRecord, latestRecord);
+  const riskDelta = delta.addedRisks.length + delta.removedSupport.length + delta.ratingChanges.filter((change) => change.direction === "weaker").length;
+  const supportDelta = delta.addedSupport.length + delta.removedRisks.length + delta.ratingChanges.filter((change) => change.direction === "stronger").length;
+  const warningDelta = delta.warnings.length;
+  const changeStatus = staleOnly
+    ? "stale-only"
+    : riskDelta && supportDelta
+      ? "mixed-context"
+      : riskDelta || warningDelta
+        ? "deteriorating-context"
+        : supportDelta
+          ? "improving-context"
+          : "unchanged";
+  return {
+    ticker: summary.ticker,
+    latestRecord,
+    previousRecord,
+    changeStatus,
+    changeLabel: seekingAlphaAiChangeLabel(changeStatus),
+    ...delta,
+    summary: seekingAlphaAiDeltaText({ ticker: summary.ticker, changeStatus, delta, latestRecord, previousRecord })
+  };
+}
+
+export function buildSeekingAlphaAiDeltaSummaries(records = [], tickers = [], options = {}) {
+  const tickerSet = new Set([
+    ...normalizeTickerList(tickers),
+    ...normalizeSeekingAlphaAiRecords(records).flatMap((record) => record.tickers || [])
+  ].map(normalizeTicker).filter(Boolean));
+  return new Map([...tickerSet].map((ticker) => [ticker, buildSeekingAlphaAiDeltaSummary(records, ticker, options)]));
+}
+
+export function compareSeekingAlphaAiRecords(previous = {}, latest = {}) {
+  const previousRatings = previous.extractedRatings || {};
+  const latestRatings = latest.extractedRatings || {};
+  const ratingKeys = dedupe([...Object.keys(previousRatings), ...Object.keys(latestRatings)]);
+  const ratingChanges = ratingKeys
+    .map((key) => {
+      const from = String(previousRatings[key] || "").trim();
+      const to = String(latestRatings[key] || "").trim();
+      if (!from && !to) return null;
+      if (from.toLowerCase() === to.toLowerCase()) return null;
+      return {
+        field: key,
+        label: humanizeField(key),
+        from: from || "not mentioned",
+        to: to || "not mentioned",
+        direction: ratingChangeDirection(from, to),
+        summary: `${humanizeField(key)} changed from ${from || "not mentioned"} to ${to || "not mentioned"} in the imported text.`
+      };
+    })
+    .filter(Boolean);
+  const addedSupport = stringDiff(latest.extractedBullishPoints, previous.extractedBullishPoints);
+  const removedSupport = stringDiff(previous.extractedBullishPoints, latest.extractedBullishPoints);
+  const addedRisks = stringDiff(latest.extractedBearishPoints, previous.extractedBearishPoints);
+  const removedRisks = stringDiff(previous.extractedBearishPoints, latest.extractedBearishPoints);
+  const newFinancialMetrics = stringDiff(latest.extractedFinancialMetrics, previous.extractedFinancialMetrics);
+  const latestWarnings = [...(latest.validationWarnings || []), ...(latest.redactionWarnings || [])];
+  const previousWarnings = [...(previous.validationWarnings || []), ...(previous.redactionWarnings || [])];
+  return {
+    addedSupport,
+    removedSupport,
+    addedRisks,
+    removedRisks,
+    ratingChanges,
+    newFinancialMetrics,
+    warnings: stringDiff(latestWarnings, previousWarnings)
+  };
+}
+
 function mergeRatingMentions(records = []) {
   const pairs = [];
   records.forEach((record) => {
@@ -356,6 +468,35 @@ function scoreSeekingAlphaAiRisk({ rows = [], bearishPoints = [], staleRows = []
   const stale = staleRows.length ? 0.1 : 0;
   const warning = Math.min(0.1, warningCount * 0.012);
   return roundScore(clamp01(0.34 + risk + stale + warning));
+}
+
+function seekingAlphaAiChangeLabel(status = "unchanged") {
+  return ({
+    missing: "Missing research",
+    new: "New import",
+    "improving-context": "Supportive context changed",
+    "deteriorating-context": "Risk context changed",
+    "mixed-context": "Mixed context changed",
+    "stale-only": "Stale only",
+    unchanged: "No major change",
+    "insufficient-history": "Needs another import"
+  })[status] || "No major change";
+}
+
+function seekingAlphaAiDeltaText({ ticker = "", changeStatus = "unchanged", delta = {}, latestRecord = {}, previousRecord = {} } = {}) {
+  const label = seekingAlphaAiChangeLabel(changeStatus);
+  const latestDate = latestRecord.reportDate || latestRecord.importedAt || "latest import";
+  const previousDate = previousRecord.reportDate || previousRecord.importedAt || "prior import";
+  if (changeStatus === "unchanged") return `${ticker} has no major Seeking Alpha AI context change between ${previousDate} and ${latestDate}.`;
+  const changes = [
+    delta.addedSupport?.length ? `${delta.addedSupport.length} new supportive point${delta.addedSupport.length === 1 ? "" : "s"}` : "",
+    delta.addedRisks?.length ? `${delta.addedRisks.length} new risk point${delta.addedRisks.length === 1 ? "" : "s"}` : "",
+    delta.removedSupport?.length ? `${delta.removedSupport.length} prior support point${delta.removedSupport.length === 1 ? "" : "s"} no longer appears` : "",
+    delta.removedRisks?.length ? `${delta.removedRisks.length} prior risk point${delta.removedRisks.length === 1 ? "" : "s"} no longer appears` : "",
+    delta.ratingChanges?.length ? `${delta.ratingChanges.length} rating mention change${delta.ratingChanges.length === 1 ? "" : "s"}` : "",
+    delta.warnings?.length ? `${delta.warnings.length} new parser warning${delta.warnings.length === 1 ? "" : "s"}` : ""
+  ].filter(Boolean);
+  return `${ticker} ${label.toLowerCase()} since ${previousDate}: ${changes.join("; ") || "context changed in the imported report text"}.`;
 }
 
 function summarizeSeekingAlphaAiText({ rows = [], bullishPoints = [], bearishPoints = [], staleRows = [] } = {}) {
@@ -615,9 +756,42 @@ function recordKey(record = {}) {
   ].join("|");
 }
 
-function compareSeekingAlphaAiRecords(a = {}, b = {}) {
+function compareSeekingAlphaAiRecordsForSort(a = {}, b = {}) {
   return String(b.reportDate || b.importedAt || "").localeCompare(String(a.reportDate || a.importedAt || ""))
     || String(a.ticker || "").localeCompare(String(b.ticker || ""));
+}
+
+function stringDiff(left = [], right = []) {
+  const rightKeys = new Set(normalizeStringArray(right).map(normalizedTextKey));
+  return normalizeStringArray(left).filter((item) => !rightKeys.has(normalizedTextKey(item)));
+}
+
+function normalizedTextKey(value = "") {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function ratingChangeDirection(from = "", to = "") {
+  const fromScore = ratingValueScore(from);
+  const toScore = ratingValueScore(to);
+  if (fromScore === null || toScore === null || fromScore === toScore) return "changed";
+  return toScore > fromScore ? "stronger" : "weaker";
+}
+
+function ratingValueScore(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  const numeric = Number(normalized);
+  if (Number.isFinite(numeric)) return numeric;
+  if (/strong buy|very bullish|outperform/.test(normalized)) return 5;
+  if (/\bbuy\b|bullish|positive/.test(normalized)) return 4;
+  if (/hold|neutral|mixed/.test(normalized)) return 3;
+  if (/\bsell\b|bearish|negative/.test(normalized)) return 2;
+  if (/strong sell|very bearish|underperform/.test(normalized)) return 1;
+  const grade = normalized.match(/\b([a-f])([+-]?)\b/i);
+  if (!grade) return null;
+  const base = { a: 5, b: 4, c: 3, d: 2, e: 1, f: 0 }[grade[1].toLowerCase()];
+  const adjustment = grade[2] === "+" ? 0.25 : grade[2] === "-" ? -0.25 : 0;
+  return base + adjustment;
 }
 
 function seekingAlphaAiRecordId(parts = {}) {

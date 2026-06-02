@@ -6381,6 +6381,7 @@
               <a href="#what-if">What-If</a>
               <a href="#targets">Targets</a>
               <a href="#thesis">Thesis</a>
+              <a href="#research-coverage">Research Coverage</a>
               <a href="#watchlist">Watchlist</a>
               <a href="#journal">Decision Journal</a>
               <a href="#market-intelligence">Market Intelligence</a>
@@ -7322,6 +7323,43 @@
                   <p id="journalEditorStatus" class="connector-status" aria-live="polite">Journal notes stay local and do not imply trades were placed.</p>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section class="screen" id="research-coverage" data-screen="research-coverage" aria-label="Research Coverage" hidden>
+            <div class="screen-header">
+              <span>Research Coverage</span>
+              <h2>See which tickers need fresh research context.</h2>
+              <p>Portfolio and watchlist tickers are checked against Tucker-imported Seeking Alpha AI context. This is a local research queue, not a live Seeking Alpha feed or trade recommendation.</p>
+            </div>
+            <div class="screen-guidance" aria-label="Research Coverage guide">
+              <div class="guidance-item"><span>What</span><b>Coverage queue</b><small>Owned, watchlist, signal-only, and unlinked imported research rows.</small></div>
+              <div class="guidance-item"><span>Why</span><b>Keep research fresh</b><small>Stale, missing, changed, or conflicting context gets surfaced before it gets lost.</small></div>
+              <div class="guidance-item"><span>Next</span><b>Open ticker or import</b><small>Use the safe prompt, then paste visible SA AI output back into Data Sources.</small></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Seeking Alpha AI Research Queue <span class="status-badge demo">Imported context</span></h2>
+                  <p>Ranks research freshness and source alignment without storing credentials, cookies, or session tokens.</p>
+                </div>
+                <label class="field-inline" for="researchCoverageFilter">
+                  <span>View</span>
+                  <select id="researchCoverageFilter" aria-label="Filter research coverage queue">
+                    <option value="all">All tickers</option>
+                    <option value="owned">Owned</option>
+                    <option value="watchlist">Watchlist</option>
+                    <option value="missing">Missing coverage</option>
+                    <option value="stale">Stale</option>
+                    <option value="risk-context">Risk context</option>
+                    <option value="parser-warnings">Parser warnings</option>
+                    <option value="changed">Changed since prior import</option>
+                    <option value="conflicting">Conflicting sources</option>
+                    <option value="unlinked">Unlinked imports</option>
+                  </select>
+                </label>
+              </div>
+              <div class="body-pad" id="researchCoveragePanel"></div>
             </div>
           </section>
 

@@ -4,7 +4,7 @@ import { summarizeRedditMentions } from "./redditSignals.js";
 import { summarizeXUpdates } from "./xUpdatesProvider.js";
 import { eventSourceLabel, eventTypeLabel, upcomingCalendarEvents } from "./eventCalendar.js";
 import { DATA_MODES, dataModeLabel, marketDataMode } from "./dataModes.js";
-import { buildSeekingAlphaAiTickerSummaries } from "./seekingAlphaAi.js";
+import { buildSeekingAlphaAiCoverageQueue } from "./seekingAlphaAiCoverage.js";
 
 export const DAILY_BRIEF_GROUPS = Object.freeze({
   ACTION: "Action needed",
@@ -448,27 +448,32 @@ function politicianTradeItems(politicianTrades = [], analysis = {}, tickerSignal
 }
 
 function seekingAlphaAiItems(records = [], analysis = {}, tickerSignals = [], asOf) {
-  const tracked = trackedTickerSet(analysis, tickerSignals);
-  const summaries = buildSeekingAlphaAiTickerSummaries(records, [...tracked], { now: asOf });
-  return [...summaries.entries()]
-    .filter(([ticker, summary]) => tracked.has(ticker) && summary.recordCount)
-    .sort((a, b) => (b[1].reviewPriorityScore || 0) - (a[1].reviewPriorityScore || 0) || a[0].localeCompare(b[0]))
+  const queue = buildSeekingAlphaAiCoverageQueue({
+    holdings: analysis.holdings || [],
+    tickerSignals,
+    seekingAlphaAiRecords: records,
+    uiState: "IMPORTED_CLEAN",
+    asOf
+  });
+  return queue.rows
+    .filter((row) => row.relationshipStatus === "owned" && row.coverageStatus !== "missing")
     .slice(0, 3)
-    .map(([ticker, summary], index) => {
-      const staleOnly = summary.staleCount === summary.recordCount;
-      const hasRiskContext = summary.bearishPoints.length > 0;
+    .map((row, index) => {
+      const staleOnly = row.coverageStatus === "stale";
+      const changed = !["missing", "new", "unchanged", "insufficient-history"].includes(row.changeStatus);
+      const hasRiskContext = row.bearishCount > 0 || row.alignmentStatus === "aligned-risk" || row.alignmentStatus === "conflicting";
       return briefItem({
-        id: `daily:seeking-alpha-ai:${ticker}`,
-        group: staleOnly ? DAILY_BRIEF_GROUPS.INFO : hasRiskContext ? DAILY_BRIEF_GROUPS.WATCH : DAILY_BRIEF_GROUPS.INFO,
+        id: `daily:seeking-alpha-ai:${row.ticker}`,
+        group: staleOnly ? DAILY_BRIEF_GROUPS.INFO : hasRiskContext || changed ? DAILY_BRIEF_GROUPS.WATCH : DAILY_BRIEF_GROUPS.INFO,
         kind: "seeking-alpha-ai",
-        title: `${ticker} has imported Seeking Alpha AI context`,
-        detail: summary.summary,
+        title: `${row.ticker} has imported Seeking Alpha AI context`,
+        detail: changed ? row.delta.summary : row.reason,
         reason: "This is Tucker-imported Seeking Alpha AI personal research context. It is not live data, not independently verified by the app, and not a trading recommendation.",
-        href: tickerHref(ticker),
-        ticker,
-        actionLabel: staleOnly ? "Check freshness" : "Review context",
+        href: tickerHref(row.ticker),
+        ticker: row.ticker,
+        actionLabel: staleOnly ? "Check freshness" : changed ? "Review change" : "Review context",
         dataStatus: staleOnly ? "Stale Seeking Alpha AI import" : "Imported Seeking Alpha AI",
-        priority: (staleOnly ? 38 : hasRiskContext ? 63 : 44) - index + (summary.reviewPriorityScore || 0) * 12
+        priority: (staleOnly ? 38 : hasRiskContext ? 65 : changed ? 61 : 44) - index + (row.priorityScore || 0) / 5
       });
     });
 }

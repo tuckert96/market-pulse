@@ -18,6 +18,7 @@ const majorRoutes = [
   "what-if",
   "targets",
   "thesis",
+  "research-coverage",
   "journal",
   "watchlist",
   "alerts",
@@ -42,6 +43,11 @@ test("route resolver canonicalizes aliases, ticker pages, invalid hashes, and ma
   assert.deepEqual(routeFromHashValue("#ideas"), {
     route: "watchlist",
     canonicalHash: "#watchlist",
+    shouldReplace: true
+  });
+  assert.deepEqual(routeFromHashValue("#research-queue"), {
+    route: "research-coverage",
+    canonicalHash: "#research-coverage",
     shouldReplace: true
   });
   assert.deepEqual(routeFromHashValue("#alpha-engine"), {
